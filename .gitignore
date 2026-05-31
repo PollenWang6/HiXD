@@ -1,0 +1,42 @@
+# ===================== DevEco Studio 缓存/配置 =====================
+.idea/
+.hvigor/
+.local/
+.build/
+/build/
+/dist/
+*.log
+*.iml
+.DS_Store
+
+# ===================== 鸿蒙工程编译产物 =====================
+entry/build/
+entry/.build/
+hvigorfile.ts.js
+hvigorfile.ts.js.map
+
+# ===================== 依赖和临时文件 =====================
+/node_modules/
+/oh_modules/
+/.cxx/
+/.clangd
+/.clang-format
+/.clang-tidy
+/.test/
+/.appanalyzer/
+
+# ===================== 隐私/密钥文件（必须加！） =====================
+local.properties
+keystore/
+*.jks
+*.p12
+*.keystore
+*.der
+*.pem
+
+# ===================== 自定义缓存 =====================
+.cache/
+
+# ===================== 临时/备份文件 =====================
+*.bak
+*.bak2

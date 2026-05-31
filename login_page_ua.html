@@ -1,0 +1,256 @@
+﻿﻿<!DOCTYPE html><html class="root-main">
+<!-- 移动端 --><!-- PC端 --><!--校外用户登录--><!-- 二维码扫码登录 --><!-- 兼容性登录 --><!--校外用户登录--><!-- 帐号登录或动态码登录 --><head>
+	<meta charset="utf-8"/><meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/><title>统一身份认证平台</title>
+	<script>
+	    var inputUserNameTip = "\u8BF7\u8F93\u5165\u7528\u6237\u540D";
+	    var inputPasswordTip = "\u8BF7\u8F93\u5165\u5BC6\u7801";
+	    var inputCodeTip = "\u8BF7\u8F93\u5165\u9A8C\u8BC1\u7801";
+
+	    var inputMobileTip = "\u8BF7\u8F93\u5165\u624B\u673A\u53F7\u6216\u5B66\u53F7";
+	    var inputDynamicTip = "\u8BF7\u8F93\u5165\u9A8C\u8BC1\u7801";
+	    //不转码，防止参数丢失
+	    var service = ["https:\/\/ehall.xidian.edu.cn\/login?service=https%3A%2F%2Fehall.xidian.edu.cn%2Fnew%2Findex.html"];
+	    var type = null;
+	</script>
+	<script type="text/javascript">
+		if(service == '' || !service){
+	        service = '';//saml后缀
+	    }
+		var isQrLogin = "false";
+        var captchaSwitch = "2";
+		var needCaptcha = "";
+		var is_dynamicLogin = "true";
+	    var contextPath = "/authserver";
+	    var cllt = "";
+	</script>
+	<link rel="stylesheet" type="text/css" href="/authserver/xidianNewThemecs0511/static/css/toastr.min.css?v=20260529.200429"><link rel="stylesheet" type="text/css" href="/authserver/xidianNewThemecs0511/static/web/css/login.css?v=20260529.200429"/><link rel="stylesheet" type="text/css" href="/authserver/xidianNewThemecs0511/static/web/iconfont/iconfont.css?v=20260529.200429"/><link rel="stylesheet" type="text/css" href="/authserver/xidianNewThemecs0511/static/web/css/fido.css?v=20260529.200429"/><script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/common/jquery-latest.min.js?v=20260529.200429"></script>
+	<script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/js/plugin/toastr.min.js?v=20260529.200429"></script>
+	<script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/common/utils.js?v=20260529.200429"></script>
+	<script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/common/common-header.js?v=20260529.200429"></script>
+	<script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/common/encrypt.js?v=20260529.200429"></script>
+	<script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/web/js/fido.js?v=20260529.200429"></script>
+	<script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/web/js/schoolCombinedLogin.js?v=20260529.200429"></script>
+	<script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/web/js/login.js?v=20260529.200429"></script>
+</head>
+<body>
+  <div class="top-container">
+    <img class="top-logo" alt="" src="/authserver/xidianNewThemecs0511/customStatic/web/images/dzlogo.png"><div class="warning-tip">严禁处理涉密业务、上传涉密文件</div>
+	    <div class="lianjie">
+			<a href="https://www.xidian.edu.cn/" target="_blank">学校官网</a>
+			<div class="language_switch t_switch">
+			  <select id="language" onchange="changeLanguage(this)" class="t_switch_list"></select>
+			</div>
+		</div>
+	</div>
+	<div class="container">
+    <div class="lunbodiv">
+			<img class="mainbg active" alt="" src="/authserver/xidianNewThemecs0511/customStatic/web/images/lbbg2.png"><!-- <div class="lunbo_nav">
+				<span class="lbnav active"></span>
+				<span class="lbnav"></span>
+				<span class="lbnav"></span>
+			</div> --></div>
+		<div class="warp-container">
+      <div class="wrap">
+        <a style="display: none;" id="qrCodeA" class="qrcode" href="/authserver/login?type=qrcode"></a>
+        <section class="main">
+          <div class="logo" style="display: none;"><img alt="" /></div>
+          <div class="tabHead" style="display: none">
+            <span id="fidoLoginSpan"><a id="fidoLogin_a" href="/authserver/login?type=fidoLogin" class="loginFont_a">生物识别</a></span>
+            <span id="pwdLoginSpan"><a id="userNameLogin_a" href="/authserver/login?type=userNameLogin" class="loginFont_a">账号登录</a></span>
+            <span id="phoneLoginSpan"><a id="dynamicLogin_a" href="/authserver/login?type=dynamicLogin" class="loginFont_a">验证码登录</a></span>
+            <span id="qrLoginSpan"><a id="qrLogin_a" class="loginFont_a" onclick="showQrLogin()">扫码登录</a></span>
+          </div>
+          <div class="login-pc">
+            <!-- fido登录 --><div id="fidoLoginDiv" style="display: none">
+              <div style="height: 260px;margin-top: 60px">
+		<a href="javascript:void(0);" onclick="startAssertion('#loginFromId');" class="loginFont_a">
+			<div class="fidoLogo">
+				<img class="fidoLogoImage" src="/authserver/xidianNewThemecs0511/static/web/images/fido.jpg" alt=""/><div id="ukey_info" class="text change-color num-text-ellipsis-2" style="width: 100%;">点击开启识别登录</div>
+			</div>
+		</a>
+		<form class="loginFromClass" method="post" id="loginFromId" action="/authserver/login">
+			<div class="lang_text_ellipsis" style="width:100%;color: red;margin-top: 10px;">
+				<span id="showErrorTip"></span>
+			</div>
+			<input type="hidden" id="_eventId" name="_eventId" value="submit" /><input type="hidden" id="username-fido" name="username" value=""><input type="hidden" id="responseJson-fido" name="responseJson" value=""><input type="hidden" id="cllt" name="cllt" value="fidoLogin"><input type="hidden" id="dllt" name="dllt" value="generalLogin"><input type="hidden" name="lt" id="lt" value="" /><input type="hidden" id="execution" name="execution" value="e1s1" /></form>
+		<div class="lang_text_ellipsis" style="width:100%;color: red;display: none;" id="showFidoErrorTip">
+			<span id="showFidoErrorTipSpan" style="font-size: 14px;"></span>
+		</div>
+	</div>
+            </div>
+            <!-- 手机动态码登录 --><div id="phoneLoginDiv" style="display: none">
+              <div>
+		<div class="methods">
+		</div>
+		<form class="loginFromClass" method="post" id="phoneFromId" action="/authserver/login">
+			<div>
+				<div class="form">
+					<!-- 动态码登录 --><div class="m-phone">
+						<div class="username item">
+							<span class="prex-icon"><img src="/authserver/xidianNewThemecs0511/static/web/images/user1.png" class="login-icon"/></span>
+							<input type="text" id="username" name="username" autocomplete="off" placeholder="请输入手机号" title="请输入手机号" value=""></div>
+						<div class="captcha item" id="captchaDiv">
+							<span class="prex-icon"><img src="/authserver/xidianNewThemecs0511/static/web/images/captcha1.png" class="login-icon"/></span>
+							<input type="text" id="captcha" name="captcha" placeholder="请输入验证码" title="请输入验证码" maxlength="10"><span class="captcha-img"> 
+								<img id="captchaImg" alt="验证码错误" height="30px"><a class="mask-inner captcha-refresh" onclick="reloadCaptcha(true)" href="javascript:void(0);">刷新</a>
+							</span>
+						</div>
+						<div class="code item">
+							<span class="prex-icon"><img src="/authserver/xidianNewThemecs0511/static/web/images/pass1.png" class="login-icon"/></span>
+							<i class="auth_icon auth_icon_bar"></i> 
+							<input type="text" id="dynamicCode" name="dynamicCode" placeholder="请输入短信验证码" title="请输入短信验证码" maxlength="10"><a class="get-code lang_text_ellipsis" href="javascript:void(0)"><em class="getCodeText">获取验证码</em></a>
+						</div>
+					</div>
+					<div class="phoneCode-remark num-text-ellipsis-2">海外手机请按“国家代码-手机号”的格式输入，如：1-888888</div>
+				</div>
+				<div id="formErrorTip" class="form-errorTip lang_text_ellipsis">
+					<span id="showErrorTip" class="form-error"></span>
+					<span id="showWarnTip" class="form-warn"></span>
+				</div>
+				<div class="btn" style="margin-top: 36px;">
+					<a id="login_submit" href="javascript:void(0);" class="login-btn lang_text_ellipsis">登录</a>
+				</div>
+			</div>
+			<input type="hidden" id="_eventId" name="_eventId" value="submit" /><input type="hidden" id="cllt" name="cllt" value="dynamicLogin"><input type="hidden" id="dllt" name="dllt" value="generalLogin"><input type="hidden" name="lt" id="lt" value="" /><input type="hidden" id="encryptSalt" value="" /><input type="hidden" id="execution" name="execution" value="e1s1" /></form>
+	</div>
+            </div>
+            <!-- 用户名密码登录 --><div id="pwdLoginDiv" style="display: none">
+              <div>
+		<div class="methods"></div>
+		<form class="loginFromClass" method="post" id="pwdFromId" action="/authserver/login">
+			<div class="form">
+				<!-- 用户名密码登录 --><div class="m-account">
+					<div class="username item">
+						<span class="prex-icon"><img src="/authserver/xidianNewThemecs0511/static/web/images/user1.png" class="login-icon"/></span> 
+						<input id="username" name="username" type="text" class="no-auto-input" readonly
+							   placeholder="用户名为学号/工资号/校友卡号" title="用户名为学号/工资号/校友卡号" value=""></div>
+					<div class="password item">
+						<span class="prex-icon"><img src="/authserver/xidianNewThemecs0511/static/web/images/pass1.png" class="login-icon"/></span>
+						<input id="password" name="passwordText" type="password" class="no-auto-input" readonly
+							   placeholder="请输入密码" title="请输入密码" maxlength="32"><input id="saltPassword" name="password" type="hidden"><!-- <a class="input_eye suffix-icon eyehide"></a> --></div>
+					<div class="captcha item hide" id="captchaDiv">
+						<span class="prex-icon"><img src="/authserver/xidianNewThemecs0511/static/web/images/captcha1.png" class="login-icon"/></span> 
+						<input type="text" id="captcha" name="captcha" placeholder="请输入验证码" title="请输入验证码" maxlength="10"><span class="captcha-img">
+							<img id="captchaImg" alt="验证码错误" height="30px"><a class="mask-inner captcha-refresh" onclick="reloadCaptcha(true)" href="javascript:void(0);">刷新</a>
+						</span>
+					</div>
+					<div class="m-rememberMe">
+						<input type="checkbox" name="rememberMe" id="rememberMe" value="true" style="width:15px;margin-right:5px;"/><span>7天免登录</span>
+					</div>
+				</div>
+				<div id="formErrorTip" class="form-errorTip">
+					<span id="showErrorTip" class="form-error text-ellipsis"></span>
+					<span id="showWarnTip" class="form-warn"></span>
+				</div>
+				<div class="btn">
+					<a id="login_submit" href="javascript:void(0);" class="login-btn">登录</a>
+				</div>
+			</div>
+			<input type="hidden" id="_eventId" name="_eventId" value="submit" /><input type="hidden" id="cllt" name="cllt" value="userNameLogin"><input type="hidden" id="dllt" name="dllt" value="generalLogin"><input type="hidden" name="lt" id="lt" value="" /><input type="hidden" id="pwdEncryptSalt" value="UqKsASddjWqfX7ge" /><input type="hidden" id="execution" name="execution" value="e1s1" /></form>
+	</div>
+            </div>
+
+            <!-- 帐号激活|忘记密码 --><div class="help">
+              <span>
+                <a id="personalcenter" target="_blank" href="/personalInfo/personCenter/index.html#/accountsecurity" class="activation-account">个人中心</a> 
+                <span>&nbsp;|&nbsp;</span>
+              </span>
+              <span>
+                <a id="activationAccountId" href="../retrieve-password/accountActivation/index.html"
+                  class="activation-account">账号激活</a>
+                <span>&nbsp;|&nbsp;</span>
+              </span>
+              <a id="retrievePassId" href="../retrieve-password/retrievePassword/index.html" class="fo-password">找回密码</a>
+            </div>
+          </div>
+          <!-- 嵌入二维码登录 --><div class="login-qrcode hide">
+            <div>
+    <script type="text/javascript" src="/authserver/xidianNewThemecs0511/static/custom/js/qrcode.js?v=20260529.200429"></script>
+    <!--认证融合码--><div>
+        <div class="qr_scan_box">
+            <form method="post" id="qrLoginForm" action="/authserver/login" role="form">
+                <div id="qr_code">
+                    <div class="qr_scan_code"><img id="qr_img" src=""/></div>
+                    <span class="title lang_text_ellipsis">手机扫码  安全登录</span>
+                </div>
+                <div id="qr_success" class="qr_success" style="display: none">
+                    <div class="qr_scan_success">
+                        <img src="/authserver/xidianNewThemecs0511/static/custom/images/success_qr.png"/><div class="qr_success_tips_div">
+                            <span class="qr_success_tips">扫描成功</span>
+                            <span class="sub_title lang_text_ellipsis qr_success_sub_title">请在手机上「确认登录」</span>
+                        </div>
+                    </div>
+                    <div class="scan_footer lang_text_ellipsis qr_success_back"><a class="scan_a" href="javascript:refresh();">返回二维码</a></div>
+                </div>
+                <div id="qr_invalid" style="display: none">
+                    <div class="qr_scan_code">
+                        <img id="invalid_img" src=""/><div class="qr_scan_Invalid">
+                            <img id="qr_refresh" src="/authserver/xidianNewThemecs0511/static/custom/images/refresh.png" onclick="refresh()"/></div>
+                    </div>
+                    <span class="title lang_text_ellipsis">手机扫码  安全登录</span>
+                </div>
+                <input type="hidden" name="lt" id="lt" value="" /><input type="hidden" name="uuid" id="uuid" value=""/><input type="hidden" name="cllt" value="qrLogin"/><input type="hidden" id="dllt" name="dllt" value="generalLogin"><input type="hidden" name="execution" value="e1s1"/><input type="hidden" name="_eventId" value="submit"/><input type="hidden" name="rmShown" value="1"></form>
+        </div>
+    </div>
+    <!--企业微信码--></div>
+          </div>
+        </section>
+				<p class="dlts">您还可以使用以下方式登录:</p>
+        <div class="footer">
+          <div class="ways">
+            <div class="item">
+						<a  id="combinedLogin_a_qq"  href="/authserver/combinedLogin.do?type=qq">
+							<img src="/authserver/xidianNewThemecs0511/static/web/images/QQ.png" alt="" /></a>
+						<div class="prompt">qq登录</div>
+					</div>
+				</div>
+          <div class="ways">
+            <div class="item">
+						<a id="combinedLogin_a_weiXin" href="/authserver/combinedLogin.do?type=weixin">
+							<img src="/authserver/xidianNewThemecs0511/static/web/images/weixin.png" alt="" /></a>
+						<div class="prompt">微信登录</div>
+					</div>
+					</div>
+				<!--跨校认证start--><!--跨校认证end--></div>
+			</div>
+		<!-- <div class="language_switch t_switch">
+			<a id="commonLoginA" class="commonloginBtn" th:href="@{/login(type=commonLogin)}" th:if="${@systemConfigUtils.isCommonLoginEnabled()}" th:utext="#{ids.loginView.commonLogin}"></a>
+			<select id="language" onchange="changeLanguage(this)" class="t_switch_list"></select>
+		</div> --></div>
+  </div>
+  <div class="bottom-container">
+  	<div class="dztips" style="margin-left: 10%;">
+  	  <h3><img src="/authserver/xidianNewThemecs0511/customStatic/web/images/dztip.png" alt="">温馨提示</h3>
+		<p>1.此页面为学校唯一官方认证页面，请各位师生注意甄别，谨防钓鱼页面，保障账号安全。</p>
+	    <p>2.<a target="_blank" href="/html/helpDoc.html" style="color: #0c4af9;">常见登录问题解答</a></p>
+	    <p>3.学生登录帐号为学号，例如：18010281234；教职工登录帐号为工资号，例如：6403</p>
+      <p>4.建议浏览器：
+				<img src="/authserver/xidianNewThemecs0511/customStatic/web/images/dzie.png" alt="">IE10+,
+				<img src="/authserver/xidianNewThemecs0511/customStatic/web/images/dzgg.png" alt="">谷歌,
+				<img src="/authserver/xidianNewThemecs0511/customStatic/web/images/dz360.png" alt="">360极速
+			</p>
+	  </div>
+		<div class="auth_login_footer">
+			<span>
+			版权信息：Copyright&nbsp;©&nbsp;西安电子科技大学版权所有&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+			地址：西安市雁塔区太白南路2号/长安区西沣路266号 &nbsp;&nbsp;
+			</span>
+		</div>
+	</div>
+  <div class="new-modal accountNoActive">
+    <div class="alert-box">
+      <div class="title">提示</div>
+      <p>该帐号未激活，请点击 <a href="../retrieve-password/accountActivation/index.html#/" id="activationAccountId2">账号激活</a> 按钮进行帐号自助激活。</p>
+      <img class="closeModal" src="/authserver/xidianNewThemecs0511/customStatic/web/images/closeImg.png" alt=""></div>
+  </div>
+  <div class="new-modal phoneNumCheck">
+    <div class="alert-box">
+      <div class="title">提示</div>
+      <p>该手机号未绑定认证帐号，请使用用户名登录后修改帐号的绑定手机；若忘记密码，请拨打 88201650。</p>
+      <a class="goAccountLogin" id="userNameLogin2" href="/authserver/login?type=userNameLogin">去登录</a>
+      <img class="closeModal" src="/authserver/xidianNewThemecs0511/customStatic/web/images/closeImg.png" alt=""></div>
+  </div>
+	<!-- 滑块验证码 --><div id="sliderCaptchaDiv" style="width: 100%;height: calc(100% - 21px)"></div>
+</body>
+<script src="/authserver/xidianNewThemecs0511/static/custom/js/login-language.js?v=20260529.200429" type="text/javascript"></script>
+</html>

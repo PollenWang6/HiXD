@@ -1,0 +1,32 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "HiXD"
+    },
+    {
+      "name": "calendar_permission_reason",
+      "value": "用于将课程表导入系统日历，方便查看上课提醒"
+    },
+    {
+      "name": "EntryFormAbility_desc",
+      "value": "课程预告桌面卡片"
+    },
+    {
+      "name": "class_preview_card_name",
+      "value": "课程预告"
+    },
+    {
+      "name": "class_preview_card_desc",
+      "value": "显示今天和明天的课程安排"
+    }
+  ]
+}
