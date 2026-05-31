@@ -1,2 +1,81 @@
 # HiXD
-XDU鸿蒙校园助手
+
+<div align="center">
+
+**西电校园助手 · HarmonyOS 原生应用**
+
+一款为西安电子科技大学学生打造的鸿蒙原生校园工具，集成课表、成绩、考试、实验、空教室、图书馆、校园卡、校园网、电费查询等常用功能于一体。
+
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)](https://github.com)
+[![HarmonyOS](https://img.shields.io/badge/HarmonyOS-Next%20API%2012-orange)](https://developer.huawei.com/consumer/cn/harmonyos/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+</div>
+
+---
+
+## 功能
+
+### 核心功能
+
+| 功能 | 说明 |
+|------|------|
+| 📅 课程表 | 周视图课表，课程冲突提示，自定义课程，一键导入系统日历 |
+| 🧪 实验信息 | 实验课表查询，系统物理实验 + 其他实验 |
+| 📝 考试安排 | 考试时间、地点、座位号查询 |
+| 🏆 成绩查询 | 成绩列表，GPA 计算，成绩构成详情 |
+| 🏫 空教室 | 按教学楼和日期查询空闲教室 |
+| 📚 图书馆 | 馆藏检索，图书详情，馆藏位置 |
+| 💳 校园卡 | 校园卡余额查询 |
+| 🌐 校园网 | 流量查询、在线设备管理 |
+| ⚡ 电费查询 | 宿舍电费余额和用量查询 |
+
+### 校园门户
+
+通过应用内 WebView 访问西电移动门户（无需微信），支持：
+- 水电缴费
+- 请销假
+- 报修服务
+- 空间预约
+- 订水服务
+- 睿思
+
+### 桌面卡片
+
+| 卡片 | 尺寸 | 功能 |
+|------|------|------|
+| 课程预告 | 4×2 | 今日/明日课程预览，点击跳转课表 |
+| 课程预告 | 2×2 | 紧凑版课程预览，支持滚动 |
+
+---
+
+## 技术栈
+
+- **平台**: HarmonyOS 5.0及以上 (API 12+)
+- **语言**: ArkTS / ArkUI
+- **网络**: @ohos.net.http (NETSTACK) + WebView
+- **存储**: @ohos.data.preferences (PreferenceUtil)
+- **UI**: HDS Design Kit (沉浸光感 Tab 栏)、系统颜色资源适配深色模式
+- **桌面卡片**: FormExtensionAbility + 系统颜色资源自动深色适配
+
+---
+
+## 已知限制
+
+- **Cookie 隔离**: HarmonyOS WebView CookieJar 与 NETSTACK cookieStore 完全隔离，CAS TGC 认证只能走 WebView
+- **密码保险箱**: 部分 WebView 页面触发华为系统密码保险箱弹窗，为系统级行为
+- **滑块验证码**: CAS 登录滑块无法程序化处理，首次登录需手动完成
+
+---
+
+## 构建 & 运行
+
+1. 安装 [DevEco Studio](https://developer.huawei.com/consumer/cn/deveco-studio/)
+2. Clone 本仓库，用 DevEco Studio 打开
+3. 连接设备或启动模拟器，点击运行
+
+---
+
+## License
+
+MIT
