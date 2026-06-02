@@ -1156,6 +1156,7 @@ struct MainPage {
     .width('100%')
     .height('100%')
     .justifyContent(FlexAlign.Center)
+    .padding({ top: 6, bottom: 8, left: 12, right: 12 })
   }
 
   // ==================== 主页 Tab ====================
