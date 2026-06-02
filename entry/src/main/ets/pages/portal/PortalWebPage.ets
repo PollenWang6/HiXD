@@ -16,7 +16,8 @@ export struct PortalWebPage {
   pageInfo: NavPathStack = new NavPathStack();
   @Prop title: string = '';
   @Prop url: string = '';
-  @Prop useWeChatUA: boolean = false;  // 是否伪装微信 UA（仅移动门户/缴费需要）
+  @Prop useWeChatUA: boolean = false;
+  @Prop keepWeChatUA: boolean = false;  // 移动门户：不清理 UA，页面内跳转保持一致
   @State isLoading: boolean = true;
   @State loadError: string = '';
   @StorageLink('portalFullscreen') portalFullscreen: boolean = false;
@@ -54,8 +55,8 @@ export struct PortalWebPage {
               })
               .onPageEnd(() => {
                 this.isLoading = false;
-                // 只有伪装过微信 UA 才需要切回普通 UA
-                if (this.useWeChatUA) {
+                console.info(TAG, 'PageOK: ' + this.url.substring(0, 60));
+                if (this.useWeChatUA && !this.keepWeChatUA) {
                   this.webController.setCustomUserAgent('');
                 }
               })
@@ -75,7 +76,7 @@ export struct PortalWebPage {
               })
               .onErrorReceive((event) => {
                 if (event) {
-                  console.error(TAG, 'WebView error: ' + event.error.getErrorInfo());
+                  console.error(TAG, 'PageFAIL: ' + this.url.substring(0, 60) + ' err=' + event.error.getErrorInfo());
                   this.loadError = '加载失败: ' + event.error.getErrorInfo();
                   this.isLoading = false;
                 }
@@ -205,4 +206,3 @@ export struct PortalWebPage {
     }
   }
 }
-

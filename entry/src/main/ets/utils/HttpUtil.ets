@@ -174,7 +174,39 @@ export class HttpUtil {
 
   getAllCookies(domain: string): string { return this.getCookiesForDomain(domain); }
 
-  private saveResponseCookies(domain: string, setCookieHeader: string): void {
+  // 复制 cookie：将 fromDomain 的 cookie 复制到 toDomain（用于跨域重定向后 session 纠正）
+  copyCookiesForDomain(fromDomain: string, toDomain: string): void {
+    if (!this.cookieStore[fromDomain]) { return; }
+    if (!this.cookieStore[toDomain]) {
+      this.cookieStore[toDomain] = {};
+    }
+    const src: Record<string, string> = this.cookieStore[fromDomain];
+    const dst: Record<string, string> = this.cookieStore[toDomain];
+    for (const name of Object.keys(src)) {
+      dst[name] = src[name];
+    }
+  }
+
+  // 从 Cookie header 字符串恢复指定域名的 cookie（先清空再设值）
+  replaceCookiesForDomain(domain: string, cookieHeader: string): void {
+    this.cookieStore[domain] = {};
+    if (cookieHeader.length === 0) { return; }
+    const pairs: string[] = cookieHeader.split(';');
+    for (let i: number = 0; i < pairs.length; i++) {
+      const pair: string = pairs[i].trim();
+      const eq: number = pair.indexOf('=');
+      if (eq > 0) {
+        const name: string = pair.substring(0, eq).trim();
+        const value: string = pair.substring(eq + 1).trim();
+        if (name.length > 0) {
+          this.cookieStore[domain][name] = value;
+        }
+      }
+    }
+  }
+
+  // 公开方法，供 CasLoginService 等外部调用者保存 cookie
+  saveResponseCookies(domain: string, setCookieHeader: string): void {
     if (!this.cookieStore[domain]) {
       this.cookieStore[domain] = {};
     }

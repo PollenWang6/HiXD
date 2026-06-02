@@ -1,77 +1,36 @@
-// ExperimentPage.ets - 实验信息页面（WebView 登录 + JS 注入获取数据）
-import web_webview from '@ohos.web.webview';
+// ExperimentPage.ets - 实验信息页面（HTTP 数据获取，参考 Flutter sysj_session.dart）
+import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { ExperimentData, ExperimentType, TimeRange, SemesterUtil } from '../../services/EhallService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
+import router from '@ohos.router';
 
 const TAG = 'ExperimentPage';
-
 const WEEKDAY_NAMES: string[] = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
 const CACHE_KEY = 'sysj_exp_cache';
 const PHYSICS_CACHE_KEY = 'physics_exp_cache';
 const CACHE_TTL = 4 * 60 * 60 * 1000;
+const TERM_ID = '2003';
+const SYSJ_BASE = 'https://sysj.xidian.edu.cn';
+const MAX_WEEKS = 25;
 
-enum PageState {
-  IDLE,
-  LOADING,
-  SUCCESS,
-  ERROR,
-  WEBVIEW_LOGIN
-}
+enum PageState { IDLE, LOADING, SUCCESS, ERROR }
 
-// 二维数组的一个子数组: [课程代码, 课程名称, 开课院系, 实验室, 星期几, 开始节次, 结束节次, 周次, _, 上课教师, _, 上课班级, 分组标识, 上课人数, 实验项目]
-// JS注入后额外附加 __week 字段
 interface SysjScheduleItem {
-  courseCode: string;
-  experimentName: string;
-  department: string;
-  lab: string;
-  weekday: string;
-  startSection: string;
-  endSection: string;
-  week: string;
-  unknown8: string;
-  teacher: string;
-  unknown10: string;
-  className: string;
-  groupId: string;
-  studentCount: string;
-  experimentProject: string;
-  __week: number;
-  sectionName?: string;
+  courseCode: string; experimentName: string; department: string; lab: string;
+  weekday: string; startSection: string; endSection: string; week: string;
+  unknown8: string; teacher: string; unknown10: string; className: string;
+  groupId: string; studentCount: string; experimentProject: string; __week: number;
 }
 
 interface ExpCard {
-  date: string;
-  weekdayName: string;
-  weekNum: number;
-  sectionName: string;
-  isCompleted: boolean;
-  experimentName: string;
-  lab: string;
-  teacher: string;
-  experimentProject: string;
-  className: string;
+  date: string; weekdayName: string; weekNum: number; sectionName: string;
+  isCompleted: boolean; experimentName: string; lab: string; teacher: string;
+  experimentProject: string; className: string;
 }
 
-function formatDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return y + '-' + m + '-' + day;
-}
-
-function getWeekdayName(weekday: number): string {
-  // weekday 1=周一(0), 2=周二(1), ..., 7=周日(6)
-  const idx = weekday - 1;
-  if (idx >= 0 && idx < WEEKDAY_NAMES.length) {
-    return WEEKDAY_NAMES[idx];
-  }
-  return '';
-}
-
+function formatDate(d: Date): string { let m=String(d.getMonth()+1).padStart(2,'0'); let day=String(d.getDate()).padStart(2,'0'); return d.getFullYear()+'-'+m+'-'+day; }
+function getWeekdayName(w: number): string { let i=w-1; return (i>=0&&i<7)?WEEKDAY_NAMES[i]:''; }
 
 @Component
 export struct ExperimentPage {
@@ -81,588 +40,418 @@ export struct ExperimentPage {
   @State errorMsg: string = '';
   @State cards: ExpCard[] = [];
   @State fetchProgress: string = '';
-
-  private webController: web_webview.WebviewController = new web_webview.WebviewController();
-  private autoFilled: boolean = false;
-  private submitHandled: boolean = false;
-  private dataReceived: boolean = false;
-  private allWeekData: SysjScheduleItem[] = [];
-  private weeksDone: number = 0;
   @State private isRefreshing: boolean = false;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   async aboutToAppear(): Promise<void> {
-    // 尝试读取缓存（方案B：启用缓存，首次弹窗后后续走缓存不弹）
-    const cached = PreferenceUtil.getString(CACHE_KEY);
+    this.pageState = PageState.LOADING;
+    this.statusText = '正在加载实验信息...';
+    let cached = PreferenceUtil.getString(CACHE_KEY);
+    let hasOther = false;
     if (cached.length > 0) {
       try {
-        const cacheObj: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
-        const ts: number = cacheObj['ts'] as number;
-        if (Date.now() - ts < CACHE_TTL) {
-          const raw: Object = cacheObj['data'];
+        let co = JSON.parse(cached) as Record<string, Object>;
+        if (Date.now() - (co['ts'] as number) < CACHE_TTL) {
+          let raw = co['data'];
           if (raw instanceof Array && raw.length > 0) {
-            const items: SysjScheduleItem[] = raw as SysjScheduleItem[];
-            this.buildCards(items);
-            this.pageState = PageState.SUCCESS;
-            console.info(TAG, 'Loaded from cache, ' + items.length + ' items');
-            return;
+            this.buildCards(raw as SysjScheduleItem[]);
+            hasOther = true;
           }
         }
-      } catch (e) {
-        console.warn(TAG, 'Cache parse error, clearing');
-        PreferenceUtil.putString(CACHE_KEY, '');
-      }
+      } catch (e) { PreferenceUtil.putString(CACHE_KEY, ''); }
     }
-    // 无有效缓存，走 WebView SSO
-    this.pageState = PageState.IDLE;
-    this.startLogin();
+    if (!hasOther) {
+      await this.doHttpSSOAndFetch();
+    } else {
+      // 有缓存，后台刷新 + 加载物理实验
+      this.doHttpSSOAndFetch();
+      await this.fetchPhysicsExperiment();
+    }
+    if (this.cards.length === 0) this.onError('暂无实验信息');
+    else this.pageState = PageState.SUCCESS;
   }
 
-  startLogin(): void {
-    const isLoggedIn: boolean = PreferenceUtil.getBool('is_logged_in');
-    if (!isLoggedIn) {
-      this.errorMsg = '请先登录统一认证';
-      this.pageState = PageState.ERROR;
-      return;
-    }
-    this.pageState = PageState.WEBVIEW_LOGIN;
-    this.statusText = '正在验证登录状态...';
+  // ===== HTTP OAuth + 数据获取 =====
+  async doHttpSSOAndFetch(): Promise<void> {
+    if (!PreferenceUtil.getBool('is_logged_in')) { this.onError('请先登录统一认证'); return; }
+    let account = PreferenceUtil.getString('ids_account');
+    if (account.length === 0) { this.onError('缺少账号信息'); return; }
+
+    this.pageState = PageState.LOADING;
+    this.statusText = '正在登录实验系统...';
     this.fetchProgress = '';
-    this.autoFilled = false;
-    this.submitHandled = false;
-    this.dataReceived = false;
-    this.allWeekData = [];
-    this.weeksDone = 0;
-  }
+    let http = HttpUtil.getInstance();
 
-  injectDataFetcher(): void {
-    if (this.dataReceived) return; // already fetched, don't re-inject
-    this.statusText = '正在获取实验数据...';
-    this.allWeekData = [];
-    this.weeksDone = 0;
-
-    // JS: 逐周抓取 myScheduleInfoAjax API，返回二维数组
-    // termId=2003 是实验系统学期 ID，下学期需手动更新
-    // & 符号在 ArkTS 字符串中用 \x26 转义
-    const js = '(async function(){' +
-      'for(var w=1;w<=25;w++){' +
-      'try{' +
-      'var resp=await fetch("/xidian/schedule/myScheduleInfoAjax?termId=2003\\x26week="+w);' +
-      'if(!resp.ok){console.error("__EXP_WEEK__"+w+"|[]");continue;}' +
-      'var data=await resp.json();' +
-      'if(data.length>0){console.error("__EXP_RAW__"+w+"|"+JSON.stringify(data[0]));}for(var i=0;i<data.length;i++){var d=data[i];data[i]={courseCode:d[0]||"",experimentName:d[1]||"",department:d[2]||"",lab:d[11]||"",weekday:d[4]||"",startSection:d[5]||"",endSection:d[6]||"",week:d[7]||"",unknown8:d[8]||"",teacher:d[9]||"",unknown10:d[10]||"",className:d[12]||"",groupId:d[12]||"",studentCount:d[13]||"",experimentProject:d[14]||"",__week:w};}' +
-      'console.error("__EXP_WEEK__"+w+"|"+JSON.stringify(data));' +
-      '}catch(e){' +
-      'console.error("__EXP_WEEK__"+w+"|[]");' +
-      '}' +
-      '}' +
-      'console.error("__EXP_DONE__");' +
-      '})();';
     try {
-      this.webController.runJavaScript(js);
-    } catch (e) {
-      console.error(TAG, 'Inject data fetcher failed: ' + String(e));
-      this.onError('注入数据获取脚本失败');
-    }
-  }
+      // === Step 0: 先试直接调 API —— 如果已有 session 直接取数据 ===
+      let r0: HttpResponse = await http.get(SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=1');
+      if (r0.isOk && r0.body.length > 0 && r0.body.charAt(0) === '[') {
+        console.info(TAG, 'already logged in, skip OAuth');
+        // 直接进入数据获取循环
+        let allItems: SysjScheduleItem[] = [];
+        this.parseWeekData(r0.body, 1, allItems);
+        for (let w: number = 2; w <= MAX_WEEKS; w++) {
+          try {
+            let rw: HttpResponse = await http.get(SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=' + String(w));
+            this.parseWeekData(rw.body, w, allItems);
+          } catch (e) { /* continue */ }
+          this.fetchProgress = '(' + String(w) + '/' + String(MAX_WEEKS) + ')';
+        }
+        console.info(TAG, 'fetched=' + String(allItems.length));
+        if (allItems.length > 0) {
+          let co: ESObject = { 'ts': Date.now(), 'data': allItems } as ESObject;
+          PreferenceUtil.putString(CACHE_KEY, JSON.stringify(co));
+        }
+        this.buildCards(allItems);
+        if (allItems.length > 0) { this.pageState = PageState.SUCCESS; return; }
+        else { this.onError('暂无实验信息'); return; }
+      }
+      console.info(TAG, 'need OAuth, API returned HTML or empty');
 
-  onPageEnd(url: string): void {
-    console.info(TAG, 'onPageEnd: ' + url);
+      // === Step 1: 从 sysj OAuth 重定向链提取真实 state ===
+      let state: string = '';
+      let r1: HttpResponse = await http.get(SYSJ_BASE + '/xidian/test');
+      let b1: string = r1.body || '';
+      console.info(TAG, 'step1 body len=' + b1.length);
+      let om: RegExpMatchArray | null = b1.match(/[?&]state=([a-f0-9\-]{20,50})/i);
+      if (om) { state = om[1]; console.info(TAG, 'state from body='+state); }
 
-    // Fallback: CAS login page detected (fetch approach failed, direct navigation)
-    const isCasLoginPage = (url.indexOf('cas.xidian.edu.cn') >= 0 && url.indexOf('/login') >= 0) ||
-      (url.indexOf('ids.xidian.edu.cn') >= 0 && url.indexOf('/login') >= 0);
-    if (isCasLoginPage) {
-      this.autoFilled = false;
-      this.submitHandled = false;
-      const username = PreferenceUtil.getString('login_username');
-      const password = PreferenceUtil.getString('login_password');
-      if (username.length > 0 && password.length > 0) {
-        // Auto-fill + auto-submit with type=password→text trick
-        const js = '(function(){' +
-          'var u=document.getElementById("username")||document.querySelector(\'input[name="username"]\');' +
-          'var p=document.getElementById("password")||document.querySelector(\'input[name="password"]\');' +
-          'if(p&&p.type==="password"){p.type="text";p.style.color="transparent";p.style.caretColor="transparent";}' +
-          'if(u){u.value="' + username + '";u.dispatchEvent(new Event("input",{bubbles:true}));}' +
-          'if(p){p.value="' + password + '";p.dispatchEvent(new Event("input",{bubbles:true}));}' +
-          'var btn=document.getElementById("loginBtn")||document.querySelector("button[type=submit]");' +
-          'if(btn){setTimeout(function(){btn.click();},300);}' +
-          '})();';
+      // 如果 body 没有，试用 getNoRedirect 拦截重定向
+      if (state.length === 0) {
+        for (let a: number = 0; a < 4; a++) {
+          let sr: HttpResponse = await http.getNoRedirect(SYSJ_BASE + '/xidian/test');
+          console.info(TAG, 'step1-gnr'+a+': isRedirect='+sr.isRedirect+' status='+sr.statusCode+' loc='+(sr.location||'none').substring(0,120));
+          if (sr.location && sr.location.length > 0) {
+            let om2: RegExpMatchArray | null = sr.location.match(/[?&]state=([^&]+)/);
+            if (om2) { state = om2[1]; break; }
+            // 跟随这个重定向继续找
+            let nextUrl: string = sr.location;
+            if (!nextUrl.startsWith('http')) { nextUrl = SYSJ_BASE + (nextUrl.startsWith('/')?nextUrl:'/'+nextUrl); }
+            let sr2: HttpResponse = await http.getNoRedirect(nextUrl);
+            console.info(TAG, 'step1-gnr'+a+'-follow: loc='+(sr2.location||'none').substring(0,120));
+            if (sr2.location) {
+              let om3: RegExpMatchArray | null = sr2.location.match(/[?&]state=([^&]+)/);
+              if (om3) { state = om3[1]; break; }
+            }
+          }
+          if (sr.body && sr.body.length > 0) {
+            let om4: RegExpMatchArray | null = sr.body.match(/state=([a-f0-9\-]{20,50})/i);
+            if (om4) { state = om4[1]; break; }
+          }
+        }
+      }
+      if (state.length === 0) { this.onError('无法获取 OAuth 认证参数'); return; }
+      console.info(TAG, 'state=' + state);
+
+      // === Step 2: sysj OAuth → CAS OAuth authorize ===
+      let params = 'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/xidian/webapp/callback') +
+        '&state=' + state + '&client_id=GvsunLims&response_type=code' +
+        '&authorize_uri=' + encodeURIComponent(SYSJ_BASE + '/uaa/oauth/authorize');
+      let r2 = await http.get(SYSJ_BASE + '/uaa/xidian/login?' + params);
+      let b2 = r2.body || '';
+      console.info(TAG, 'login page got, len=' + b2.length);
+
+      // Step 3: CAS — http.get() 会把重定向链中 sysj 的 cookie 错存到 ids 域名
+      // 先备份 ids/ehall cookie，CAS 完成后恢复，避免污染 portal 页面
+      let idsBackup: string = http.getAllCookies('ids.xidian.edu.cn');
+      let ehallBackup: string = http.getAllCookies('ehall.xidian.edu.cn');
+      let casUrl = 'https://ids.xidian.edu.cn/authserver/oauth2.0/authorize?' +
+        'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/uaa/xidian/callback') +
+        '&response_type=code&state=' + state + '&client_id=1387116615722893312';
+      let r3 = await http.get(casUrl);
+      let b3 = r3.body || '';
+      // 如果 body 里有 CAS 登录表单，说明 TGC 过期
+      if (b3.indexOf('password') >= 0 && b3.indexOf('username') >= 0 && b3.indexOf('<form') >= 0) {
+        this.onError('CAS 登录已过期，请先重新登录统一认证');
+        return;
+      }
+      console.info(TAG, 'CAS done, body=' + b3.length);
+      // CAS 重定向到 sysj 后，Set-Cookie 被 HttpUtil 按原始 URL 存到了 ids 域名
+      // sysj OAuth 需要这些 cookie 在 sysj.xidian.edu.cn 下，复制一份
+      http.copyCookiesForDomain('ids.xidian.edu.cn', 'sysj.xidian.edu.cn');
+      // 恢复 ids/ehall 备份，撤销 CAS 步骤对 portal 页面的 cookie 污染
+      http.replaceCookiesForDomain('ids.xidian.edu.cn', idsBackup);
+      http.replaceCookiesForDomain('ehall.xidian.edu.cn', ehallBackup);
+
+      // Step 4+5: 提取 code 和 password
+      let code: string = '';
+      let pwd: string = '';
+
+      // 方式A：Step 3 CAS 响应 body 可能已走完整个 OAuth 链（如含 var password，直接提取）
+      let cmA: RegExpMatchArray | null = b3.match(/var password = '([^']+)'/);
+      if (cmA) {
+        pwd = cmA[1];
+        console.info(TAG, 'got pwd from CAS step, len=' + String(pwd.length));
+      }
+
+      // 方式B：调 /uaa/oauth/authorize 拿 code
+      if (pwd.length === 0) {
+        let oauthUrl: string = SYSJ_BASE + '/uaa/oauth/authorize?' +
+          'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/xidian/webapp/callback') +
+          '&state=' + state + '&client_id=GvsunLims&response_type=code';
+        let r4: HttpResponse = await http.get(oauthUrl);
+        let b4: string = r4.body || '';
+        console.info(TAG, 'step4 body len=' + String(b4.length) + ' head=' + b4.substring(0, 300));
+
+        // 把 body 写入 PreferenceUtil 以便调试
+        let debugStr: string = b4.replace(/\n/g, ' ').replace(/\r/g, '').replace(/\s+/g, ' ');
+        // 找含 'code' 的行
+        let codeIdx: number = debugStr.indexOf('code=');
+        if (codeIdx >= 0) { console.info(TAG, 'codeSnippet=' + debugStr.substring(Math.max(0, codeIdx-60), codeIdx+100)); }
+        let cbIdx: number = debugStr.indexOf('/webapp/callback');
+        if (cbIdx >= 0) { console.info(TAG, 'cbSnippet=' + debugStr.substring(Math.max(0, cbIdx-60), cbIdx+100)); }
+
+        // 多种 regex 试 code
+        let cm4: RegExpMatchArray | null = b4.match(/[?&]code=([a-zA-Z0-9]+)/);
+        if (!cm4) { cm4 = b4.match(/["']code["']\s*:\s*["']([^"']+)["']/); }
+        if (!cm4) { cm4 = b4.match(/window\.location.*?[?&]code=([a-zA-Z0-9]+)/); }
+        if (!cm4) { cm4 = b4.match(/url=.*?[?&]code=([a-zA-Z0-9]+)/); }
+        if (cm4) { code = cm4[1]; console.info(TAG, 'code=' + code); }
+
+        // 方式C：用 code 去 callback 拿 password
+        if (code.length > 0) {
+          let r5: HttpResponse = await http.get(SYSJ_BASE + '/xidian/webapp/callback?code=' + code + '&state=' + state);
+          let b5: string = r5.body || '';
+          console.info(TAG, 'step5 body len=' + String(b5.length) + ' head=' + b5.substring(0, 200));
+          let pm: RegExpMatchArray | null = b5.match(/var password = '([^']+)'/);
+          if (pm) { pwd = pm[1]; }
+          // fallback: CAS response
+          if (pwd.length === 0) {
+            pm = b3.match(/var password = '([^']+)'/);
+            if (pm) { pwd = pm[1]; }
+          }
+        }
+      }
+
+      if (pwd.length === 0) {
+        console.info(TAG, 'failed: b3=' + b3.substring(0, 500));
+        this.onError('无法获取实验系统登录密码');
+        return;
+      }
+      console.info(TAG, 'pwd len=' + String(pwd.length));
+
+      // Step 6: POST sysj login
+      let loginBody = 'username=' + encodeURIComponent(account) + '&password=' + encodeURIComponent(pwd);
+      let r6 = await http.postRaw(SYSJ_BASE + '/xidian/webapp/login', loginBody, 'application/x-www-form-urlencoded');
+      console.info(TAG, 'sysj login result: status=' + r6.statusCode);
+
+      // Step 7: 逐周获取数据
+      let allItems: SysjScheduleItem[] = [];
+      for (let w = 1; w <= MAX_WEEKS; w++) {
         try {
-          this.webController.runJavaScript(js);
-          this.autoFilled = true;
-          this.submitHandled = true;
-          this.statusText = '自动登录中...';
+          let r7 = await http.get(SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=' + String(w));
+          if (r7.isOk && r7.body.length > 0 && r7.body.charAt(0) === '[') {
+            let raw = JSON.parse(r7.body) as Object[];
+            for (let i = 0; i < raw.length; i++) {
+              let d = raw[i] as Object[];
+              if (d.length < 15) continue;
+              let item: SysjScheduleItem = {
+                courseCode: (d[0] as string) || '', experimentName: (d[1] as string) || '',
+                department: (d[2] as string) || '', lab: (d[11] as string) || '',
+                weekday: (d[4] as string) || '', startSection: (d[5] as string) || '',
+                endSection: (d[6] as string) || '', week: (d[7] as string) || '',
+                unknown8: (d[8] as string) || '', teacher: (d[9] as string) || '',
+                unknown10: (d[10] as string) || '', className: (d[12] as string) || '',
+                groupId: (d[12] as string) || '', studentCount: (d[13] as string) || '',
+                experimentProject: (d[14] as string) || '', __week: w
+              } as SysjScheduleItem;
+              allItems.push(item);
+            }
+          }
         } catch (e) {
-          console.warn(TAG, 'CAS auto-fill failed: ' + String(e));
+          console.warn(TAG, 'week ' + w + ' err: ' + String(e));
         }
+        this.fetchProgress = '(' + w + '/' + MAX_WEEKS + ')';
       }
-      return;
-    }
-    // 登录成功回到 sysj 主站（排除sysj的OAuth中间页面和登录页）
-    if (url.indexOf('sysj.xidian.edu.cn') >= 0 &&
-      url.indexOf('/uaa/') < 0 &&
-      url.indexOf('/webapp/login') < 0 &&
-      url.indexOf('/webapp/callback') < 0) {
-      if (this.dataReceived) return;
-      setTimeout(() => { this.injectDataFetcher(); }, 1000);
+      console.info(TAG, 'fetched=' + allItems.length);
+
+      if (allItems.length > 0) {
+        let co: ESObject = { 'ts': Date.now(), 'data': allItems } as ESObject;
+        PreferenceUtil.putString(CACHE_KEY, JSON.stringify(co));
+      }
+      this.buildCards(allItems);
+      await this.fetchPhysicsExperiment();
+      if (this.cards.length === 0) {
+        this.onError('暂无实验信息');
+      }
+    } catch (e) {
+      console.error(TAG, 'error: ' + String(e));
+      this.onError('实验系统登录失败: ' + String(e));
     }
   }
 
-  handleConsole(event: OnConsoleEvent): boolean {
-    const msg: string = event?.message?.getMessage()?.toString() || '';
-
-    // Login status updates from local HTML
-    if (msg.startsWith('__LOGIN_STATUS__')) {
-      this.statusText = msg.substring('__LOGIN_STATUS__'.length);
-      return true;
-    }
-    if (msg.startsWith('__LOGIN_FAIL__')) {
-      console.error(TAG, 'Login failed: ' + msg);
-      return true;
-    }
-
-    if (!msg.startsWith('__EXP_')) return false;
-
-    if (msg.startsWith('__EXP_WEEK__')) {
-      if (this.dataReceived) return true;
-      const pipeIdx = msg.indexOf('|');
-      if (pipeIdx < 0) return true;
-      const jsonStr = msg.substring(pipeIdx + 1);
-      try {
-        const items = JSON.parse(jsonStr) as SysjScheduleItem[];
-        if (items.length > 0) {
-          this.allWeekData = this.allWeekData.concat(items);
-        }
-      } catch (e) {
-        console.warn(TAG, 'Parse week data error: ' + String(e));
+  parseWeekData(body: string, week: number, out: SysjScheduleItem[]): void {
+    try {
+      if (body.length === 0 || body.charAt(0) !== '[') { return; }
+      let raw: Object[] = JSON.parse(body) as Object[];
+      for (let i: number = 0; i < raw.length; i++) {
+        let d: Object[] = raw[i] as Object[];
+        if (d.length < 15) { continue; }
+        let item: SysjScheduleItem = {
+          courseCode: (d[0] as string) || '', experimentName: (d[1] as string) || '',
+          department: (d[2] as string) || '', lab: (d[11] as string) || '',
+          weekday: (d[4] as string) || '', startSection: (d[5] as string) || '',
+          endSection: (d[6] as string) || '', week: (d[7] as string) || '',
+          unknown8: (d[8] as string) || '', teacher: (d[9] as string) || '',
+          unknown10: (d[10] as string) || '', className: (d[12] as string) || '',
+          groupId: (d[12] as string) || '', studentCount: (d[13] as string) || '',
+          experimentProject: (d[14] as string) || '', __week: week
+        } as SysjScheduleItem;
+        out.push(item);
       }
-      this.weeksDone++;
-      this.statusText = '正在获取实验数据...';
-      this.fetchProgress = '(' + this.weeksDone + '/20)';
-      return true;
-    }
-
-    if (msg.startsWith('__EXP_DONE__')) {
-      if (this.dataReceived) return true;
-      this.dataReceived = true;
-      console.info(TAG, 'All weeks fetched, total items=' + this.allWeekData.length);
-      this.onAllDataFetched();
-      return true;
-    }
-
-    return false;
-  }
-
-  onAllDataFetched(): void {
-    const cacheObj: ESObject = {
-      'ts': Date.now(),
-      'data': this.allWeekData
-    } as ESObject;
-    PreferenceUtil.putString(CACHE_KEY, JSON.stringify(cacheObj));
-
-    this.buildCards(this.allWeekData);
-    // 同时拉取物理实验数据（后台 HTTP，不阻塞 UI）
-    this.fetchPhysicsExperiment();
+    } catch (e) { /* non-critical */ }
   }
 
   buildCards(items: SysjScheduleItem[]): void {
-    console.info(TAG, 'buildCards called with items=' + items.length);
-    for (let i = 0; i < Math.min(items.length, 2); i++) {
-      const it = items[i];
-      console.info(TAG, 'item[' + i + ']: name=' + it.experimentName + ' weekday=' + it.weekday + ' week=' + it.week + ' start=' + it.startSection);
-    }
-    const cardMap: Map<string, ExpCard> = new Map();
-    const semesterStart = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
-    const today = formatDate(new Date());
-    const dayMs = 24 * 60 * 60 * 1000;
-
-    for (const item of items) {
-      // 从二维数组子数组中按索引取值
-      const experimentName: string = item.experimentName || '未知实验';   // [1] 课程名称
-      const lab: string = item.lab || '';                    // [3] 实验室
-      const weekday: number = parseInt(item.weekday) || 1;      // [4] 星期几 (1=周一..7=周日)
-      const startSection: number = parseInt(item.startSection) || 1;  // [5] 开始节次
-      const endSection: number = parseInt(item.endSection) || 1;    // [6] 结束节次
-      const weekNum: number = parseInt(item.week) || 1;          // 周次(由JS注入)
-      const teacher: string = item.teacher || '';                // [9] 上课教师
-      const className: string = item.className || '';             // [11] 上课班级
-      const experimentProject: string = item.experimentProject || '';     // [14] 实验项目
-
-      if (weekNum <= 0 || weekNum > 20) continue;
-
-      // 日期计算: 学期起始 + (week-1)*7 + (weekday-1)
-      // weekday 1=周一 偏移0, 2=周二 偏移1, ..., 7=周日 偏移6
-      const weekdayOffset = weekday - 1;
-      const dateMs = semesterStart.getTime() + (weekNum - 1) * 7 * dayMs + weekdayOffset * dayMs;
-      const date = formatDate(new Date(dateMs));
-
-      // 节次名称
-      const sectionName = '第' + startSection + '-' + endSection + '节';
-      const weekdayName = getWeekdayName(weekday);
-
-      // 分组 key = 日期 + _ + 开始节次，不合并不同天的实验
-      const key = date + '_' + startSection;
-      let card = cardMap.get(key);
+    let cmap: Map<string, ExpCard> = new Map();
+    let ss = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
+    let today = formatDate(new Date());
+    let dm = 86400000;
+    for (let it of items) {
+      let en = it.experimentName || '\u672a\u77e5\u5b9e\u9a8c';
+      let lab = it.lab || '';
+      let wd = parseInt(it.weekday) || 1;
+      let ss2 = parseInt(it.startSection) || 1;
+      let es = parseInt(it.endSection) || 1;
+      let wn = parseInt(it.week) || 1;
+      if (wn <= 0 || wn > 20) continue;
+      let t = ss.getTime() + (wn - 1) * 7 * dm + (wd - 1) * dm;
+      let date = formatDate(new Date(t));
+      let sn = '\u7b2c' + ss2 + '-' + es + '\u8282';
+      let key = date + '_' + ss2;
+      let card = cmap.get(key);
       if (!card) {
         card = {
-          date: date,
-          weekdayName: weekdayName,
-          weekNum: weekNum,
-          sectionName: sectionName,
-          isCompleted: date < today,
-          experimentName: experimentName,
-          lab: lab,
-          teacher: teacher,
-          experimentProject: experimentProject,
-          className: className
-        };
-        cardMap.set(key, card);
+          date: date, weekdayName: getWeekdayName(wd), weekNum: wn,
+          sectionName: sn, isCompleted: date < today, experimentName: en,
+          lab: lab, teacher: it.teacher || '', experimentProject: it.experimentProject || '',
+          className: it.className || ''
+        } as ExpCard;
+        cmap.set(key, card);
       }
-
-      // 同一 key 下如果有多条，追加实验项目
-      if (experimentProject.length > 0 && card.experimentProject.indexOf(experimentProject) < 0) {
-        card.experimentProject = card.experimentProject + ' | ' + experimentProject;
-      }
+      if (it.experimentProject && card.experimentProject.indexOf(it.experimentProject) < 0)
+        card.experimentProject += ' | ' + it.experimentProject;
     }
-
-    const sortedKeys = Array.from(cardMap.keys()).sort();
-    const upcoming: ExpCard[] = [];
-    const completed: ExpCard[] = [];
-    for (const k of sortedKeys) {
-      const card = cardMap.get(k);
-      if (card !== undefined) {
-        if (card.isCompleted) {
-          completed.push(card);
-        } else {
-          upcoming.push(card);
-        }
-      }
-    }
-    this.cards = upcoming.concat(completed);
-    console.info(TAG, 'cards built: total=' + this.cards.length);
+    let sk: string[] = []; cmap.forEach((_v: ExpCard, k: string) => { sk.push(k); }); sk.sort();
+    let up: ExpCard[] = []; let cm: ExpCard[] = [];
+    for (let k of sk) { let c = cmap.get(k); if (c) { if(c.isCompleted)cm.push(c); else up.push(c); } }
+    this.cards = up.concat(cm);
   }
 
   async fetchPhysicsExperiment(): Promise<void> {
-    const pwd = PreferenceUtil.getString('physics_pwd');
-    if (pwd.length === 0) {
-      // 没设密码，只更新状态
-      if (this.allWeekData.length === 0) { this.onError('暂无实验信息'); }
-      else { this.pageState = PageState.SUCCESS; }
-      return;
-    }
+    let pwd = PreferenceUtil.getString('physics_pwd');
+    if (pwd.length === 0) { if(this.cards.length===0)this.onError('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f'); else this.pageState=PageState.SUCCESS; return; }
     try {
-      // 尝试读物理实验缓存
-      const cached = PreferenceUtil.getString(PHYSICS_CACHE_KEY);
-      let physicsItems: SysjScheduleItem[] = [];
+      let pi: SysjScheduleItem[] = [];
+      let cached = PreferenceUtil.getString(PHYSICS_CACHE_KEY);
       if (cached.length > 0) {
-        const c: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
-        if (Date.now() - (c['ts'] as number) < CACHE_TTL && (c['data'] as Object[]).length > 0) {
-          physicsItems = c['data'] as SysjScheduleItem[];
-          console.info(TAG, 'Physics loaded from cache, ' + physicsItems.length + ' items');
+        let c = JSON.parse(cached) as Record<string, Object>;
+        if (Date.now()-(c['ts'] as number)<CACHE_TTL && ((c['data'] as Object[])).length>0) pi = c['data'] as SysjScheduleItem[];
+      }
+      if (pi.length === 0) {
+        let http = HttpUtil.getInstance();
+        let bd = '__EVENTTARGET=&__EVENTARGUMENT=&__VIEWSTATE=%2FwEPDwUKMTEzNzM0MjM0OWQYAQUeX19Db250cm9sc1JlcXVpcmVQb3N0QmFja0tleV9fFgEFD2xvZ2luMSRidG5Mb2dpbkOuzGVaztce4Ict7jsIJ0F5pUDb%2BsmSbCCrNVSBlPML&__VIEWSTATEGENERATOR=EE008CD9&__EVENTVALIDATION=%2FwEdAAcKecdPGDB%2BfW8Tyghx7AeSpOzeiNZ7aaEg5p6LqSa9cODI2bZwNtRxUKPkisVLf8l8Vv4WhRVIIhZlyYNJO%2BySrDKOhP%2B%2FYMNbVIh74hA2rCYnBBSTsX9SjxiYNNk%2B5kglM%2B6pGIq22Oi5mNu6u6eC2WEBfKAmATKwSpsOL%2FPNcRyi9l8Dnp6JamksyAzjhW4%3D&login1%24StuLoginID='+encodeURIComponent(PreferenceUtil.getString('ids_account'))+'&login1%24StuPassword='+encodeURIComponent(pwd)+'&login1%24UserRole=Student&login1%24btnLogin.x=28&login1%24btnLogin.y=14';
+        await http.postRaw('http://wlsy.xidian.edu.cn/PhyEws/default.aspx', bd, 'application/x-www-form-urlencoded');
+        let r = await http.get('http://wlsy.xidian.edu.cn/PhyEws/student/select.aspx');
+        if (r.isOk) {
+          pi = this.parsePhysicsHtml(r.body);
+          let pc: ESObject = {'ts':Date.now(),'data':pi} as ESObject;
+          PreferenceUtil.putString(PHYSICS_CACHE_KEY, JSON.stringify(pc));
         }
       }
-      // 无缓存则 HTTP 获取
-      if (physicsItems.length === 0) {
-        const http = HttpUtil.getInstance();
-        const body = '__EVENTTARGET=&__EVENTARGUMENT=&' +
-          '__VIEWSTATE=%2FwEPDwUKMTEzNzM0MjM0OWQYAQUeX19Db250cm9sc1JlcXVpcmVQb3N0QmFja0tleV9fFgEFD2xvZ2luMSRidG5Mb2dpbkOuzGVaztce4Ict7jsIJ0F5pUDb%2BsmSbCCrNVSBlPML&' +
-          '__VIEWSTATEGENERATOR=EE008CD9&' +
-          '__EVENTVALIDATION=%2FwEdAAcKecdPGDB%2BfW8Tyghx7AeSpOzeiNZ7aaEg5p6LqSa9cODI2bZwNtRxUKPkisVLf8l8Vv4WhRVIIhZlyYNJO%2BySrDKOhP%2B%2FYMNbVIh74hA2rCYnBBSTsX9SjxiYNNk%2B5kglM%2B6pGIq22Oi5mNu6u6eC2WEBfKAmATKwSpsOL%2FPNcRyi9l8Dnp6JamksyAzjhW4%3D&' +
-          'login1%24StuLoginID=' + encodeURIComponent(PreferenceUtil.getString('ids_account')) +
-          '&login1%24StuPassword=' + encodeURIComponent(pwd) +
-          '&login1%24UserRole=Student&login1%24btnLogin.x=28&login1%24btnLogin.y=14';
-        const loginResp = await http.postRaw('http://wlsy.xidian.edu.cn/PhyEws/default.aspx',
-          body, 'application/x-www-form-urlencoded');
-        if (loginResp.statusCode === 302 || loginResp.isOk) {
-          // 登录成功，获取列表
-          const resp = await http.get('http://wlsy.xidian.edu.cn/PhyEws/student/select.aspx');
-          if (resp.isOk) {
-            physicsItems = this.parsePhysicsHtml(resp.body);
-            const pcache: ESObject = { 'ts': Date.now(), 'data': physicsItems } as ESObject;
-            PreferenceUtil.putString(PHYSICS_CACHE_KEY, JSON.stringify(pcache));
-            console.info(TAG, 'Physics fetched: ' + physicsItems.length + ' items');
-          }
-        }
-      }
-      // 合并物理实验卡片
-      if (physicsItems.length > 0) {
-        this.buildCards(physicsItems);
-      }
-    } catch (e) {
-      console.warn(TAG, 'Physics fetch error: ' + String(e));
-    }
-    // 最终状态
-    if (this.allWeekData.length === 0 && this.cards.length === 0) {
-      this.onError('暂无实验信息');
-    } else if (this.pageState !== PageState.SUCCESS) {
-      this.pageState = PageState.SUCCESS;
-    }
+      if (pi.length > 0) this.buildCards(pi);
+    } catch (e) { console.warn(TAG, 'physics err: '+String(e)); }
+    if(this.cards.length===0)this.onError('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f'); else this.pageState=PageState.SUCCESS;
   }
 
   parsePhysicsHtml(html: string): SysjScheduleItem[] {
-    const items: SysjScheduleItem[] = [];
-    const trRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-    const tdRegex = /<td[^>]*>[\s\S]*?<\/td>/gi;
-    const trs = html.match(trRegex);
+    let items: SysjScheduleItem[] = [];
+    let trs = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi);
     if (!trs) return items;
-    for (const tr of trs) {
-      const tds: string[] = [];
-      let m: RegExpExecArray | null;
-      while ((m = tdRegex.exec(tr)) !== null) {
-        tds.push(m[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim());
-      }
-      if (tds.length < 10 || tds[1].length === 0) continue;
-      // td[1]=名称, td[3]=时间(如"第8-9节"或含"15"的时间), td[4]=日期(如"4/26/2026"), td[5]=教室
-      // 转换为 ExpCard 兼容格式
-      const dateStr = tds[4] || '';
-      const dateParts = dateStr.split('/');
-      const timeStr = tds[3] || '';
-      const isAfternoon = timeStr.includes('15');
-      const sectionName = isAfternoon ? '15:55-18:10' : '18:30-20:45';
-      const item: SysjScheduleItem = {
-        courseCode: '',
-        experimentName: '⚛ ' + tds[1],
-        department: '',
-        lab: tds[5] || '',
-        weekday: '0', // 从日期推算
-        startSection: isAfternoon ? '7' : '9',
-        endSection: isAfternoon ? '9' : '11',
-        week: '0',
-        unknown8: '',
-        teacher: tds[9] || '',
-        unknown10: '',
-        className: '',
-        groupId: '',
-        studentCount: '',
-        experimentProject: tds[8] || '',
-        __week: 0
+    for (let tr of trs) {
+      let tds: string[] = []; let tm: RegExpExecArray|null; let tr2 = new RegExp(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+      while((tm=tr2.exec(tr))!==null) tds.push(tm[1].replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').trim());
+      if (tds.length<10||tds[1].length===0) continue;
+      let dp = (tds[4]||'').split('/'); let isPM = (tds[3]||'').includes('15');
+      let it: SysjScheduleItem = {
+        courseCode:'', experimentName:'\u269b '+tds[1], department:'',
+        lab:tds[5]||'', weekday:'0', startSection:isPM?'7':'9', endSection:isPM?'9':'11',
+        week:'0', unknown8:'', teacher:tds[9]||'', unknown10:'', className:'',
+        groupId:'', studentCount:'', experimentProject:tds[8]||'', __week:0
       } as SysjScheduleItem;
-      // 从日期推算星期几
-      if (dateParts.length >= 3) {
-        const m = parseInt(dateParts[0]);
-        const d = parseInt(dateParts[1]);
-        const y = parseInt(dateParts[2]);
-        const dt = new Date(y, m - 1, d);
-        item.weekday = String(dt.getDay() === 0 ? 7 : dt.getDay());
-        // 计算周次
-        const semesterStart = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
-        const diffDays = Math.floor((dt.getTime() - semesterStart.getTime()) / 86400000);
-        item.week = String(Math.floor(diffDays / 7) + 1);
-        // 设置节次
-        const hour = isAfternoon ? 15 : 18;
-        const section = hour <= 15 ? 7 : 9;
-        item.startSection = String(section);
-        item.endSection = String(section + 2);
-        item.sectionName = sectionName;
+      if(dp.length>=3){
+        let dt = new Date(parseInt(dp[2]),parseInt(dp[0])-1,parseInt(dp[1]));
+        it.weekday=String(dt.getDay()===0?7:dt.getDay());
+        let ss2=SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
+        it.week=String(Math.floor((dt.getTime()-ss2.getTime())/86400000/7)+1);
+        it.startSection=isPM?'7':'9'; it.endSection=isPM?'9':'11';
       }
-      items.push(item);
+      items.push(it);
     }
     return items;
   }
 
-  onError(msg: string): void {
-    this.errorMsg = msg;
-    this.pageState = PageState.ERROR;
-  }
+  onError(msg: string) { this.errorMsg=msg; this.pageState=PageState.ERROR; }
 
   build() {
     NavDestination() {
       Column() {
-      // 顶部导航栏
-      if (this.pageState === PageState.WEBVIEW_LOGIN) {
-        Stack() {
-          // 隐藏 WebView 做 CAS SSO + 数据获取
-          Web({ src: 'https://sysj.xidian.edu.cn/xidian/test', controller: this.webController })
-            .width(1).height(1)
-            .javaScriptAccess(true)
-            .fileAccess(true)
-            .domStorageAccess(true)
-            .cacheMode(CacheMode.Default)
-            .password(false)
-
-            .onPageEnd((event) => {
-              if (event) { this.onPageEnd(event.url); }
-            })
-            .onConsole((event: OnConsoleEvent) => {
-              return this.handleConsole(event);
-            })
-
-          // 转圈加载动画覆盖层，盖住WebView
+        if (this.pageState===PageState.LOADING) {
           Column() {
-            LoadingProgress().width(48).height(48).color('#2979FF')
-            Text(this.statusText || '正在登录实验系统...').fontSize(14).fontColor(ThemeColors.textSecondary)
-              .margin({ top: 16 })
-            if (this.fetchProgress.length > 0) {
-              Text(this.fetchProgress).fontSize(12).fontColor(ThemeColors.textSecondary)
-                .margin({ top: 8 })
+            LoadingProgress().width(40).height(40).color('#2979FF')
+            Text(this.statusText).fontSize(14).fontColor(ThemeColors.textSecondary).margin({top:12})
+            if(this.fetchProgress.length>0) Text(this.fetchProgress).fontSize(12).fontColor(ThemeColors.textSecondary).margin({top:8})
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+        } else if (this.pageState===PageState.ERROR) {
+          Column() {
+            Text('\ud83d\udccb').fontSize(48)
+            Text(this.errorMsg).fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
+            Row() {
+              Button('\u91cd\u8bd5').fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF').borderRadius(20).height(36).margin({top:20,right:12}).onClick(()=>{this.doHttpSSOAndFetch();})
+              Button('\u91cd\u65b0\u767b\u5f55').fontSize(14).fontColor('#FFFFFF').backgroundColor('#E53935').borderRadius(20).height(36).margin({top:20}).onClick(()=>{PreferenceUtil.putBool('is_logged_in',false);PreferenceUtil.putString('mod_auth_cas','');router.pushUrl({url:'pages/login/LoginPage'});})
             }
-          }
-          .width('100%').height('100%')
-          .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-          .backgroundColor(ThemeColors.bgPage)
-          .zIndex(1)
-        }
-        .width('100%').layoutWeight(1)
-
-      } else if (this.pageState === PageState.LOADING) {
-        Column() {
-          LoadingProgress().width(40).height(40).color('#2979FF')
-          Text(this.statusText || '加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-        }
-        .width('100%').layoutWeight(1)
-        .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-
-      } else if (this.pageState === PageState.ERROR) {
-        Column() {
-          Text('\ud83d\udccb').fontSize(48)
-          Text(this.errorMsg).fontSize(15).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-          Button('重新登录')
-            .fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF')
-            .borderRadius(20).height(36).margin({ top: 20 })
-            .onClick(() => { this.startLogin(); })
-        }
-        .width('100%').layoutWeight(1)
-        .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-        .padding(24)
-
-      } else if (this.pageState === PageState.IDLE) {
-        Column() {
-          Text('\ud83e\uddea').fontSize(48)
-          Text('实验系统需要单独登录').fontSize(15).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-          Text('将使用统一认证账号自动填充').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 6 })
-          Button('登录实验系统')
-            .fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF')
-            .borderRadius(20).height(40).margin({ top: 20 })
-            .onClick(() => { this.startLogin(); })
-        }
-        .width('100%').layoutWeight(1)
-        .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-        .padding(24)
-
-      } else if (this.pageState === PageState.SUCCESS) {
-        if (this.cards.length === 0) {
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
+        } else if (this.pageState===PageState.IDLE) {
           Column() {
             Text('\ud83e\uddea').fontSize(48)
-            Text('暂无实验信息').fontSize(15).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-            Button('重新登录')
-              .fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF')
-              .borderRadius(20).height(36).margin({ top: 20 })
-              .onClick(() => { this.startLogin(); })
+            Text('\u5b9e\u9a8c\u7cfb\u7edf\u9700\u8981\u5355\u72ec\u767b\u5f55').fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
+            Text('\u5c06\u81ea\u52a8\u901a\u8fc7\u7edf\u4e00\u8ba4\u8bc1\u767b\u5f55').fontSize(13).fontColor(ThemeColors.textSecondary).margin({top:6})
+            Button('\u8fdb\u5165\u5b9e\u9a8c\u7cfb\u7edf').fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF').borderRadius(20).height(40).margin({top:20}).onClick(()=>{this.doHttpSSOAndFetch();})
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
+        } else if (this.pageState===PageState.SUCCESS) {
+          if(this.cards.length===0) {
+            Column() {
+              Text('\ud83e\uddea').fontSize(48)
+              Text('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f').fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
+              Button('\u5237\u65b0').fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF').borderRadius(20).height(36).margin({top:20}).onClick(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.doHttpSSOAndFetch();})
+            }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
+          } else {
+            Refresh({refreshing:$$this.isRefreshing}) {
+              Scroll() {
+                Column() {
+                  ForEach(this.cards, (card:ExpCard)=>{this.ExpCardBuilder(card)},(card:ExpCard)=>card.date+'_'+card.sectionName)
+                }.width('100%').padding({left:16,right:16,top:8,bottom:16})
+              }.width('100%').layoutWeight(1)
+            }.onRefreshing(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.isRefreshing=false;this.doHttpSSOAndFetch();})
           }
-          .width('100%').layoutWeight(1)
-          .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-          .padding(24)
-        } else {
-          Refresh({ refreshing: $$this.isRefreshing }) {
-            Scroll() {
-              Column() {
-                ForEach(this.cards, (card: ExpCard) => {
-                  this.ExpCardBuilder(card)
-                }, (card: ExpCard) => card.date + '_' + card.sectionName)
-              }
-              .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 16 })
-          }
-          .width('100%').layoutWeight(1)
-          }
-          .onRefreshing(() => {
-            // 下拉刷新：清缓存，重新走 WebView SSO
-            PreferenceUtil.putString(CACHE_KEY, '');
-            this.isRefreshing = false;
-            this.startLogin();
-          })
         }
-      }
-    }
-    .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+      }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+    }.title('\u5b9e\u9a8c\u4fe1\u606f')
   }
-    .title('实验信息')
 
-  }
   @Builder
   ExpCardBuilder(card: ExpCard) {
     Column() {
-      // 实验名称
       Row() {
-        if (card.isCompleted) {
-          Text('\u2705').fontSize(16).margin({ right: 6 })
-        }
-        Text(card.experimentName).fontSize(16).fontWeight(FontWeight.Medium)
-          .fontColor(ThemeColors.textPrimary)
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .width('100%')
-      .margin({ bottom: 6 })
-
-      // 日期 + 星期 + 周次
-      Row() {
-        Text('\ud83d\udcc5').fontSize(13).margin({ right: 4 })
-        Text(card.date + ' ' + card.weekdayName + ' 第' + card.weekNum + '周')
-          .fontSize(13).fontColor(ThemeColors.textSecondary)
-      }
-      .width('100%')
-      .margin({ bottom: 4 })
-
-      // 节次
-      Row() {
-        Text('\ud83d\udd50').fontSize(13).margin({ right: 4 })
-        Text(card.sectionName)
-          .fontSize(13).fontColor(ThemeColors.textSecondary)
-      }
-      .width('100%')
-      .margin({ bottom: 4 })
-
-      // 实验室
-      if (card.lab.length > 0) {
-        Row() {
-          Text('\ud83d\udccd').fontSize(13).margin({ right: 4 })
-          Text(card.lab).fontSize(13).fontColor(ThemeColors.textSecondary)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%').margin({ top: 2 })
-      }
-
-      // 教师
-      if (card.teacher.length > 0) {
-        Row() {
-          Text('\ud83d\udc68\u200d\ud83c\udfeb').fontSize(13).margin({ right: 4 })
-          Text(card.teacher).fontSize(13).fontColor(ThemeColors.textSecondary)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%').margin({ top: 2 })
-      }
-
-      // 实验项目
-      if (card.experimentProject.length > 0) {
-        Row() {
-          Text('\ud83d\udcdd').fontSize(13).margin({ right: 4 })
-          Text(card.experimentProject).fontSize(13).fontColor(ThemeColors.textSecondary)
-            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
-        }
-        .width('100%').margin({ top: 2 })
-      }
-
-      // 班级
-      if (card.className.length > 0) {
-        Row() {
-          Text('\ud83d\udc65').fontSize(13).margin({ right: 4 })
-          Text(card.className).fontSize(13).fontColor(ThemeColors.textSecondary)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%').margin({ top: 2 })
-      }
-    }
-    .width('100%')
-    .padding(14)
-    .borderRadius(12)
-    .backgroundColor(ThemeColors.bgCard)
-
-    .margin({ top: 8 })
-    .alignItems(HorizontalAlign.Start)
-    .border({ width: { bottom: 1, right: 1, top: 1, left: 1 }, color: '#E0E0E0', radius: 12 })
-
+        if(card.isCompleted) Text('\u2705').fontSize(16).margin({right:6})
+        Text(card.experimentName).fontSize(16).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary).layoutWeight(1).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis})
+      }.width('100%').margin({bottom:6})
+      Row() { Text('\ud83d\udcc5').fontSize(13).margin({right:4}); Text(card.date+' '+card.weekdayName+' \u7b2c'+card.weekNum+'\u5468').fontSize(13).fontColor(ThemeColors.textSecondary) }.width('100%').margin({bottom:4})
+      Row() { Text('\ud83d\udd50').fontSize(13).margin({right:4}); Text(card.sectionName).fontSize(13).fontColor(ThemeColors.textSecondary) }.width('100%').margin({bottom:4})
+      if(card.lab.length>0) { Row() { Text('\ud83d\udccd').fontSize(13).margin({right:4}); Text(card.lab).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis}) }.width('100%').margin({top:2}) }
+      if(card.teacher.length>0) { Row() { Text('\ud83d\udc68\u200d\ud83c\udfeb').fontSize(13).margin({right:4}); Text(card.teacher).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis}) }.width('100%').margin({top:2}) }
+      if(card.experimentProject.length>0) { Row() { Text('\ud83d\udcdd').fontSize(13).margin({right:4}); Text(card.experimentProject).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(2).textOverflow({overflow:TextOverflow.Ellipsis}).layoutWeight(1) }.width('100%').margin({top:2}) }
+      if(card.className.length>0) { Row() { Text('\ud83d\udc65').fontSize(13).margin({right:4}); Text(card.className).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis}) }.width('100%').margin({top:2}) }
+    }.width('100%').padding(14).borderRadius(12).backgroundColor(ThemeColors.bgCard).margin({top:8}).alignItems(HorizontalAlign.Start).border({width:{bottom:1,right:1,top:1,left:1},color:'#E0E0E0',radius:12})
   }
 }

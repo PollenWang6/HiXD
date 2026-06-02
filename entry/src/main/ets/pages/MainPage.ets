@@ -3,6 +3,7 @@ import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { EhallService, SemesterUtil, DataParser, ClassItemModel } from '../services/EhallService';
+import { CasLoginService } from '../services/CasLoginService';
 import { HttpUtil } from '../utils/HttpUtil';
 import { router } from '@kit.ArkUI';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
@@ -16,6 +17,7 @@ import { SchoolCardPage } from './schoolcard/SchoolCardPage';
 import { PortalWebPage } from './portal/PortalWebPage';
 import { SchoolNetPage } from './schoolnet/SchoolNetPage';
 import { ElectricityPage } from './electricity/ElectricityPage';
+import { FaqPage } from './faq/FaqPage';
 import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -171,6 +173,8 @@ struct MainPage {
           this.loginStatus = 'ok';
           this.stopRetryTimer();
           await PreferenceUtil.putBool('is_logged_in', true);
+          await CasLoginService.getInstance().syncCookiesToWebView();
+          this.startPreload();
         } else {
           // 无论是否有历史记录，都尝试一次 CAS 自动恢复
           // 因为 IDS TGC 可能仍有效（浏览器环境共享）
@@ -180,6 +184,7 @@ struct MainPage {
             this.isLoggedIn = true;
             this.loginStatus = 'ok';
             await PreferenceUtil.putBool('is_logged_in', true);
+            this.startPreload();
             console.info('MainPage', 'Auto-login restored successfully');
           } else {
             const hadSession = PreferenceUtil.getString('ids_account').length > 0;
@@ -218,6 +223,7 @@ struct MainPage {
           this.loginStatus = 'ok';
           this.stopRetryTimer();
           await PreferenceUtil.putBool('is_logged_in', true);
+          this.startPreload();
           console.info('MainPage', 'Auto-login restored successfully');
         } else {
           this.isLoggedIn = false;
@@ -236,6 +242,8 @@ struct MainPage {
       } else {
         this.loginStatus = 'ok';
         this.stopRetryTimer();
+        await CasLoginService.getInstance().syncCookiesToWebView();
+        this.startPreload();
         if (!this.username) {
           const sid = await ehall.fetchStudentId();
           if (sid) {
@@ -264,6 +272,20 @@ struct MainPage {
       clearInterval(this.retryTimer);
       this.retryTimer = -1;
     }
+  }
+
+  // 登录成功后预加载课表、考试、实验数据
+  private startPreload(): void {
+    EhallService.getInstance().preloadAllData().catch((e: Error) => {
+      console.warn('MainPage', 'preload failed: ' + String(e));
+    });
+  }
+
+  // 同步 Cookie 后跳转 Portal WebView
+  private async navPortal(routeName: string): Promise<void> {
+    await CasLoginService.getInstance().syncCookiesToWebView();
+    await new Promise<void>((r) => setTimeout(r, 300));
+    this.pageInfo.pushPath({ name: routeName });
   }
 
   // ==================== 缓存管理 ====================
@@ -402,6 +424,8 @@ struct MainPage {
       }
       // 合并实验数据
       this.mergeExpPreview(grid);
+      // 合并物理实验数据（独立于其他实验）
+      this.mergePhysicsPreview(grid);
       // 合并自定义课程
       this.mergeCustomPreview(grid);
       // 合并考试数据
@@ -480,6 +504,38 @@ struct MainPage {
       }
     } catch (e) {
       console.error('MainPage', 'mergeExpPreview error: ' + String(e));
+    }
+  }
+
+  // 合并物理实验缓存到预览grid
+  private mergePhysicsPreview(grid: PreviewCell[][][]): void {
+    const cached = PreferenceUtil.getString('physics_exp_cache');
+    if (cached.length === 0) return;
+    try {
+      const cacheObj: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
+      const raw: Object[] = cacheObj['data'] as Object[];
+      if (!(raw instanceof Array) || raw.length === 0) return;
+      const items: Record<string, string>[] = raw as Record<string, string>[];
+      for (let ei = 0; ei < items.length; ei++) {
+        const item: Record<string, string> = items[ei];
+        const weekday: number = parseInt(item['weekday']) || 0;
+        const startSec: number = parseInt(item['startSection']) || 0;
+        const endSec: number = parseInt(item['endSection']) || 0;
+        if (weekday < 1 || weekday > 7 || startSec < 1) continue;
+        const cell = new PreviewCell();
+        cell.name = item['experimentName'] || '物理实验';
+        cell.classroom = item['lab'] || '';
+        cell.day = weekday;
+        cell.startSection = startSec;
+        cell.endSection = endSec > startSec ? endSec : startSec;
+        cell.isExperiment = true;
+        cell.weekNum = parseInt(item['week']) || 0;
+        if (weekday <= 7 && startSec <= 11) {
+          grid[weekday][startSec].push(cell);
+        }
+      }
+    } catch (e) {
+      console.error('MainPage', 'mergePhysicsPreview error: ' + String(e));
     }
   }
 
@@ -575,6 +631,7 @@ struct MainPage {
       }
     } catch (e) {
       console.error('MainPage', 'mergeExamPreview error: ' + String(e));
+      PreferenceUtil.putString('exam_schedule_cache', '');
     }
   }
 
@@ -732,13 +789,17 @@ struct MainPage {
     } else if (name === 'PortalWeb_Space') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '空间预约', url: 'http://libspace.xidian.edu.cn', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Portal') {
-      PortalWebPage({ pageInfo: this.pageInfo, title: '移动门户', url: 'https://xxcapp.xidian.edu.cn/site/xidianPage/home' , useWeChatUA: true , isTablet: this.isTablet })
+      PortalWebPage({ pageInfo: this.pageInfo, title: '移动门户', url: 'https://xxcapp.xidian.edu.cn/site/xidianPage/home' , useWeChatUA: true , keepWeChatUA: true , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Ruisi') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '睿思导航', url: 'https://nav.xdruisi.cn/', isTablet: this.isTablet })
+    } else if (name === 'PortalWeb_Net') {
+      PortalWebPage({ pageInfo: this.pageInfo, title: '校园网登录', url: 'https://zfw.xidian.edu.cn/', isTablet: this.isTablet })
     } else if (name === 'SchoolNetPage') {
       SchoolNetPage({ pageInfo: this.pageInfo })
     } else if (name === 'ElectricityPage') {
       ElectricityPage({ pageInfo: this.pageInfo })
+    } else if (name === 'FaqPage') {
+      FaqPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Dianfei') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , useWeChatUA: true , isTablet: this.isTablet })
     }
@@ -1118,7 +1179,7 @@ struct MainPage {
           }
         }
         Blank()
-        if (this.isLoggedIn) {
+        if (this.loginStatus === 'ok') {
           Stack() {
             Circle().width(32).height(32).fill('#FFFFFF33')
             Text('👤').fontSize(18).fontColor('#FFFFFFCC')
@@ -1206,6 +1267,12 @@ struct MainPage {
       Divider().color('#F0F0F0')
 
       List({ space: 8 }) {
+        // 提示：首次使用需先进入订水系统初始化
+        ListItem() {
+          Row() {
+            Text('💡 水电缴费/移动门户等需要先进入「订水系统」完成初始化').fontSize(11).fontColor(ThemeColors.textHint)
+          }.width('100%').padding({ left: 4, right: 4, top: 2, bottom: 2 })
+        }
         // 外部浏览器跳转
         ListItem() {
           this.MenuItemBuilder('💰', '水电缴费', '线上一键缴纳水电费用', '#E65100',
@@ -1231,6 +1298,10 @@ struct MainPage {
         ListItem() {
           this.MenuItemBuilder('🧭', '睿思导航', '补充其他功能', '#4527A0',
             () => { this.pageInfo.pushPath({ name: 'PortalWeb_Ruisi' }); })
+        }
+        ListItem() {
+          this.MenuItemBuilder('🌐', '校园网登录', '登录校园网自助服务平台', '#00ACC1',
+            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Net' }); })
         }
       }
       .padding({ left: 16, right: 16, top: 8 })
@@ -1295,8 +1366,9 @@ struct MainPage {
                 () => { this.showThemeDialog = true; })
             }
             ListItem() {
-              this.MenuItemBuilder('🌐', '校园网登录', '登录校园网自助服务平台', '#00ACC1',
-                () => { router.pushUrl({ url: 'pages/schoolnet/SchoolNetLoginPage' }); })
+              this.MenuItemBuilder('❓', '常见问题', '使用帮助和问题反馈', '#795548',
+                () => { this.pageInfo.clear();
+                  this.pageInfo.pushPath({ name: 'FaqPage' }); })
             }
             ListItem() {
               this.MenuItemBuilder('🔓', '退出登录', '清除登录状态', '#FF5252',

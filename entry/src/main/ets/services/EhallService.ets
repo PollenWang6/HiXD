@@ -3,6 +3,7 @@
 import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { CacheService } from './CacheService';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
+import { CasLoginService } from './CasLoginService';
 
 const TAG = 'EhallService';
 
@@ -156,6 +157,12 @@ export class EhallService {
 
   constructor() {}
 
+  /** 登录后清除过期 session 缓存 */
+  clearSessionCache(): void {
+    this.appSessionUrl = {};
+    console.info(TAG, 'Session cache cleared');
+  }
+
   static getInstance(): EhallService {
     if (!EhallService.inst) EhallService.inst = new EhallService();
     return EhallService.inst;
@@ -204,18 +211,37 @@ export class EhallService {
    * → ehall 用 ticket 换取新 session，返回新的 MOD_AUTH_CAS cookie
    */
   /**
-   * 尝试自动恢复登录态（简化版）
-   * MOD_AUTH_CAS 已通过 LoginPage WebView 登录时保存到 PreferenceUtil，
-   * HttpUtil 自动注入到 ehall.xidian.edu.cn 域的所有请求。
-   * 只需用 checkEhallLogin 发一个简单 API 请求即可判断登录是否有效。
+   * 尝试自动恢复登录态
+   * 1. 先检查 HttpUtil 里 MOD_AUTH_CAS 是否仍有效
+   * 2. 如果过期则通过 CAS TGC 自动续期（无需密码）
    */
   async tryAutoRestoreLogin(): Promise<boolean> {
     try {
-      // MOD_AUTH_CAS 已通过 HttpUtil.getCookiesForDomain 自动注入
-      // 直接检查 ehall API 是否可用
+      // Step 1: 快速检查
       const verified = await this.checkEhallLogin();
-      console.info(TAG, 'tryAutoRestoreLogin: result=' + verified);
-      return verified;
+      if (verified) {
+        console.info(TAG, 'tryAutoRestoreLogin: already logged in');
+        return true;
+      }
+
+      // Step 2: 尝试 CAS 自动恢复（TGC 有效则无需密码）
+      console.info(TAG, 'tryAutoRestoreLogin: attempting CAS restore...');
+      const cas = CasLoginService.getInstance();
+      const restored = await cas.tryAutoRestoreLogin();
+      if (restored) {
+        console.info(TAG, 'tryAutoRestoreLogin: CAS redirect completed, re-verifying...');
+        // Re-verify with ehall API (same as Flutter isLoggedIn())
+        const reVerified = await this.checkEhallLogin();
+        if (reVerified) {
+          console.info(TAG, 'tryAutoRestoreLogin: CAS restore verified, session valid');
+          await cas.syncCookiesToWebView();
+          return true;
+        }
+        console.warn(TAG, 'tryAutoRestoreLogin: re-verification FAILED, CAS restore was false positive');
+      }
+
+      console.info(TAG, 'tryAutoRestoreLogin: all attempts failed');
+      return false;
     } catch (e) {
       console.warn(TAG, 'tryAutoRestoreLogin failed: ' + JSON.stringify(e));
       return false;
@@ -365,7 +391,9 @@ export class EhallService {
   private async appPost(path: string, body: Record<string, string>): Promise<HttpResponse> {
     const url = 'https://ehall.xidian.edu.cn' + path;
     const cookies = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
-    console.info(TAG, 'appPost: url=' + path);
+    const hasCas: boolean = cookies.indexOf('MOD_AUTH_CAS') >= 0;
+    const hasJsession: boolean = cookies.toLowerCase().indexOf('jsessionid') >= 0;
+    console.info(TAG, `appPost: url=${path} hasMOD_AUTH=${hasCas} hasJSESSIONID=${hasJsession} cookieLen=${cookies.length}`);
     let resp = await this.http.postForm(url, body, EHALL_HEADERS);
     const cookiesAfter = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     console.info(TAG, 'appPost: resp status=' + resp.statusCode);
@@ -387,7 +415,7 @@ export class EhallService {
 
     // 检测响应体是否是 HTML 登录页（非 JSON）
     if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
-      console.warn(TAG, 'appPost: received HTML instead of JSON (session likely expired)');
+      console.warn(TAG, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
       this.appSessionUrl = {};
       const appId = this.findAppIdByPath(path);
       if (appId) {
@@ -756,7 +784,7 @@ export class EhallService {
       console.warn(TAG, 'extractRaw: no rows found in response');
       return [];
     } catch (e) {
-      console.error(TAG, 'extractRaw parse error: ' + JSON.stringify(e));
+      console.error(TAG, 'extractRaw parse error: ' + JSON.stringify(e) + ' body[0:200]=' + body.substring(0, 200));
       return [];
     }
   }
@@ -1425,6 +1453,219 @@ export class EhallService {
     }
     console.info(TAG, 'fetchOtherExperiments: done, total=' + result.length);
     return result;
+  }
+
+  // ===== 登录后预加载 =====
+  async preloadAllData(): Promise<void> {
+    console.info(TAG, 'preloadAllData: start');
+    try {
+      const semCode: string = SemesterUtil.getCurrentSemesterCode();
+      const sid: string = await this.fetchStudentId();
+      if (!sid) {
+        console.warn(TAG, 'preloadAllData: no student ID');
+        return;
+      }
+
+      // 课表 + 考试并行预加载，await 考试结果写入 PreferenceUtil
+      this.getClassTable(semCode, sid, true).catch((e: Error) => {
+        console.warn(TAG, 'preload classTable: ' + String(e));
+      });
+      this.getExamSchedule(semCode).then((raw: string) => {
+        // ClassTablePage 从 PreferenceUtil 读考试数据，CacheService 里的 exam_<sem> 它读不到
+        PreferenceUtil.putString('exam_schedule_cache', raw);
+        console.info(TAG, 'preload: exam saved to PreferenceUtil, ' + raw.length + ' chars');
+      }).catch((e: Error) => {
+        console.warn(TAG, 'preload exam: ' + String(e));
+      });
+
+      // 其他实验（后台静默调 sysj API，写入 PreferenceUtil 供 ClassTablePage 读取）
+      this.preloadOtherExperimentsDirect().catch((e: Error) => {
+        console.warn(TAG, 'preload other experiments: ' + String(e));
+      });
+
+      console.info(TAG, 'preloadAllData: dispatched');
+    } catch (e) {
+      console.warn(TAG, 'preloadAllData: ' + String(e));
+    }
+  }
+
+  // 完整实验数据获取：先试直接API，失败则走 OAuth 流程
+  async preloadOtherExperimentsDirect(): Promise<number> {
+    const TERM_ID = '2003';
+    const SYSJ_BASE = 'https://sysj.xidian.edu.cn';
+    const MAX_WEEKS = 25;
+    console.info(TAG, 'preloadOtherExperimentsDirect: start');
+
+    try {
+      // Step 0: 先试直接 API
+      const r0: HttpResponse = await this.http.get(
+        SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=1'
+      );
+      let allItems: Record<string, string>[] = [];
+
+      if (r0.isOk && r0.body.length > 0 && r0.body.charAt(0) === '[') {
+        // Session 有效，直接拉取
+        this._parseWeekData(r0.body, 1, allItems);
+        for (let w = 2; w <= MAX_WEEKS; w++) {
+          try {
+            const rw = await this.http.get(
+              SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=' + String(w)
+            );
+            this._parseWeekData(rw.body, w, allItems);
+          } catch (_e) { /* continue */ }
+        }
+      } else {
+        // Session 过期或无 OAuth → 走完整流程
+        console.info(TAG, 'preloadOtherExperimentsDirect: doing full OAuth');
+        allItems = await this._fetchExperimentsWithOAuth(TERM_ID, SYSJ_BASE, MAX_WEEKS);
+      }
+
+      if (allItems.length > 0) {
+        const co: ESObject = { 'ts': Date.now(), 'data': allItems } as ESObject;
+        PreferenceUtil.putString('sysj_exp_cache', JSON.stringify(co));
+        console.info(TAG, 'preloadOtherExperimentsDirect: saved ' + allItems.length + ' items');
+        return allItems.length;
+      }
+      return 0;
+    } catch (e) {
+      console.warn(TAG, 'preloadOtherExperimentsDirect: ' + String(e));
+      return 0;
+    }
+  }
+
+  // 完整 OAuth 流程获取实验数据
+  private async _fetchExperimentsWithOAuth(
+    TERM_ID: string, SYSJ_BASE: string, MAX_WEEKS: number
+  ): Promise<Record<string, string>[]> {
+    // Step 1: 获取 OAuth state
+    let state = '';
+    const r1 = await this.http.get(SYSJ_BASE + '/xidian/test');
+    let om = r1.body?.match(/[?&]state=([a-f0-9\-]{20,50})/i);
+    if (om) { state = om[1]; }
+
+    if (!state) {
+      for (let a = 0; a < 4; a++) {
+        const sr = await this.http.getNoRedirect(SYSJ_BASE + '/xidian/test');
+        if (sr.location) {
+          let om2 = sr.location.match(/[?&]state=([^&]+)/);
+          if (om2) { state = om2[1]; break; }
+          let nextUrl = sr.location;
+          if (!nextUrl.startsWith('http')) { nextUrl = SYSJ_BASE + (nextUrl.startsWith('/') ? nextUrl : '/' + nextUrl); }
+          const sr2 = await this.http.getNoRedirect(nextUrl);
+          if (sr2.location) {
+            let om3 = sr2.location.match(/[?&]state=([^&]+)/);
+            if (om3) { state = om3[1]; break; }
+          }
+        }
+        if (sr.body) {
+          let om4 = sr.body.match(/state=([a-f0-9\-]{20,50})/i);
+          if (om4) { state = om4[1]; break; }
+        }
+      }
+    }
+    if (!state) {
+      console.warn(TAG, '_fetchExperimentsWithOAuth: no state');
+      return [];
+    }
+    console.info(TAG, '_fetchExperimentsWithOAuth: state=' + state);
+
+    // Step 2: sysj OAuth → CAS
+    const params = 'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/xidian/webapp/callback') +
+      '&state=' + state + '&client_id=GvsunLims&response_type=code' +
+      '&authorize_uri=' + encodeURIComponent(SYSJ_BASE + '/uaa/oauth/authorize');
+    await this.http.get(SYSJ_BASE + '/uaa/xidian/login?' + params);
+
+    // Step 3: CAS redirect — 备份 cookie 避免污染
+    const idsBackup = this.http.getAllCookies('ids.xidian.edu.cn');
+    const ehallBackup = this.http.getAllCookies('ehall.xidian.edu.cn');
+    const casUrl = 'https://ids.xidian.edu.cn/authserver/oauth2.0/authorize?' +
+      'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/uaa/xidian/callback') +
+      '&response_type=code&state=' + state + '&client_id=1387116615722893312';
+    const r3 = await this.http.get(casUrl);
+    if (r3.body && r3.body.indexOf('password') >= 0 && r3.body.indexOf('username') >= 0 && r3.body.indexOf('<form') >= 0) {
+      console.warn(TAG, '_fetchExperimentsWithOAuth: CAS session expired');
+      return [];
+    }
+    this.http.copyCookiesForDomain('ids.xidian.edu.cn', 'sysj.xidian.edu.cn');
+    this.http.replaceCookiesForDomain('ids.xidian.edu.cn', idsBackup);
+    this.http.replaceCookiesForDomain('ehall.xidian.edu.cn', ehallBackup);
+
+    // Step 4/5: 提取 password
+    let pwd = '';
+    let pm = r3.body?.match(/var password = '([^']+)'/);
+    if (pm) { pwd = pm[1]; }
+
+    if (!pwd) {
+      // 方式B: /uaa/oauth/authorize → 拿 code → callback → 拿 password
+      const oauthUrl = SYSJ_BASE + '/uaa/oauth/authorize?' +
+        'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/xidian/webapp/callback') +
+        '&state=' + state + '&client_id=GvsunLims&response_type=code';
+      const r4 = await this.http.get(oauthUrl);
+      let code = '';
+      let cm4 = r4.body?.match(/[?&]code=([a-zA-Z0-9]+)/);
+      if (!cm4) { cm4 = r4.body?.match(/["']code["']\s*:\s*["']([^"']+)["']/); }
+      if (!cm4) { cm4 = r4.body?.match(/window\.location.*?[?&]code=([a-zA-Z0-9]+)/); }
+      if (!cm4) { cm4 = r4.body?.match(/url=.*?[?&]code=([a-zA-Z0-9]+)/); }
+      if (cm4) { code = cm4[1]; }
+
+      if (code) {
+        const r5 = await this.http.get(SYSJ_BASE + '/xidian/webapp/callback?code=' + code + '&state=' + state);
+        let pm2 = r5.body?.match(/var password = '([^']+)'/);
+        if (pm2) { pwd = pm2[1]; }
+        if (!pwd) { pm2 = r3.body?.match(/var password = '([^']+)'/); if (pm2) { pwd = pm2[1]; } }
+      }
+    }
+
+    if (!pwd) {
+      console.warn(TAG, '_fetchExperimentsWithOAuth: no password extracted');
+      return [];
+    }
+
+    // Step 6: 登录 sysj
+    const account = PreferenceUtil.getString('ids_account');
+    const loginBody = 'username=' + encodeURIComponent(account) + '&password=' + encodeURIComponent(pwd);
+    await this.http.postRaw(SYSJ_BASE + '/xidian/webapp/login', loginBody, 'application/x-www-form-urlencoded');
+
+    // Step 7: 逐周获取数据
+    const allItems: Record<string, string>[] = [];
+    for (let w = 1; w <= MAX_WEEKS; w++) {
+      try {
+        const rw = await this.http.get(
+          SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=' + String(w)
+        );
+        this._parseWeekData(rw.body, w, allItems);
+      } catch (_e) { /* continue */ }
+    }
+    console.info(TAG, '_fetchExperimentsWithOAuth: fetched=' + allItems.length);
+    return allItems;
+  }
+
+  // 解析 sysj myScheduleInfoAjax 返回的周数据（与 ExperimentPage.parseWeekData 逻辑一致）
+  private _parseWeekData(body: string, week: number, out: Record<string, string>[]): void {
+    try {
+      if (body.length === 0 || body.charAt(0) !== '[') return;
+      const raw: Object[] = JSON.parse(body) as Object[];
+      for (const d of raw) {
+        const row: Object[] = d as Object[];
+        if (row.length < 15) continue;
+        const item: Record<string, string> = {};
+        item['courseCode'] = (row[0] as string) || '';
+        item['experimentName'] = (row[1] as string) || '';
+        item['department'] = (row[2] as string) || '';
+        item['lab'] = (row[11] as string) || '';
+        item['weekday'] = (row[4] as string) || '';
+        item['startSection'] = (row[5] as string) || '';
+        item['endSection'] = (row[6] as string) || '';
+        item['week'] = (row[7] as string) || '';
+        item['teacher'] = (row[9] as string) || '';
+        item['className'] = (row[12] as string) || '';
+        item['groupId'] = (row[12] as string) || '';
+        item['studentCount'] = (row[13] as string) || '';
+        item['experimentProject'] = (row[14] as string) || '';
+        item['__week'] = String(week);
+        out.push(item);
+      }
+    } catch (_e) { /* non-critical */ }
   }
 
   async clearCache(): Promise<void> {

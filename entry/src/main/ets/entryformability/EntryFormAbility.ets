@@ -337,6 +337,38 @@ function mergeExperimentPreview(form: FormDataClass, currentWeek: number, localD
   }
 }
 
+function mergePhysicsPreview(form: FormDataClass, currentWeek: number, localDay: number): void {
+  const cached: string = PreferenceUtil.getString('physics_exp_cache');
+  if (cached.length === 0) return;
+  try {
+    const co: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
+    const data: Object[] = co['data'] as Object[];
+    if (!data || data.length === 0) return;
+    for (let i: number = 0; i < data.length; i++) {
+      const item: Record<string, Object> = data[i] as Record<string, Object>;
+      const wk: number = parseInt(String(item['week'] || '0')) || 0;
+      if (wk !== currentWeek) continue;
+      const day: number = parseInt(String(item['weekday'] || '0')) || 0;
+      if (day < 1 || day > 7 || day !== localDay) continue;
+      const name: string = String(item['experimentName'] || '物理实验');
+      const room: string = String(item['lab'] || '');
+      const startSec: number = parseInt(String(item['startSection'] || '0')) || 0;
+      const endSec: number = parseInt(String(item['endSection'] || '0')) || 0;
+      let timeStr: string = '';
+      if (startSec > 0 && startSec < SECTION_TIMES.length && endSec > 0 && endSec < SECTION_TIMES.length) {
+        timeStr = SECTION_TIMES[startSec].split('-')[0] + '~' + SECTION_TIMES[endSec].split('-')[1];
+      }
+      form.todayNames.push('⚛ ' + name);
+      form.todayTimes.push(timeStr);
+      form.todayRooms.push(room);
+      form.todayTeachers.push('');
+      form.todayStarts.push(startSec);
+    }
+  } catch (e) {
+    hilog.warn(DOMAIN, TAG, 'mergePhysicsPreview error: ' + JSON.stringify(e));
+  }
+}
+
 function mergeExamPreview(form: FormDataClass, currentWeek: number, localDay: number): void {
   try {
     const cached: string = PreferenceUtil.getString('exam_schedule_cache');
@@ -439,6 +471,7 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
 
   // ── 加载实验数据 ──
   mergeExperimentPreview(form, currentWeek, localDay);
+  mergePhysicsPreview(form, currentWeek, localDay);
 
   // ── 加载考试数据 ──
   mergeExamPreview(form, currentWeek, localDay);

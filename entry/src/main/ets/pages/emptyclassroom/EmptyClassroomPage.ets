@@ -85,7 +85,7 @@ export struct EmptyClassroomPage {
           Row({ space: 8 }) {
             ForEach(this.buildings, (b: BuildingInfo) => {
               Button(b.name).fontSize(13).height(32).borderRadius(16)
-                .fontColor(b.code === this.selectedBuilding ? '#FFFFFF' : '#333333')
+                .fontColor(b.code === this.selectedBuilding ? '#FFFFFF' : ThemeColors.textPrimary)
                 .backgroundColor(b.code === this.selectedBuilding ? '#F4511E' : ThemeColors.bgInput)
                 .onClick(() => { this.selectedBuilding = b.code; this.search(); })
             }, (b: BuildingInfo) => 'bld_' + b.code)

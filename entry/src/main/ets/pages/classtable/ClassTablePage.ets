@@ -2,6 +2,7 @@
 import { ThemeColors } from '../../utils/ThemeColors';
 import { EhallService, SemesterUtil, DataParser, ClassItemModel, ExamItemModel } from '../../services/EhallService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
+import { HttpUtil } from '../../utils/HttpUtil';
 
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -11,10 +12,13 @@ import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 
 // 课程卡片背景色（较鲜艳的色块，配白色文字）
 const CLASS_COLORS: string[] = ['#42A5F5', '#AB47BC', '#FF7043', '#66BB6A', '#EC407A', '#26C6DA', '#FFCA28', '#8BC34A', '#7E57C2', '#29B6F6'];
+const CLASS_COLORS_DK: string[] = ['#1A3A5C', '#3A1A4C', '#4A2018', '#1A3A1E', '#3A1A2E', '#1A3A4C', '#4A3A18', '#2A3A1A', '#2A1A3A', '#1A3A4C'];
 // 实验卡片背景色（橙色系，区分课程）
 const EXP_COLORS: string[] = ['#FF8C00', '#E65100', '#F57C00', '#EF6C00', '#FF9800'];
+const EXP_COLORS_DK: string[] = ['#4A2818', '#3A1818', '#3A2018', '#3A1A18', '#4A2A18'];
 // 考试卡片背景色（红色系，区分课程和实验）
 const EXAM_COLORS: string[] = ['#E53935', '#C62828', '#D32F2F', '#F44336', '#EF5350'];
+const EXAM_COLORS_DK: string[] = ['#4A1A1A', '#3A1818', '#3A1A1A', '#4A1A1A', '#4A1A18'];
 const DAY_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const DAY_COUNT = 7;
 const SECTION_COUNT = 11;
@@ -69,6 +73,7 @@ class ClassCell {
   kxh: string = '';
   colorIndex: number = 0;
   isExperiment: boolean = false;  // 实验标记
+  isPhysics: boolean = false;      // 物理实验
   experimentProject: string = '';  // 实验项目名
   isExam: boolean = false;        // 考试标记
   examDate: string = '';          // 考试日期(yyyy-MM-dd)
@@ -92,6 +97,7 @@ export struct ClassTablePage {
   @State semesterCode: string = '';
   @State classGrid: ClassCell[][][] = []; // 三维数组：[day][startSection] = [课程1, 课程2, ...]
   @State hasCache: boolean = false;
+  @State dataHint: string = ''; // 数据同步提示（考试/实验加载状态）
   @State refreshing: boolean = false;
   @State showCacheBanner: boolean = false;
 
@@ -147,14 +153,8 @@ export struct ClassTablePage {
     const context = getContext(this) as common.UIAbilityContext;
     this.localFilePath = context.filesDir + '/class_table_' + this.semesterCode + '.json';
 
-    const local = this.readLocalClassTable();
-    if (local) {
-      this.renderClassTable(local);
-      this.loading = false;
-      this.hasCache = true;
-      return;
-    }
-
+    // 统一走 fetchAndSave：缓存优先 + 后台刷新 + 考试/实验合并
+    this.loading = true;
     await this.fetchAndSave();
 
     try {
@@ -249,14 +249,83 @@ export struct ClassTablePage {
   private async fetchAndSave(): Promise<void> {
     this.errorMsg = '';
     const sid: string = PreferenceUtil.getString('ids_account');
+    // Step 1: 缓存优先 — 有缓存先显示
     try {
-      const raw: string = await this.ehall.getClassTable(this.semesterCode, sid, true);
-      this.renderClassTable(raw);
-      this.lastRenderedRaw = raw;
+      let cached: string | null = this.readLocalClassTable();
+      if (!cached || cached.length < 100) {
+        cached = await this.ehall.getCachedClassTableStale(this.semesterCode, sid);
+      }
+      if (cached && cached.length >= 100) {
+        this.renderClassTable(cached);
+        this.lastRenderedRaw = cached;
+        this.hasCache = true;
+        this.loading = false;
+        this.mergeExperimentDataIntoGrid();
+        if (!this.dataHint) {
+          this.dataHint = '📦 使用缓存数据，后台刷新中...';
+        }
+      }
+    } catch (_e) { /* ignore */ }
+
+    // Step 2: 后台拉最新数据（需登录）
+    const isLoggedIn = PreferenceUtil.getBool('is_logged_in');
+    if (!isLoggedIn) {
+      this.dataHint = '⚠️ 未登录，显示缓存数据';
+      setTimeout(() => { this.dataHint = ''; }, 3000);
+      this.loading = false;
+      return;
+    }
+
+    try {
+      let raw: string | null = null;
+      raw = await this.ehall.getCachedClassTable(this.semesterCode, sid);
+      if (!raw || raw.length < 100) {
+        this.dataHint = '🔄 正在同步课表数据...';
+        raw = await this.ehall.getClassTable(this.semesterCode, sid, true);
+      }
+      // 只有数据变化或首次加载才重新渲染
+      if (raw !== this.lastRenderedRaw || !this.hasCache) {
+        this.renderClassTable(raw);
+        this.lastRenderedRaw = raw;
+        this.hasCache = true;
+      }
       this.writeLocalClassTable(raw);
-      this.hasCache = true;
+      console.info('ClassTablePage', 'fetchAndSave: step3 exp+exam');
+
+      // Step 3: 同步实验和考试（网络获取）
+      let expCount = 0;
+      try {
+        expCount = await this.ehall.preloadOtherExperimentsDirect();
+        if (expCount > 0) { this.mergeExperimentDataIntoGrid(); }
+      } catch (_e) { /* ignore */ }
+      // 物理实验（独立于其他实验，没有密码或没数据也不报错）
+      try { await this.mergePhysicsExperiments(); } catch (_e) { /* ignore */ }
+      console.info('ClassTablePage', 'syncComplete: exp=' + expCount);
+
+      this.loadExamDataInPlace().then((examCount: number) => {
+        console.info('ClassTablePage', 'syncComplete: exam=' + examCount);
+        const expPart = expCount > 0 ? '实验' : '';
+        const examPart = examCount > 0 ? '考试(' + examCount + '门)' : '';
+        const both = [expPart, examPart].filter(s => s.length > 0).join('、');
+        this.dataHint = both.length > 0 ? ('✅ 已同步' + both) : '✅ 已经是最新';
+        setTimeout(() => { this.dataHint = ''; }, 3000);
+      }).catch((e: Error) => {
+        console.error('ClassTablePage', 'loadExamDataInPlace error: ' + String(e));
+        this.dataHint = '';
+      });
+      // 兜底：最多 6 秒后自动消掉缓存提示
+      setTimeout(() => {
+        if (this.dataHint === '📦 使用缓存数据，后台刷新中...' ||
+            this.dataHint === '🔄 正在同步课表数据...') {
+          this.dataHint = '';
+        }
+      }, 6000);
     } catch (e) {
-      if (!this.hasCache) {
+      if (this.hasCache && this.lastRenderedRaw && this.lastRenderedRaw.length > 0) {
+        // 有缓存，网络失败可以接受
+        this.dataHint = '⚠️ 刷新失败，显示缓存数据';
+        setTimeout(() => { this.dataHint = ''; }, 3000);
+      } else {
         this.errorMsg = '加载课程表失败，请检查网络';
       }
     } finally {
@@ -330,15 +399,11 @@ export struct ClassTablePage {
         grid[cell.day][cell.startSection].push(cell);
       }
     }
-    // 合并实验数据到课程表
-    this.mergeExperimentData(grid);
     // 合并自定义课程
     this.loadCustomCourses(grid);
     this.classGrid = grid;
     // 诊断：打印今天（当前周）的课程列表，与卡片对比
     this.diagTodayGrid(grid);
-    // 异步加载考试数据（不阻塞课程表渲染）
-    this.loadExamData();
   }
 
   private diagTodayGrid(grid: ClassCell[][][]): void {
@@ -362,13 +427,56 @@ export struct ClassTablePage {
     console.error('ClassTablePage', 'TODAY_GRID total=' + count + ' weekday=' + today + ' week=' + cw);
   }
 
-  private mergeExperimentData(grid: ClassCell[][][]): void {
+  // 在当前 classGrid 上合并实验数据
+  private mergeExperimentDataIntoGrid(): boolean {
     const cached = PreferenceUtil.getString(this.EXP_CACHE_KEY);
-    if (cached.length === 0) return;
+    console.info('ClassTablePage', 'mergeExperimentDataIntoGrid: cacheLen=' + cached.length);
+    if (cached.length === 0) return false;
     try {
       const cacheObj: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
       const raw: Object[] = cacheObj['data'] as Object[];
-      if (!(raw instanceof Array) || raw.length === 0) return;
+      if (!(raw instanceof Array) || raw.length === 0) return false;
+      // 深拷贝当前 grid，先清除实验数据
+      const grid: ClassCell[][][] = JSON.parse(JSON.stringify(this.classGrid)) as ClassCell[][][];
+      for (let d = 0; d <= DAY_COUNT; d++) {
+        for (let s = 0; s <= SECTION_COUNT; s++) {
+          grid[d][s] = grid[d][s].filter((c: ClassCell) => !c.isExperiment);
+        }
+      }
+      if (this.mergeExperimentData(grid)) {
+        this.classGrid = grid;
+        return true;
+      }
+    } catch (_e) { /* ignore */ }
+    return false;
+  }
+
+  // 异步加载考试，返回加载数量
+  private async loadExamDataInPlace(): Promise<number> {
+    const cached: string = PreferenceUtil.getString('exam_schedule_cache');
+    console.info('ClassTablePage', 'loadExamDataInPlace: cacheLen=' + cached.length);
+    if (cached.length === 0) return 0;
+    try {
+      const items: ExamItemModel[] = DataParser.parseExamSchedule(cached);
+      console.info('ClassTablePage', 'loadExamDataInPlace: parsed=' + items.length);
+      if (items.length > 0) {
+        this.applyExamItems(items);
+        this.classGrid = [...this.classGrid];
+        return items.length;
+      }
+    } catch (e) {
+      console.error('ClassTablePage', 'loadExamDataInPlace error: ' + JSON.stringify(e));
+    }
+    return 0;
+  }
+
+  private mergeExperimentData(grid: ClassCell[][][]): boolean {
+    const cached = PreferenceUtil.getString(this.EXP_CACHE_KEY);
+    if (cached.length === 0) return false;
+    try {
+      const cacheObj: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
+      const raw: Object[] = cacheObj['data'] as Object[];
+      if (!(raw instanceof Array) || raw.length === 0) return false;
       const items: Record<string, string>[] = raw as Record<string, string>[];
       let expColorIdx: number = 0;
       for (const item of items) {
@@ -405,7 +513,9 @@ export struct ClassTablePage {
       }
     } catch (e) {
       console.warn('ClassTablePage', 'mergeExperimentData error: ' + String(e));
+      return false;
     }
+    return true;
   }
 
   // 从 _custom.json 加载自定义课程合并到 grid
@@ -477,23 +587,6 @@ export struct ClassTablePage {
       }
     } catch (e) {
       console.error('ClassTablePage', 'loadCustomCourses error: ' + String(e));
-    }
-  }
-
-  private async loadExamData(): Promise<void> {
-    // 只读缓存（由ExamPage写入），不主动请求API
-    const cached: string = PreferenceUtil.getString('exam_schedule_cache');
-    console.error('ClassTablePage', 'loadExamData: cached.length=' + cached.length);
-    if (cached.length > 0) {
-      try {
-        const items: ExamItemModel[] = DataParser.parseExamSchedule(cached);
-        console.error('ClassTablePage', 'loadExamData: parsed items=' + items.length);
-        this.applyExamItems(items);
-      } catch (e) {
-        console.error('ClassTablePage', 'loadExamData parse error: ' + String(e));
-      }
-    } else {
-      console.error('ClassTablePage', 'loadExamData: no exam cache found');
     }
   }
 
@@ -601,11 +694,18 @@ export struct ClassTablePage {
             }.width('100%').height(28).justifyContent(FlexAlign.Center)
             .backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
           }
+          if (this.dataHint.length > 0) {
+            Row() {
+              Text(this.dataHint).fontSize(12).fontColor('#FFFFFF')
+            }.width('100%').height(28).justifyContent(FlexAlign.Center)
+            .backgroundColor('#43A047')
+          }
           Divider().color('#F0F0F0')
           if (this.loading && !this.hasCache) {
             Column() {
               LoadingProgress().width(40).height(40).color('#2979FF')
-              Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+              Text('正在从学校服务器获取课程表...').fontSize(15).fontColor(ThemeColors.textPrimary).margin({ top: 16 })
+              Text('首次加载约需 3~5 秒，请耐心等待').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 8 })
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else if (this.errorMsg.length > 0) {
             Column() {
@@ -692,7 +792,9 @@ export struct ClassTablePage {
                         if (!cell.isExam) {
                           this.DetailRow('📍 教室', cell.classroom)
                         }
-                        if (!cell.isExam) {
+                        if (cell.isPhysics) {
+                          this.DetailRow('🕐 时段', cell.startSection === 7 ? '下午 (15:55-18:10)' : '晚上 (18:30-20:45)')
+                        } else if (!cell.isExam) {
                           this.DetailRow('🕐 节次', '第' + cell.startSection + '-' + cell.endSection + '节')
                         }
                         this.DetailRow('📅 周次', cell.weekDesc || '未设置')
@@ -924,7 +1026,7 @@ export struct ClassTablePage {
       .opacity(this.currentWeek <= 1 ? 0.3 : 1.0)
       .onClick(() => { this.changeWeek(this.currentWeek - 1); })
 
-      Text(this.getWeekRangeLabel()).fontSize(15).fontColor('#2979FF').fontWeight(FontWeight.Medium)
+      Text(this.getWeekRangeLabel()).fontSize(15).fontColor(ThemeColors.isDark ? '#64B5F6' : '#2979FF').fontWeight(FontWeight.Medium)
         .margin({ left: 12, right: 12 })
 
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
@@ -957,9 +1059,16 @@ export struct ClassTablePage {
 
   // 统一颜色获取方法：考试→红色系，实验→橙色系，课程→蓝色系
   private getCellColor(cell: ClassCell): string {
-    if (cell.isExam) return EXAM_COLORS[cell.colorIndex % EXAM_COLORS.length];
-    if (cell.isExperiment) return EXP_COLORS[cell.colorIndex % EXP_COLORS.length];
-    return CLASS_COLORS[cell.colorIndex % CLASS_COLORS.length];
+    if (cell.isExam) {
+      const arr: string[] = ThemeColors.isDark ? EXAM_COLORS_DK : EXAM_COLORS;
+      return arr[cell.colorIndex % arr.length];
+    }
+    if (cell.isExperiment) {
+      const arr: string[] = ThemeColors.isDark ? EXP_COLORS_DK : EXP_COLORS;
+      return arr[cell.colorIndex % arr.length];
+    }
+    const arr: string[] = ThemeColors.isDark ? CLASS_COLORS_DK : CLASS_COLORS;
+    return arr[cell.colorIndex % arr.length];
   }
 
   // 计算某个节次在含分隔行的网格中的 Y 偏移
@@ -1126,7 +1235,7 @@ export struct ClassTablePage {
               Text(this.getDateStr(this.currentWeek, idx + 1)).fontSize(10)
                 .fontColor(idx === new Date().getDay() - 1 ? '#FFFFFF99' : ThemeColors.textSecondary)
             }.layoutWeight(1).height(44)
-            .backgroundColor(idx === new Date().getDay() - 1 ? '#2979FF' : ThemeColors.bgCard)
+            .backgroundColor(idx === new Date().getDay() - 1 ? (ThemeColors.isDark ? '#1A3A6C' : '#2979FF') : ThemeColors.bgCard)
             .borderRadius(8)
             .justifyContent(FlexAlign.Center)
           }, (name: string, idx: number) => `day_${idx}`)
@@ -1660,5 +1769,92 @@ export struct ClassTablePage {
       item.startSection === cell.startSection && item.endSection === cell.endSection
     );
     this.showAddCourseDialog = true;
+  }
+
+  // 后台获取物理实验（wlsy.xidian.edu.cn），有密码才尝试，没数据也不报错
+  private async mergePhysicsExperiments(): Promise<void> {
+    const PHYSICS_CACHE = 'physics_exp_cache';
+    const CACHE_TTL = 30 * 60 * 1000; // 30 分钟
+    const pwd = PreferenceUtil.getString('physics_pwd');
+    if (pwd.length === 0) return; // 无密码，跳过
+    try {
+      let items: Record<string, string>[] = [];
+      let cached = PreferenceUtil.getString(PHYSICS_CACHE);
+      if (cached.length > 0) {
+        try {
+          let co = JSON.parse(cached) as Record<string, Object>;
+          if (Date.now() - (co['ts'] as number) < CACHE_TTL) {
+            items = co['data'] as Record<string, string>[];
+          }
+        } catch (_e) { PreferenceUtil.putString(PHYSICS_CACHE, ''); }
+      }
+      if (items.length === 0) {
+        let http = HttpUtil.getInstance();
+        let account = PreferenceUtil.getString('ids_account');
+        let bd = '__EVENTTARGET=&__EVENTARGUMENT=&__VIEWSTATE=%2FwEPDwUKMTEzNzM0MjM0OWQYAQUeX19Db250cm9sc1JlcXVpcmVQb3N0QmFja0tleV9fFgEFD2xvZ2luMSRidG5Mb2dpbkOuzGVaztce4Ict7jsIJ0F5pUDb%2BsmSbCCrNVSBlPML&__VIEWSTATEGENERATOR=EE008CD9&__EVENTVALIDATION=%2FwEdAAcKecdPGDB%2BfW8Tyghx7AeSpOzeiNZ7aaEg5p6LqSa9cODI2bZwNtRxUKPkisVLf8l8Vv4WhRVIIhZlyYNJO%2BySrDKOhP%2B%2FYMNbVIh74hA2rCYnBBSTsX9SjxiYNNk%2B5kglM%2B6pGIq22Oi5mNu6u6eC2WEBfKAmATKwSpsOL%2FPNcRyi9l8Dnp6JamksyAzjhW4%3D&login1%24StuLoginID='+encodeURIComponent(account)+'&login1%24StuPassword='+encodeURIComponent(pwd)+'&login1%24UserRole=Student&login1%24btnLogin.x=28&login1%24btnLogin.y=14';
+        await http.postRaw('http://wlsy.xidian.edu.cn/PhyEws/default.aspx', bd, 'application/x-www-form-urlencoded');
+        let r = await http.get('http://wlsy.xidian.edu.cn/PhyEws/student/select.aspx');
+        if (r.isOk) {
+          items = this.parsePhysicsToItems(r.body);
+          let pc: ESObject = {'ts':Date.now(),'data':items} as ESObject;
+          PreferenceUtil.putString(PHYSICS_CACHE, JSON.stringify(pc));
+        }
+      }
+      if (items.length > 0) {
+        // 深拷贝当前 grid，合并物理实验
+        let grid: ClassCell[][][] = JSON.parse(JSON.stringify(this.classGrid)) as ClassCell[][][];
+        let merged = 0;
+        for (let it of items) {
+          let d = parseInt(it['weekday'] as string);
+          let s = parseInt(it['startSection'] as string);
+          let e = parseInt(it['endSection'] as string);
+          if (isNaN(d) || isNaN(s) || isNaN(e) || d < 1 || d > 7) continue;
+          let cell = new ClassCell();
+          cell.name = (it['experimentName'] || '物理实验').replace('⚛ ', ''); // 弹窗已自动加🧪前缀
+          cell.classroom = it['lab'] || '';
+          cell.day = d;
+          cell.startSection = s;
+          cell.endSection = e;
+          cell.teacher = it['teacher'] || '';
+          cell.isExperiment = true;
+          cell.isPhysics = true;
+          cell.experimentProject = it['experimentProject'] || '';
+          cell.weekDesc = '第' + (it['week'] || '?') + '周';
+          cell.colorIndex = 0;
+          grid[d][s].push(cell);
+          merged++;
+        }
+        if (merged > 0) {
+          this.classGrid = grid;
+          console.info('ClassTablePage', 'mergePhysicsExperiments: merged ' + merged);
+        }
+      }
+    } catch (_e) { /* 无物理实验或网络错误，静默 */ }
+  }
+
+  // 从物理实验 HTML 解析为简单记录（与 ExperimentPage.parsePhysicsHtml 逻辑一致）
+  private parsePhysicsToItems(html: string): Record<string, string>[] {
+    let items: Record<string, string>[] = [];
+    let trs = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi);
+    if (!trs) return items;
+    for (let tr of trs) {
+      let tds: string[] = []; let tm: RegExpExecArray|null; let tr2 = new RegExp(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+      while((tm=tr2.exec(tr))!==null) tds.push(tm[1].replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').trim());
+      if (tds.length < 10 || tds[1].length === 0) continue;
+      let dp = (tds[4]||'').split('/'); let isPM = (tds[3]||'').includes('15');
+      let it: Record<string, string> = {
+        'experimentName': '⚛ ' + tds[1], 'lab': tds[5] || '',
+        'teacher': tds[9] || '', 'experimentProject': tds[8] || '',
+        'weekday': '0', 'startSection': isPM ? '7' : '9', 'endSection': isPM ? '9' : '11',
+        'week': '0', '__week': '0'
+      };
+      if(dp.length >= 3) {
+        let dt = new Date(parseInt(dp[2]), parseInt(dp[0])-1, parseInt(dp[1]));
+        it['weekday'] = String(dt.getDay()===0 ? 7 : dt.getDay());
+        it['startSection'] = isPM ? '7' : '9'; it['endSection'] = isPM ? '9' : '11';
+      }
+      items.push(it);
+    }
+    return items;
   }
 }

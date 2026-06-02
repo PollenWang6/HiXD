@@ -5,6 +5,7 @@ import web_webview from '@ohos.web.webview';
 import cryptoFramework from '@ohos.security.cryptoFramework';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
+import { CasLoginService } from '../../services/CasLoginService';
 
 const TAG: string = 'ElectricityPage';
 
@@ -106,6 +107,9 @@ export struct ElectricityPage {
   private ssoDone: boolean = false;
 
   aboutToAppear(): void {
+    // WebView SSO 加载前同步 HTTP cookie（TGC）到 WebView CookieJar
+    CasLoginService.getInstance().syncCookiesToWebView();
+
     // 静默模式：自动刷新后 pop
     const silent: boolean = AppStorage.Get('electricity_silent') as boolean;
     if (silent === true) {
