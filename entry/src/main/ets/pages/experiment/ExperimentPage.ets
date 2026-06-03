@@ -1,4 +1,4 @@
-// ExperimentPage.ets - 实验信息页面（HTTP 数据获取，参考 Flutter sysj_session.dart）
+// ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { ExperimentData, ExperimentType, TimeRange, SemesterUtil } from '../../services/EhallService';

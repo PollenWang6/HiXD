@@ -121,25 +121,15 @@ struct MainPage {
     // 立即显示界面，后台检查登录
     this.username = PreferenceUtil.getString('ids_account');
     this.computeCacheSizeDirect();
-    // 补填 ids_account：如果 ids_account 为空但 login_username 已保存，直接用 login_username（西电统一认证账号就是学号）
-    if (!this.username || this.username.length === 0) {
-      const savedUsername = PreferenceUtil.getString('login_username');
-      if (savedUsername && savedUsername.length > 0) {
-        PreferenceUtil.putString('ids_account', savedUsername);
-        this.username = savedUsername;
-        console.info('MainPage', 'ids_account auto-filled from login_username: ' + savedUsername);
-      }
-    }
-    this.isLoggedIn = PreferenceUtil.getBool('is_logged_in');
+    // 基于 ids_account 判断登录状态（无 is_logged_in 标记）
+    this.isLoggedIn = this.username.length > 0;
     this.phyPwdStatus = PreferenceUtil.getString('physics_pwd').length > 0 ? '已设置' : '未设置';
-    // 初始化主题（传 context 以读取系统实际模式）
-    // 恢复深色设置
     const savedMode: number = PreferenceUtil.getNumber('theme_color_mode',
       ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     ThemeColors.init(savedMode, getContext());
-    // 不信任本地标记，始终先显示"验证中"，等 HTTP 检测结果
     this.loginStatus = 'checking';
-    this.checkLoginInBackground();
+    // TGC 优先 → 密码兜底，一步完成
+    this.checkLogin();
     this.loadClassPreview();
     this.initCacheDirs();
   }
@@ -159,98 +149,28 @@ struct MainPage {
     this.stopRetryTimer();
   }
 
-  async checkLoginInBackground() {
-    // 先停掉旧的轮询
-    this.stopRetryTimer();
-
-    if (!this.isLoggedIn) {
-      // 本地标记未登录，但仍尝试探测+自动恢复
-      try {
+  // 自动登录检测：TGC → 密码，简单直接
+  async checkLogin() {
+    try {
+      const cas = CasLoginService.getInstance();
+      const loggedIn: boolean = await cas.checkAndAutoLogin();
+      if (loggedIn) {
+        // 验证 session 真实有效
         const ehall = EhallService.getInstance();
-        const reallyLoggedIn = await ehall.checkEhallLogin();
+        const reallyLoggedIn: boolean = await ehall.checkEhallLogin();
         if (reallyLoggedIn) {
           this.isLoggedIn = true;
           this.loginStatus = 'ok';
-          this.stopRetryTimer();
-          await PreferenceUtil.putBool('is_logged_in', true);
-          await CasLoginService.getInstance().syncCookiesToWebView();
+          await cas.syncCookiesToWebView();
           this.startPreload();
-        } else {
-          // 无论是否有历史记录，都尝试一次 CAS 自动恢复
-          // 因为 IDS TGC 可能仍有效（浏览器环境共享）
-          console.info('MainPage', 'Not logged in, attempting auto-login...');
-          const restored = await ehall.tryAutoRestoreLogin();
-          if (restored) {
-            this.isLoggedIn = true;
-            this.loginStatus = 'ok';
-            await PreferenceUtil.putBool('is_logged_in', true);
-            this.startPreload();
-            console.info('MainPage', 'Auto-login restored successfully');
-          } else {
-            const hadSession = PreferenceUtil.getString('ids_account').length > 0;
-            this.loginStatus = hadSession ? 'expired' : 'not_logged_in';
-            console.info('MainPage', 'Auto-login failed, status=' + this.loginStatus);
-            // 自动跳转LoginPage重新登录（已保存凭据时，仅自动尝试1次防循环）
-            if (PreferenceUtil.getString('login_password').length > 0 &&
-              PreferenceUtil.getNumber('auto_login_attempts', 0) < 1) {
-              PreferenceUtil.putNumber('auto_login_attempts', PreferenceUtil.getNumber('auto_login_attempts', 0) + 1);
-              PreferenceUtil.putBool('auto_login_next', true);
-              setTimeout(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); }, 500);
-            }
-          }
-        }
-      } catch (e) {
-        if (JSON.stringify(e).includes('NETWORK_ERROR')) {
-          this.loginStatus = 'no_network';
-          this.startRetryTimer();
-        } else {
-          this.loginStatus = 'not_logged_in';
-          this.stopRetryTimer();
+          return;
         }
       }
-      return;
-    }
-    this.loginStatus = 'checking';
-    try {
-      const ehall = EhallService.getInstance();
-      const reallyLoggedIn = await ehall.checkEhallLogin();
-      if (!reallyLoggedIn) {
-        // Cookie 过期，尝试自动恢复
-        console.info('MainPage', 'Session expired (was logged in), attempting auto-login...');
-        const restored = await ehall.tryAutoRestoreLogin();
-        if (restored) {
-          this.isLoggedIn = true;
-          this.loginStatus = 'ok';
-          this.stopRetryTimer();
-          await PreferenceUtil.putBool('is_logged_in', true);
-          this.startPreload();
-          console.info('MainPage', 'Auto-login restored successfully');
-        } else {
-          this.isLoggedIn = false;
-          this.loginStatus = 'expired';
-          this.stopRetryTimer();
-          await PreferenceUtil.putBool('is_logged_in', false);
-          console.info('MainPage', 'Auto-login failed, showing expired');
-          // 自动跳转LoginPage重新登录（仅自动尝试1次防循环）
-          if (PreferenceUtil.getString('login_password').length > 0 &&
-            PreferenceUtil.getNumber('auto_login_attempts', 0) < 1) {
-            PreferenceUtil.putNumber('auto_login_attempts', PreferenceUtil.getNumber('auto_login_attempts', 0) + 1);
-            PreferenceUtil.putBool('auto_login_next', true);
-            setTimeout(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); }, 500);
-          }
-        }
-      } else {
-        this.loginStatus = 'ok';
-        this.stopRetryTimer();
-        await CasLoginService.getInstance().syncCookiesToWebView();
-        this.startPreload();
-        if (!this.username) {
-          const sid = await ehall.fetchStudentId();
-          if (sid) {
-            await PreferenceUtil.putString('ids_account', sid);
-            this.username = sid;
-          }
-        }
+      this.isLoggedIn = false;
+      const hasCred: boolean = PreferenceUtil.getString('ids_account').length > 0;
+      this.loginStatus = hasCred ? 'expired' : 'not_logged_in';
+      if (hasCred && PreferenceUtil.getString('login_password').length > 0) {
+        setTimeout(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); }, 500);
       }
     } catch (e) {
       this.loginStatus = 'no_network';
@@ -259,10 +179,9 @@ struct MainPage {
   }
 
   private startRetryTimer() {
-    // 每10秒自动重试,直到网络恢复
     this.retryTimer = setInterval(() => {
       if (this.loginStatus === 'no_network') {
-        this.checkLoginInBackground();
+        this.checkLogin();
       }
     }, 10000) as number;
   }
@@ -1374,8 +1293,8 @@ struct MainPage {
             ListItem() {
               this.MenuItemBuilder('🔓', '退出登录', '清除登录状态', '#FF5252',
                 async () => {
-                  await PreferenceUtil.putBool('is_logged_in', false);
                   await PreferenceUtil.putString('ids_account', '');
+                  await PreferenceUtil.putString('login_password', '');
                   await HttpUtil.getInstance().clearCookies();
                   this.isLoggedIn = false;
                   this.username = '';

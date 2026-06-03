@@ -345,6 +345,46 @@ export class CasLoginService {
     return await this.postLogin(username, password, fields, onProgress);
   }
 
+  // ========== 自动登录（TGC 优先 → 密码兜底）==========
+  // 不依赖持久化标记，直接用 HTTP 检测真实登录状态
+  // 返回值：true=已登录，false=需要手动登录
+  async checkAndAutoLogin(): Promise<boolean> {
+    // Step 1: TGC 自动恢复（已有 cookie，无需密码）
+    try {
+      const restored: boolean = await this.tryAutoRestoreLogin();
+      if (restored) {
+        console.info(TAG, 'checkAndAutoLogin: TGC restored');
+        return true;
+      }
+    } catch (e) {
+      console.warn(TAG, 'checkAndAutoLogin: TGC restore failed: ' + String(e));
+    }
+
+    // Step 2: 用保存的密码正式登录
+    const username: string = PreferenceUtil.getString('ids_account');
+    const password: string = PreferenceUtil.getString('login_password');
+    if (username.length === 0 || password.length === 0) {
+      console.info(TAG, 'checkAndAutoLogin: no saved credentials');
+      return false;
+    }
+
+    try {
+      // 直接走完整登录流程（需要滑块验证码）
+      const success: boolean = await this.login(username, password, async (): Promise<TrackPoint[]> => {
+        // 自动登录无法弹滑块，返回空轨迹让 login 知道需要手动
+        return [];
+      });
+      if (success) {
+        console.info(TAG, 'checkAndAutoLogin: password login success');
+        return true;
+      }
+    } catch (e) {
+      console.warn(TAG, 'checkAndAutoLogin: password login failed: ' + String(e));
+    }
+
+    return false;
+  }
+
   // ========== 尝试自动恢复登录（无需密码）==========
   // 如果 CAS TGC (Ticket Granting Cookie) 仍有效，
   // 直接访问 login?service= 就会 302 到 ehall 并签发新 MOD_AUTH_CAS
@@ -474,7 +514,7 @@ export class CasLoginService {
 
   // ========== 加密工具 ==========
 
-  // AES 加密密码（匹配 Flutter 版实现）
+  // AES 加密密码
   private async encryptPassword(password: string, salt: string): Promise<string> {
     // 构建待加密文本
     const prefix: string = 'xidianscriptsxduxidianscriptsxduxidianscriptsxduxidianscriptsxdu';
@@ -493,7 +533,7 @@ export class CasLoginService {
     return await this.aesEncryptBase64(textEncoder.encodeInto(plainText), key16, ivBytes);
   }
 
-  // 加密滑块验证 payload（匹配 Flutter 版 SliderCaptchaClientProvider._encryptPayload）
+  // 加密滑块验证 payload
   private async encryptCaptchaPayload(payload: VerifyRequest, pieceBase64: string): Promise<string> {
     // 从图片末尾提取 AES key（最后 16 字节）
     const textEncoder: util.TextEncoder = new util.TextEncoder();

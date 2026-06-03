@@ -230,7 +230,7 @@ export class EhallService {
       const restored = await cas.tryAutoRestoreLogin();
       if (restored) {
         console.info(TAG, 'tryAutoRestoreLogin: CAS redirect completed, re-verifying...');
-        // Re-verify with ehall API (same as Flutter isLoggedIn())
+        // 重新验证 ehall 登录状态
         const reVerified = await this.checkEhallLogin();
         if (reVerified) {
           console.info(TAG, 'tryAutoRestoreLogin: CAS restore verified, session valid');

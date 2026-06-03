@@ -3,6 +3,7 @@
 import web_webview from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { common } from '@kit.AbilityKit';
+import { CasLoginService } from '../../services/CasLoginService';
 const TAG = 'PortalWebPage';
 
 // 需要拉起外部 App 的自定义 scheme（微信支付、支付宝等）
@@ -41,6 +42,10 @@ export struct PortalWebPage {
           Stack() {
             Web({ src: this.url, controller: this.webController })
               .onControllerAttached(() => {
+                // 只对 CAS 保护域名的页面同步 cookie，避免污染 libspace/sysj 等独立站点
+                if (!this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('zfw')) {
+                  CasLoginService.getInstance().syncCookiesToWebView();
+                }
                 if (this.useWeChatUA) {
                   this.webController.setCustomUserAgent(WE_CHAT_UA);
                 }

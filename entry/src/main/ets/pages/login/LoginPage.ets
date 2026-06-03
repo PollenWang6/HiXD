@@ -43,20 +43,8 @@ struct LoginPage {
   private readonly dragLimit: number = 240; // PUZZLE_WIDTH - SLIDER_RIGHT_PADDING = 280-40
 
   aboutToAppear(): void {
-    if (PreferenceUtil.getBool('is_logged_in')) {
-      this.statusText = '检测到已保存的登录状态，正在验证...';
-      setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 500);
-      return;
-    }
-    this.username = PreferenceUtil.getString('login_username');
+    this.username = PreferenceUtil.getString('ids_account');
     this.password = PreferenceUtil.getString('login_password');
-    const autoLogin: boolean = PreferenceUtil.getBool('auto_login_next');
-    if (autoLogin) {
-      PreferenceUtil.putBool('auto_login_next', false);
-      if (this.username.length > 0 && this.password.length > 0) {
-        setTimeout(() => { this.doLogin(); }, 300);
-      }
-    }
   }
 
   // ===== 登录流程 =====
@@ -66,7 +54,7 @@ struct LoginPage {
   async doLogin(): Promise<void> {
     if (this.username.length === 0) { this.statusText = '请输入学号'; return; }
     if (this.password.length === 0) { this.statusText = '请输入密码'; return; }
-    PreferenceUtil.putString('login_username', this.username);
+    PreferenceUtil.putString('ids_account', this.username);
     PreferenceUtil.putString('login_password', this.password);
     this.statusText = '';
     this.captchaError = '';
@@ -83,8 +71,6 @@ struct LoginPage {
 
       // TGC 有效 → CAS 直接 302 到 ehall，没有登录表单
       if (!fields.execution) {
-        await PreferenceUtil.putBool('is_logged_in', true);
-        PreferenceUtil.putNumber('auto_login_attempts', 0);
         this.statusText = '自动登录成功！';
         setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 400);
         return;
@@ -144,8 +130,8 @@ struct LoginPage {
       );
 
       if (success) {
-        await PreferenceUtil.putBool('is_logged_in', true);
-        PreferenceUtil.putNumber('auto_login_attempts', 0);
+        PreferenceUtil.putString('ids_account', this.username);
+        PreferenceUtil.putString('login_password', this.password);
         EhallService.getInstance().clearSessionCache();
         await this.cas.syncCookiesToWebView();
         this.statusText = '登录成功！';
