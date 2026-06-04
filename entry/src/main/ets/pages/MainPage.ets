@@ -94,8 +94,11 @@ struct MainPage {
   @State phyPwdInput: string = '';
   @State phyPwdStatus: string = '未设置';
   @State showThemeDialog: boolean = false;
+  @State warmupActive: boolean = false;
+  private warmupUrl: string = 'https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1';
 
   private tabsController: HdsTabsController = new HdsTabsController();
+  private warmupController: web_webview.WebviewController = new web_webview.WebviewController();
   private retryTimer: number = -1;
   private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
   // 应用级缓存目录（异步初始化，供 computeCacheSizeDirect 同步使用）
@@ -162,6 +165,7 @@ struct MainPage {
           this.isLoggedIn = true;
           this.loginStatus = 'ok';
           await cas.syncCookiesToWebView();
+          this.warmupActive = true;
           this.startPreload();
           return;
         }
@@ -762,6 +766,23 @@ struct MainPage {
 
   build() {
     Stack() {
+    // 隐形 WebView：冷启动时走一遍 CAS OAuth 链刷新 session cookie
+    if (this.warmupActive) {
+      Web({ src: this.warmupUrl, controller: this.warmupController })
+        .width('100%')
+        .height('100%')
+        .onPageEnd((event) => {
+          if (event && event.url && event.url.indexOf('order.xidian.edu.cn') >= 0) {
+            console.error(TAG, 'warmup done: ' + event.url);
+            setTimeout(() => { this.warmupActive = false; }, 2000);
+          }
+        })
+        .onErrorReceive(() => {
+          console.error(TAG, 'warmup error, disabling');
+          setTimeout(() => { this.warmupActive = false; }, 5000);
+        })
+        .domStorageAccess(true)
+    }
     Navigation(this.pageInfo) {
       if (deviceInfo.distributionOSApiVersion >= 60100) {
         HdsTabs({ controller: this.tabsController }) {
@@ -1187,12 +1208,6 @@ struct MainPage {
       Divider().color('#F0F0F0')
 
       List({ space: 8 }) {
-        // 提示：首次使用需先进入订水系统初始化
-        ListItem() {
-          Row() {
-            Text('💡 水电缴费/移动门户等需要先进入「订水系统」完成初始化').fontSize(11).fontColor(ThemeColors.textHint)
-          }.width('100%').padding({ left: 4, right: 4, top: 2, bottom: 2 })
-        }
         // 外部浏览器跳转
         ListItem() {
           this.MenuItemBuilder('💰', '水电缴费', '线上一键缴纳水电费用', '#E65100',

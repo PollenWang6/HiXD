@@ -105,10 +105,12 @@ export struct ElectricityPage {
   private isSilent: boolean = false;
   private http: HttpUtil = HttpUtil.getInstance();
   private ssoDone: boolean = false;
+  @State webViewSrc: string = '';
 
-  aboutToAppear(): void {
-    // WebView SSO 加载前同步 HTTP cookie（TGC）到 WebView CookieJar
-    CasLoginService.getInstance().syncCookiesToWebView();
+  async aboutToAppear(): Promise<void> {
+    // 先同步 HTTP cookie 到 WebView，再加载 SSO 页面（避免 cookie 未就绪的竞态）
+    await CasLoginService.getInstance().syncCookiesToWebView();
+    this.webViewSrc = SSO_ENTRY;
 
     // 静默模式：自动刷新后 pop
     const silent: boolean = AppStorage.Get('electricity_silent') as boolean;
@@ -485,7 +487,7 @@ export struct ElectricityPage {
     NavDestination() {
       Stack() {
         // 隐藏 WebView（全尺寸，被 UI 层覆盖，仅做 SSO 拿 code）
-        Web({ src: SSO_ENTRY, controller: this.webController })
+        Web({ src: this.webViewSrc, controller: this.webController })
           .width('100%').height('100%')
           .javaScriptAccess(true)
           .domStorageAccess(true)

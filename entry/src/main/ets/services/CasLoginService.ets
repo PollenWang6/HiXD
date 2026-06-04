@@ -411,6 +411,10 @@ export class CasLoginService {
       loopGuard++;
     }
 
+    // 跨域 Cookie 修复：NETSTACK getNoRedirect 按原始 URL 域名存 cookie，
+    // TGC 刷新出的 MOD_AUTH_CAS 会被存到 ids.xidian.edu.cn 下，
+    // 但 checkEhallLogin() 查的是 ehall.xidian.edu.cn，需要显式复制。
+    this.http.copyCookiesForDomain('ids.xidian.edu.cn', 'ehall.xidian.edu.cn');
     await this.http.saveCookies();
 
     const ehallCookies: string = this.http.getCookiesForDomain('ehall.xidian.edu.cn');

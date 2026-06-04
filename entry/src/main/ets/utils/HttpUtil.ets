@@ -205,6 +205,31 @@ export class HttpUtil {
     }
   }
 
+  // 深拷贝整个 cookieStore（对象引用，不受后续修改影响）
+  cloneCookieStore(): Record<string, Record<string, string>> {
+    const clone: Record<string, Record<string, string>> = {};
+    for (const domain of Object.keys(this.cookieStore)) {
+      clone[domain] = {};
+      for (const name of Object.keys(this.cookieStore[domain])) {
+        clone[domain][name] = this.cookieStore[domain][name];
+      }
+    }
+    return clone;
+  }
+
+  // 从快照中恢复指定域名的 cookie（不受字符串序列化丢数据影响）
+  restoreDomainsFromClone(clone: Record<string, Record<string, string>>, domains: string[]): void {
+    for (let i: number = 0; i < domains.length; i++) {
+      const domain: string = domains[i];
+      this.cookieStore[domain] = {};
+      if (clone[domain]) {
+        for (const name of Object.keys(clone[domain])) {
+          this.cookieStore[domain][name] = clone[domain][name];
+        }
+      }
+    }
+  }
+
   // 公开方法，供 CasLoginService 等外部调用者保存 cookie
   saveResponseCookies(domain: string, setCookieHeader: string): void {
     if (!this.cookieStore[domain]) {

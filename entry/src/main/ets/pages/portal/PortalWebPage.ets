@@ -29,6 +29,16 @@ export struct PortalWebPage {
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
   private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
 
+  @State webViewSrc: string = '';
+
+  async aboutToAppear(): Promise<void> {
+    // 先同步 cookie 再设置 WebView 初始 URL（避免竞态）
+    if (!this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('zfw')) {
+      await CasLoginService.getInstance().syncCookiesToWebView();
+    }
+    this.webViewSrc = this.url;
+  }
+
   aboutToDisappear(): void {
     this.portalFullscreen = false;
   }
@@ -40,12 +50,8 @@ export struct PortalWebPage {
 
           // WebView 区域
           Stack() {
-            Web({ src: this.url, controller: this.webController })
+            Web({ src: this.webViewSrc, controller: this.webController })
               .onControllerAttached(() => {
-                // 只对 CAS 保护域名的页面同步 cookie，避免污染 libspace/sysj 等独立站点
-                if (!this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('zfw')) {
-                  CasLoginService.getInstance().syncCookiesToWebView();
-                }
                 if (this.useWeChatUA) {
                   this.webController.setCustomUserAgent(WE_CHAT_UA);
                 }
