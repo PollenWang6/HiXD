@@ -79,7 +79,7 @@ export struct SchoolCardPage {
     }
     .width('100%').height('100%')
     }
-    .title('校园卡')
+    .title('校园卡', { backgroundColor: ThemeColors.bgCard })
     .onReady((ctx: NavDestinationContext) => {})
   }
 }

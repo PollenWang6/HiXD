@@ -442,7 +442,7 @@ export struct ScorePage {
       .width('100%')
       .height('100%')
     }
-    .title('成绩查询')
+    .title('成绩查询', { backgroundColor: ThemeColors.bgCard })
     .onReady((ctx: NavDestinationContext) => {})
     .onBackPressed(() => {
       if (this.selectedCell !== null) {

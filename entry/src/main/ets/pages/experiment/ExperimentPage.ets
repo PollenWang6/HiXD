@@ -436,7 +436,7 @@ export struct ExperimentPage {
           }
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
-    }.title('\u5b9e\u9a8c\u4fe1\u606f')
+    }.title('\u5b9e\u9a8c\u4fe1\u606f', { backgroundColor: ThemeColors.bgCard })
   }
 
   @Builder

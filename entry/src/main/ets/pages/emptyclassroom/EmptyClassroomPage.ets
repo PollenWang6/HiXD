@@ -171,7 +171,7 @@ export struct EmptyClassroomPage {
       }
     }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
   }
-    .title('空闲教室')
+    .title('空闲教室', { backgroundColor: ThemeColors.bgCard })
     .onReady((ctx: NavDestinationContext) => {})
   }
 }

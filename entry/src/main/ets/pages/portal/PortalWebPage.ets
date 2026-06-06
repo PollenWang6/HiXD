@@ -127,7 +127,7 @@ export struct PortalWebPage {
       .width('100%')
       .height('100%')
     }
-    .title(this.customTitle())
+    .title(this.customTitle(), { backgroundColor: ThemeColors.bgCard })
     .hideBackButton(true)
 
 

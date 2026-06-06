@@ -1063,7 +1063,7 @@ export struct ClassTablePage {
       }.width('100%').height('100%')
     }
     .hideBackButton(true)
-    .title({ builder: this.customTitle(), height: 56 })
+    .title({ builder: this.customTitle(), height: 56 }, { backgroundColor: ThemeColors.bgCard })
     .onReady(() => {})
     .onBackPressed(() => {
       if (this.showAddCourseDialog) {

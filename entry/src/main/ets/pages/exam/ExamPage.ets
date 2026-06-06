@@ -144,7 +144,7 @@ export struct ExamPage {
       .height('100%')
       .backgroundColor(ThemeColors.bgPage)
     }
-    .title('考试安排')
+    .title('考试安排', { backgroundColor: ThemeColors.bgCard })
     .onReady((ctx: NavDestinationContext) => {
       // NavDestination 初始化完成
     })

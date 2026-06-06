@@ -688,7 +688,7 @@ export struct ElectricityPage {
       }
       .width('100%').height('100%')
     }
-    .title('水电查询')
+    .title('水电查询', { backgroundColor: ThemeColors.bgCard })
     .onReady((ctx: NavDestinationContext) => {})
   }
 }

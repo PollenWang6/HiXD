@@ -242,7 +242,7 @@ export struct LibraryPage {
       modalTransition: ModalTransition.DEFAULT,
       backgroundColor: Color.Transparent
     })
-    .title('图书馆')
+    .title('图书馆', { backgroundColor: ThemeColors.bgCard })
   }
   @Builder
   bookDetailBuilder() {

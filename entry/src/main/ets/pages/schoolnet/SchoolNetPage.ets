@@ -133,7 +133,7 @@ export struct SchoolNetPage {
       }
     }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
   }
-    .title('校园网')
+    .title('校园网', { backgroundColor: ThemeColors.bgCard })
     .onReady((ctx: NavDestinationContext) => {})
   }
 }
