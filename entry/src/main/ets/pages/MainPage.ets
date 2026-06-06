@@ -80,6 +80,7 @@ class PreviewCell {
 @Component
 struct MainPage {
   onBackPress(): boolean {
+    if (this.showSemesterDialog) { this.showSemesterDialog = false; return true; }
     if (this.showWheelPicker) { this.showWheelPicker = false; return true; }
     if (this.showColorPicker) { this.showColorPicker = false; return true; }
     if (this.showThemeDialog) { this.showThemeDialog = false; return true; }
@@ -118,6 +119,10 @@ struct MainPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('accent_index') accentIdx: number = 0;
   private retryTimer: number = -1;
+  @State showSemesterDialog: boolean = false;
+  @State pickSemYear: number = 2025;
+  @State pickSemPart: number = 2;
+  @State pickWeekSwift: number = 0;
   @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
   @State currentThemeLabel: string = '当前：浅色模式';
   @State warmupActive: boolean = false;
@@ -1307,23 +1312,115 @@ struct MainPage {
               .onClick(() => { this.showWheelPicker = false; })
           }.width('100%').margin({ bottom: 12 })
           ColorWheelPicker({
-            onApply: () => {
+            onCancel: () => {
               this.showWheelPicker = false;
               this.showColorPicker = false;
             }
           })
         }
-        .width('90%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+        .width('310vp').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
         .shadow({ radius: 20, color: '#30000000' })
+        .onClick(() => { /* 吞掉事件，阻止穿透到遮罩关闭 */ })
       }
       .width('100%').height('100%')
       .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
       .backgroundColor(ThemeColors.overlay)
       .onClick(() => { this.showWheelPicker = false; })
     }
+    // 学期设置弹窗
+    if (this.showSemesterDialog) {
+      Column() {
+        Column() {
+          Row() {
+            Text('学期设置').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+            Blank()
+            Row() { Text('✕').fontSize(18).fontColor('#999999') }
+              .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+              .justifyContent(FlexAlign.Center)
+              .onClick(() => { this.showSemesterDialog = false; })
+          }.width('100%').margin({ bottom: 14 })
+          // 当前学期
+          Text(SemesterUtil.formatSemester(SemesterUtil.getCurrentSemesterCode()))
+            .fontSize(14).fontColor(ThemeColors.textSecondary).margin({ bottom: 14 }).width('100%')
+          // 学年度
+          Text('学年度').fontSize(12).fontColor(ThemeColors.textHint).margin({ bottom: 6 })
+          Row() {
+            Button('‹').fontSize(22).width(40).height(40).fontColor(this.accentColor)
+              .backgroundColor(Color.Transparent)
+              .onClick(() => { if (this.pickSemYear > 2016) this.pickSemYear--; })
+            Text(this.pickSemYear + '-' + (this.pickSemYear + 1)).fontSize(18).fontWeight(FontWeight.Medium)
+              .fontColor(ThemeColors.textPrimary).fontFamily('monospace').width(120).textAlign(TextAlign.Center)
+            Button('›').fontSize(22).width(40).height(40).fontColor(this.accentColor)
+              .backgroundColor(Color.Transparent)
+              .onClick(() => { if (this.pickSemYear < new Date().getFullYear() + 1) this.pickSemYear++; })
+          }.width('100%').justifyContent(FlexAlign.Center).margin({ bottom: 14 })
+          // 学期选择
+          Text('学期').fontSize(12).fontColor(ThemeColors.textHint).margin({ bottom: 6 })
+          Row() {
+            Button('秋季学期').height(40).fontSize(14)
+              .backgroundColor(this.pickSemPart === 1 ? this.accentColor : ThemeColors.bgInput)
+              .fontColor(this.pickSemPart === 1 ? '#FFFFFF' : ThemeColors.textPrimary)
+              .borderRadius(10).layoutWeight(1)
+              .onClick(() => { this.pickSemPart = 1; })
+            Button('春季学期').height(40).fontSize(14)
+              .backgroundColor(this.pickSemPart === 2 ? this.accentColor : ThemeColors.bgInput)
+              .fontColor(this.pickSemPart === 2 ? '#FFFFFF' : ThemeColors.textPrimary)
+              .borderRadius(10).layoutWeight(1).margin({ left: 10 })
+              .onClick(() => { this.pickSemPart = 2; })
+          }.width('100%').margin({ bottom: 16 })
+          // 周次偏移
+          Text('周次偏移（±几周）').fontSize(12).fontColor(ThemeColors.textHint).margin({ bottom: 6 })
+          Row() {
+            Button('−').fontSize(20).width(40).height(36).fontColor(this.accentColor)
+              .backgroundColor(Color.Transparent)
+              .onClick(() => { if (this.pickWeekSwift > -8) this.pickWeekSwift--; })
+            Text(this.pickWeekSwift >= 0 ? '+' + this.pickWeekSwift.toString() : this.pickWeekSwift.toString())
+              .fontSize(16).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+              .fontFamily('monospace').width(50).textAlign(TextAlign.Center)
+            Button('+').fontSize(20).width(40).height(36).fontColor(this.accentColor)
+              .backgroundColor(Color.Transparent)
+              .onClick(() => { if (this.pickWeekSwift < 8) this.pickWeekSwift++; })
+          }.width('100%').justifyContent(FlexAlign.Center).margin({ bottom: 16 })
+          // 按钮
+          Row() {
+            Button('取消').height(40).fontSize(14)
+              .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary).borderRadius(10)
+              .layoutWeight(1)
+              .onClick(() => { this.showSemesterDialog = false; })
+            Button('保存').height(40).fontSize(14)
+              .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
+              .layoutWeight(1).margin({ left: 10 })
+              .onClick(() => {
+                const code = this.pickSemYear + '-' + (this.pickSemYear + 1) + '-' + this.pickSemPart;
+                PreferenceUtil.putString('current_semester', code);
+                PreferenceUtil.putNumber('week_swift', this.pickWeekSwift);
+                this.showSemesterDialog = false;
+              })
+          }.width('100%')
+        }
+        .width('85%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+        .shadow({ radius: 20, color: '#30000000' })
+        .onClick(() => {})
+      }
+      .width('100%').height('100%')
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .backgroundColor(ThemeColors.overlay)
+      .onClick(() => { this.showSemesterDialog = false; })
+    }
     } // closes Stack
     .width('100%').height('100%')
   }
+
+  // 根据主题色亮度选择白色或黑色文字
+  private accentTextColor(): string {
+    const hex = this.accentColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b); // W3C 亮度公式
+    return lum > 160 ? '#333333' : '#FFFFFF';
+  }
+
   // 课表预览卡片
   @Builder
   ClassPreviewCard() {
@@ -1513,7 +1610,7 @@ struct MainPage {
       // 顶部导航栏
       Row() {
         Column() {
-          Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+          Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
           if (this.loginStatus === 'ok') {
             Text('已登录').fontSize(11).fontColor('#FF80CC80')
           } else if (this.loginStatus === 'expired') {
@@ -1616,10 +1713,10 @@ struct MainPage {
     Column() {
       // 顶部
       Row() {
-        Text('更多功能').fontSize(24).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        Text('更多功能').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
       }
       .width('100%').height(56).padding({ left: 20 })
-      .backgroundColor(ThemeColors.bgCard)
+      .backgroundColor(this.accentColor)
       Divider().color('#F0F0F0')
 
       List({ space: 8 }) {
@@ -1670,10 +1767,10 @@ struct MainPage {
     Column() {
       // 顶部
       Row() {
-        Text('我的').fontSize(24).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        Text('我的').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
       }
       .width('100%').height(56).padding({ left: 20 })
-      .backgroundColor(ThemeColors.bgCard)
+      .backgroundColor(this.accentColor)
       Divider().color('#F0F0F0')
 
       // 用户区域：已登录显示信息卡片，未登录显示登录入口，下方菜单始终可见
@@ -1741,7 +1838,7 @@ struct MainPage {
                 }.margin({ right: 16 })
                 Column() {
                   Text('主题色').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                  Text(AccentColors.currentName).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                  Text(this.accentIdx === -1 ? '自定义' : (ACCENT_PRESETS[this.accentIdx]?.[1] ?? '')).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
                 }.layoutWeight(1)
                 Text('›').fontSize(20).fontColor('#CCCCCC')
               }
@@ -1754,6 +1851,32 @@ struct MainPage {
               this.MenuItemBuilder('❓', '常见问题', '使用帮助和问题反馈', '#795548',
                 () => { this.pageInfo.clear();
                   this.pageInfo.pushPath({ name: 'FaqPage' }); })
+            }
+            if (this.isLoggedIn) {
+            ListItem() {
+              Row() {
+                Stack({ alignContent: Alignment.Center }) {
+                  Circle().width(44).height(44).fill('#546E7A22')
+                  Text('📅').fontSize(22)
+                }.margin({ right: 16 })
+                Column() {
+                  Text('学期设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                  Text(SemesterUtil.formatSemester(SemesterUtil.getCurrentSemesterCode())).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                }.layoutWeight(1)
+                Text('›').fontSize(20).fontColor('#CCCCCC')
+              }
+              .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+              .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+              .onClick(() => {
+                const cur = SemesterUtil.getCurrentSemesterCode();
+                const parts = cur.split('-');
+                this.pickSemYear = parseInt(parts[0]);
+                this.pickSemPart = parseInt(parts[2]) || 2;
+                this.pickWeekSwift = PreferenceUtil.getNumber('week_swift', 0);
+                this.showSemesterDialog = true;
+              })
+            }
             }
             ListItem() {
               this.MenuItemBuilder('🔓', '退出登录', '清除登录状态', '#FF5252',

@@ -460,15 +460,15 @@ export struct ElectricityPage {
             Column() {
               // 第一行：读表时间 + 用量
               Row() {
-                Text(this.fmtDate(item.date)).fontSize(13).fontColor(ThemeColors.textSecondary)
+                Text(this.fmtDate(item.date)).fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
                 Blank()
                 Text(item.use + ' kWh').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
               }.width('100%')
               // 第二行：上次读数 / 本次读数
               Row() {
-                Text('上次: ' + item.startNum).fontSize(11).fontColor(ThemeColors.textSecondary)
+                Text('上次: ' + item.startNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
                 Blank()
-                Text('本次: ' + item.endNum).fontSize(11).fontColor(ThemeColors.textSecondary)
+                Text('本次: ' + item.endNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
               }.width('100%').margin({ top: 2 })
             }
             .width('100%').padding({ top: 10, bottom: 10 })
@@ -617,10 +617,10 @@ export struct ElectricityPage {
                       ForEach(this.waterDailyItems, (item: DailyItem, index: number) => {
                         Row() {
                           // 四列：读表时间 / 用量 / 本次读数 / 上次读数
-                          Text(this.fmtDate(item.date)).fontSize(12).fontColor(ThemeColors.textSecondary).width('25%')
+                          Text(this.fmtDate(item.date)).fontSize(12).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('25%')
                           Text(item.use + ' 吨').fontSize(13).fontWeight(FontWeight.Medium).fontColor('#2196F3').width('20%')
-                          Text('本次:' + item.endNum).fontSize(11).fontColor(ThemeColors.textSecondary).width('27%')
-                          Text('上次:' + item.startNum).fontSize(11).fontColor(ThemeColors.textSecondary).width('28%')
+                          Text('本次:' + item.endNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('27%')
+                          Text('上次:' + item.startNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('28%')
                         }
                         .width('100%').padding({ top: 8, bottom: 8 })
                         if (index < this.waterDailyItems.length - 1) {
@@ -691,6 +691,11 @@ export struct ElectricityPage {
     }
     .title('水电查询', { backgroundColor: this.accentColor })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .onBackPressed(() => {
+      if (this.showMore) { this.showMore = false; return true; }
+      if (this.showMoreWater) { this.showMoreWater = false; return true; }
+      return false;
+    })
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }

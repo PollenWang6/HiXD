@@ -437,8 +437,6 @@ export class CasLoginService {
 
   // Sync cookies to WebView CookieJar，覆盖所有 *.xidian.edu.cn 子域名
   async syncCookiesToWebView(): Promise<void> {
-    // 先快速检查 TGC 是否有效，过期则自动续期
-    await this.tryAutoRestoreLogin();
     const WCM = web_webview.WebCookieManager;
     // 收集所有子域名的 cookie（warmUpWebViewSession 会在 xxcapp/order 下种 session）
     const sourceDomains: string[] = [

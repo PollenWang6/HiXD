@@ -83,10 +83,13 @@ export class SemesterUtil {
     const now = new Date();
     const start = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
     const diff = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return Math.max(1, Math.floor(diff / 7) + 1);
+    const swift = PreferenceUtil.getNumber('week_swift', 0);
+    return Math.max(1, Math.floor(diff / 7) + 1 + swift);
   }
 
   static getCurrentSemesterCode(): string {
+    const saved = PreferenceUtil.getString('current_semester');
+    if (saved.length > 0) return saved;
     const now = new Date();
     const y = now.getFullYear();
     const m = now.getMonth() + 1;

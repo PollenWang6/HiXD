@@ -3,6 +3,7 @@ import { PreferenceUtil } from './PreferenceUtil';
 
 // 预设主题色：[颜色, 名称]
 export const ACCENT_PRESETS: string[][] = [
+  ['#FFFFFF', '雪峰白'],
   ['#2979FF', '西电蓝'],
   ['#1565C0', '深蓝'],
   ['#00ACC1', '青碧'],
@@ -36,7 +37,7 @@ export class AccentColors {
       AppStorage.setOrCreate('accent_index', -1);
       return;
     }
-    const saved: number = PreferenceUtil.getNumber(KEY, 0);
+    const saved: number = PreferenceUtil.getNumber(KEY, 1);
     const idx: number = (saved >= 0 && saved < ACCENT_PRESETS.length) ? saved : 0;
     AppStorage.setOrCreate('accent_color', ACCENT_PRESETS[idx][0]);
     AppStorage.setOrCreate('accent_index', idx);
