@@ -1368,25 +1368,34 @@ struct MainPage {
               .borderRadius(10).layoutWeight(1).margin({ left: 10 })
               .onClick(() => { this.pickSemPart = 2; })
           }.width('100%').margin({ bottom: 16 })
+          // 开学日期预览
+          Text('开学日期：' + this.buildSemesterStartLabel())
+            .fontSize(13).fontColor(ThemeColors.textSecondary).margin({ bottom: 6 }).width('100%')
+          Text('💡 此日期所在周为「第 1 周」，不是精确到某一天开学').fontSize(11).fontColor(ThemeColors.textHint)
+            .margin({ bottom: 14 }).width('100%')
           // 周次偏移
           Text('周次偏移（±几周）').fontSize(12).fontColor(ThemeColors.textHint).margin({ bottom: 6 })
           Row() {
-            Button('−').fontSize(20).width(40).height(36).fontColor(this.accentColor)
+            Button('−').fontSize(22).width(44).height(36).fontColor(this.accentColor)
               .backgroundColor(Color.Transparent)
               .onClick(() => { if (this.pickWeekSwift > -8) this.pickWeekSwift--; })
             Text(this.pickWeekSwift >= 0 ? '+' + this.pickWeekSwift.toString() : this.pickWeekSwift.toString())
               .fontSize(16).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-              .fontFamily('monospace').width(50).textAlign(TextAlign.Center)
-            Button('+').fontSize(20).width(40).height(36).fontColor(this.accentColor)
+              .fontFamily('monospace').width(56).textAlign(TextAlign.Center)
+            Button('+').fontSize(22).width(44).height(36).fontColor(this.accentColor)
               .backgroundColor(Color.Transparent)
               .onClick(() => { if (this.pickWeekSwift < 8) this.pickWeekSwift++; })
           }.width('100%').justifyContent(FlexAlign.Center).margin({ bottom: 16 })
           // 按钮
           Row() {
-            Button('取消').height(40).fontSize(14)
+            Button('恢复默认').height(40).fontSize(14)
               .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary).borderRadius(10)
               .layoutWeight(1)
-              .onClick(() => { this.showSemesterDialog = false; })
+              .onClick(() => {
+                PreferenceUtil.putString('current_semester', '');
+                PreferenceUtil.putNumber('week_swift', 0);
+                this.showSemesterDialog = false;
+              })
             Button('保存').height(40).fontSize(14)
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
               .layoutWeight(1).margin({ left: 10 })
@@ -1419,6 +1428,19 @@ struct MainPage {
     const b = parseInt(hex.substring(4, 6), 16);
     const lum = (0.299 * r + 0.587 * g + 0.114 * b); // W3C 亮度公式
     return lum > 160 ? '#333333' : '#FFFFFF';
+  }
+
+  // 根据当前选中的学年+学期+周次偏移计算开学日期预览
+  private buildSemesterStartLabel(): string {
+    const code = this.pickSemYear + '-' + (this.pickSemYear + 1) + '-' + this.pickSemPart;
+    const d = SemesterUtil.getSemesterStartDate(code);
+    // 加上周次偏移
+    d.setDate(d.getDate() + this.pickWeekSwift * 7);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+    return y + '/' + m + '/' + day + '（周' + weekNames[d.getDay()] + '）';
   }
 
   // 课表预览卡片

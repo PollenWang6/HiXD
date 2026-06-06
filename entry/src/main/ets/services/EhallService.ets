@@ -41,37 +41,19 @@ const APP_PATH_MAP: Map<string, string> = new Map([
 ]);
 
 export class SemesterUtil {
-  private static readonly SEMESTER_START_DATE_2025_2026_2 = new Date(2026, 2, 2);
-
   static getSemesterStartDate(semCodeOrYear: string, termPart?: string): Date {
-    const savedDate: string = PreferenceUtil.getString('semester_start_date');
-    if (savedDate.length > 0) {
-      const clean: string = savedDate.split(' ')[0];
-      const dp: string[] = clean.split('-');
-      if (dp.length === 3) {
-        return new Date(parseInt(dp[0]), parseInt(dp[1]) - 1, parseInt(dp[2]));
-      }
-    }
     let y: number, t: number;
     if (termPart === undefined) {
       const p = semCodeOrYear.split('-');
-      y = parseInt(p[0]);
       t = parseInt(p[2]);
+      // 秋季(1)用第一个年，春季(2)用第二个年
+      y = t === 1 ? parseInt(p[0]) : parseInt(p[1]);
     } else {
       const p = semCodeOrYear.split('-');
       y = parseInt(termPart === '1' ? p[0] : p[1]);
       t = parseInt(termPart);
     }
-    let semCode: string;
-    if (termPart === undefined) {
-      semCode = semCodeOrYear;
-    } else {
-      const pp = semCodeOrYear.split('-');
-      semCode = pp[0] + '-' + pp[1] + '-' + termPart;
-    }
-    if (semCode === '2025-2026-2') {
-      return new Date(SemesterUtil.SEMESTER_START_DATE_2025_2026_2);
-    }
+    // 秋季 9月1日，春季 3月2日，调整到最近的周一
     const start = t === 1 ? new Date(y, 8, 1) : new Date(y, 2, 2);
     const dow = start.getDay();
     const add = dow === 0 ? -6 : dow === 1 ? 0 : 1 - dow;
