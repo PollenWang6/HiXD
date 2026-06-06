@@ -80,7 +80,7 @@ export struct EmptyClassroomPage {
       // 顶部导航
       // 楼栋选择
       if (this.loadingBuildings) {
-        Row() { Text('加载楼栋...').fontSize(13).fontColor(ThemeColors.textSecondary); LoadingProgress().width(16).height(16).margin({ left: 8 }); }
+        Row() { Text('加载楼栋...').fontSize(13).fontColor(ThemeColors.textSecondary); LoadingProgress().width(16).height(16).color(this.accentColor).margin({ left: 8 }); }
           .width('100%').padding({ left: 16, right: 16, top: 8 })
       } else if (this.buildings.length > 0) {
         Scroll() {
@@ -131,7 +131,7 @@ export struct EmptyClassroomPage {
       // 内容区
       if (this.loading) {
         Column() {
-          LoadingProgress().width(40).height(40).color('#F4511E')
+          LoadingProgress().width(40).height(40).color(this.accentColor)
           Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else if (this.errorMsg) {
@@ -173,6 +173,7 @@ export struct EmptyClassroomPage {
     }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
   }
     .title('空闲教室', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }

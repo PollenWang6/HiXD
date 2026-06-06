@@ -64,7 +64,7 @@ struct SchoolNetLoginPage {
           .onClick(() => { router.back(); })
         Text('校园网登录').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
           .layoutWeight(1).textAlign(TextAlign.Center)
-        Text('刷新').fontSize(14).fontColor('#2979FF').width(40).textAlign(TextAlign.End)
+        Text('刷新').fontSize(14).fontColor((AppStorage.get('accent_color') as string ?? '#2979FF')).width(40).textAlign(TextAlign.End)
           .onClick(() => {
             this.isLoading = true;
             this.webController.refresh();

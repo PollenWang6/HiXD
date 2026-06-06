@@ -389,6 +389,7 @@ export class CasLoginService {
   // 如果 CAS TGC (Ticket Granting Cookie) 仍有效，
   // 直接访问 login?service= 就会 302 到 ehall 并签发新 MOD_AUTH_CAS
   async tryAutoRestoreLogin(): Promise<boolean> {
+    console.info(TAG, 'tryAutoRestoreLogin: start');
     const serviceUrl: string = encodeURIComponent(this.SERVICE_URL);
     const loginWithService: string = this.LOGIN_PAGE + '?service=' + serviceUrl;
 
@@ -426,14 +427,18 @@ export class CasLoginService {
         await PreferenceUtil.putString('mod_auth_cas', modMatch[1]);
       }
       await PreferenceUtil.putBool('is_logged_in', true);
+      console.info(TAG, 'tryAutoRestoreLogin: success, has MOD_AUTH_CAS');
       return true;
     }
 
+    console.info(TAG, 'tryAutoRestoreLogin: failed, no MOD_AUTH_CAS, ehallCookies=' + ehallCookies.substring(0, 200));
     return false;
   }
 
   // Sync cookies to WebView CookieJar，覆盖所有 *.xidian.edu.cn 子域名
   async syncCookiesToWebView(): Promise<void> {
+    // 先快速检查 TGC 是否有效，过期则自动续期
+    await this.tryAutoRestoreLogin();
     const WCM = web_webview.WebCookieManager;
     // 收集所有子域名的 cookie（warmUpWebViewSession 会在 xxcapp/order 下种 session）
     const sourceDomains: string[] = [

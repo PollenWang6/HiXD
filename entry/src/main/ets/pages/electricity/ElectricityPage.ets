@@ -515,7 +515,7 @@ export struct ElectricityPage {
           // Loading
           if (this.isLoading) {
             Column() {
-              LoadingProgress().width(48).height(48).color('#FF6D00')
+              LoadingProgress().width(48).height(48).color(this.accentColor)
               Text('正在查询水电...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 16 })
             }
             .width('100%').layoutWeight(1)
@@ -690,6 +690,7 @@ export struct ElectricityPage {
       .width('100%').height('100%')
     }
     .title('水电查询', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }

@@ -181,7 +181,7 @@ export struct LibraryPage {
       if (this.currentTab === 0) {
         if (this.isSearching) {
           Column() {
-            LoadingProgress().width(40).height(40).color('#8E24AA')
+            LoadingProgress().width(40).height(40).color(this.accentColor)
             Text('搜索中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.books.length > 0) {
@@ -244,6 +244,7 @@ export struct LibraryPage {
       backgroundColor: Color.Transparent
     })
     .title('图书馆', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
   }
   @Builder

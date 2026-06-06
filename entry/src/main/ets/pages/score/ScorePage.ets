@@ -274,7 +274,7 @@ export struct ScorePage {
 
           if (this.loading) {
             Column() {
-              LoadingProgress().width(40).height(40).color('#4CAF50')
+              LoadingProgress().width(40).height(40).color(this.accentColor)
               Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
             }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
@@ -395,7 +395,7 @@ export struct ScorePage {
             // 成绩构成详情列表
             if (this.detailLoading) {
               Column() {
-                LoadingProgress().width(32).height(32).color('#4CAF50')
+                LoadingProgress().width(32).height(32).color(this.accentColor)
                   .margin({ top: 20, bottom: 20 })
               }.width('100%')
             } else if (this.currentDetail.length === 0) {
@@ -444,6 +444,7 @@ export struct ScorePage {
       .height('100%')
     }
     .title('成绩查询', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
     .onBackPressed(() => {

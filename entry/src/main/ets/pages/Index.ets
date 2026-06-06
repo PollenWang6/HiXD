@@ -15,8 +15,8 @@ struct Index {
 
   build() {
     Column() {
-      LoadingProgress().width(48).height(48).color('#2979FF')
-      Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor('#2979FF').margin({ top: 16 })
+      LoadingProgress().width(48).height(48).color((AppStorage.get('accent_color') as string ?? '#2979FF'))
+      Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor((AppStorage.get('accent_color') as string ?? '#2979FF')).margin({ top: 16 })
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center)

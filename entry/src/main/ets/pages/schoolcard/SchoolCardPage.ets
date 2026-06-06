@@ -45,7 +45,7 @@ export struct SchoolCardPage {
         // 加载中覆盖层
         if (this.isLoading) {
           Column() {
-            LoadingProgress().width(48).height(48).color('#FF6D00')
+            LoadingProgress().width(48).height(48).color(this.accentColor)
             Text('正在加载校园卡...').fontSize(14).fontColor(ThemeColors.textSecondary)
               .margin({ top: 16 })
           }
@@ -81,6 +81,7 @@ export struct SchoolCardPage {
     .width('100%').height('100%')
     }
     .title('校园卡', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }

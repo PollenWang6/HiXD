@@ -205,7 +205,7 @@ export struct MyPage {
           // 用户信息卡片
           Column() {
             Row() {
-              Circle().width(56).height(56).fill('#2979FF')
+              Circle().width(56).height(56).fill((AppStorage.get('accent_color') as string ?? '#2979FF'))
               Column() {
                 Text(this.username.length > 0 ? this.username : '已登录')
                   .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)

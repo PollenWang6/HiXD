@@ -399,7 +399,7 @@ export struct ExperimentPage {
       Column() {
         if (this.pageState===PageState.LOADING) {
           Column() {
-            LoadingProgress().width(40).height(40).color('#2979FF')
+            LoadingProgress().width(40).height(40).color((AppStorage.get('accent_color') as string ?? '#2979FF'))
             Text(this.statusText).fontSize(14).fontColor(ThemeColors.textSecondary).margin({top:12})
             if(this.fetchProgress.length>0) Text(this.fetchProgress).fontSize(12).fontColor(ThemeColors.textSecondary).margin({top:8})
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -408,7 +408,7 @@ export struct ExperimentPage {
             Text('\ud83d\udccb').fontSize(48)
             Text(this.errorMsg).fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
             Row() {
-              Button('\u91cd\u8bd5').fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF').borderRadius(20).height(36).margin({top:20,right:12}).onClick(()=>{this.doHttpSSOAndFetch();})
+              Button('\u91cd\u8bd5').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(36).margin({top:20,right:12}).onClick(()=>{this.doHttpSSOAndFetch();})
               Button('\u91cd\u65b0\u767b\u5f55').fontSize(14).fontColor('#FFFFFF').backgroundColor('#E53935').borderRadius(20).height(36).margin({top:20}).onClick(()=>{PreferenceUtil.putBool('is_logged_in',false);PreferenceUtil.putString('mod_auth_cas','');router.pushUrl({url:'pages/login/LoginPage'});})
             }
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
@@ -417,14 +417,14 @@ export struct ExperimentPage {
             Text('\ud83e\uddea').fontSize(48)
             Text('\u5b9e\u9a8c\u7cfb\u7edf\u9700\u8981\u5355\u72ec\u767b\u5f55').fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
             Text('\u5c06\u81ea\u52a8\u901a\u8fc7\u7edf\u4e00\u8ba4\u8bc1\u767b\u5f55').fontSize(13).fontColor(ThemeColors.textSecondary).margin({top:6})
-            Button('\u8fdb\u5165\u5b9e\u9a8c\u7cfb\u7edf').fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF').borderRadius(20).height(40).margin({top:20}).onClick(()=>{this.doHttpSSOAndFetch();})
+            Button('\u8fdb\u5165\u5b9e\u9a8c\u7cfb\u7edf').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(40).margin({top:20}).onClick(()=>{this.doHttpSSOAndFetch();})
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
         } else if (this.pageState===PageState.SUCCESS) {
           if(this.cards.length===0) {
             Column() {
               Text('\ud83e\uddea').fontSize(48)
               Text('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f').fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
-              Button('\u5237\u65b0').fontSize(14).fontColor('#FFFFFF').backgroundColor('#2979FF').borderRadius(20).height(36).margin({top:20}).onClick(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.doHttpSSOAndFetch();})
+              Button('\u5237\u65b0').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(36).margin({top:20}).onClick(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.doHttpSSOAndFetch();})
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
           } else {
             Refresh({refreshing:$$this.isRefreshing}) {
@@ -438,6 +438,7 @@ export struct ExperimentPage {
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
     }.title('\u5b9e\u9a8c\u4fe1\u606f', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
   }
 

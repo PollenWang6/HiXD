@@ -7,6 +7,7 @@ const PORTAL_URL = 'https://xxcapp.xidian.edu.cn/site/xidianPage/home';
 
 @Component
 export struct MobilePortalPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State isLoading: boolean = true;
   @State loadError: string = '';
@@ -43,7 +44,7 @@ export struct MobilePortalPage {
         if (this.isLoading) {
           LoadingProgress()
             .width(36).height(36)
-            .color('#00695C')
+            .color(this.accentColor)
         }
 
         // 加载错误提示

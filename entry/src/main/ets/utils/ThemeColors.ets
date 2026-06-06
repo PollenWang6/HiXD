@@ -58,12 +58,12 @@ export class ThemeColors {
   static get textHint(): string       { return _isDark ? '#666666' : '#999999'; }
   static get textOnDark(): string     { return '#FFFFFF'; }
   static get textOnDarkSub(): string  { return '#FFFFFF88'; }
-  static get accent(): string         { return '#2979FF'; }
+  static get accent(): string         { return (AppStorage.get('accent_color') as string) ?? '#2979FF'; }
   static get success(): string        { return _isDark ? '#81C784' : '#43A047'; }
   static get error(): string          { return _isDark ? '#EF9A9A' : '#FF5252'; }
   static get warning(): string        { return _isDark ? '#FFB74D' : '#FF9800'; }
   static get tabBar(): string         { return _isDark ? '#2C2C2EDD' : '#FFFFFFFF'; }
   static get overlay(): string        { return _isDark ? '#80000000' : '#40000000'; }
-  static get headerGradientStart(): string  { return '#1A237E'; }
-  static get headerGradientEnd(): string    { return '#2979FF'; }
+  static get headerGradientStart(): string  { return (AppStorage.get('accent_color') as string) ?? '#1A237E'; }
+  static get headerGradientEnd(): string    { return (AppStorage.get('accent_color') as string) ?? '#2979FF'; }
 }

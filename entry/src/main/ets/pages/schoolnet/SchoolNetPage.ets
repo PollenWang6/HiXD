@@ -78,7 +78,7 @@ export struct SchoolNetPage {
 
       if (this.loading) {
         Column() {
-          LoadingProgress().width(40).height(40).color('#00ACC1')
+          LoadingProgress().width(40).height(40).color(this.accentColor)
           Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else if (this.isOnline) {
@@ -135,6 +135,7 @@ export struct SchoolNetPage {
     }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
   }
     .title('校园网', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }

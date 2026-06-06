@@ -2,6 +2,7 @@
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
 import { AccentColors, ACCENT_PRESETS } from '../utils/AccentColors';
+import { ColorWheelPicker } from '../components/ColorWheelPicker';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { EhallService, SemesterUtil, ClassItemModel } from '../services/EhallService';
 import { ClassService } from '../services/ClassService';
@@ -79,6 +80,7 @@ class PreviewCell {
 @Component
 struct MainPage {
   onBackPress(): boolean {
+    if (this.showWheelPicker) { this.showWheelPicker = false; return true; }
     if (this.showColorPicker) { this.showColorPicker = false; return true; }
     if (this.showThemeDialog) { this.showThemeDialog = false; return true; }
     if (this.showPhyPwdDialog) { this.showPhyPwdDialog = false; return true; }
@@ -111,8 +113,11 @@ struct MainPage {
   @State phyPwdStatus: string = '未设置';
   @State showThemeDialog: boolean = false;
   @State showColorPicker: boolean = false;
+  @State showWheelPicker: boolean = false;
+  @State customHex: string = '';
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('accent_index') accentIdx: number = 0;
+  private retryTimer: number = -1;
   @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
   @State currentThemeLabel: string = '当前：浅色模式';
   @State warmupActive: boolean = false;
@@ -190,11 +195,12 @@ struct MainPage {
     }
   }
 
-  aboutToDisappear() {}
+  aboutToDisappear() { this.stopRetryTimer(); }
 
   // 自动登录检测：TGC → 密码，简单直接
   // 网络失败不跳转不重试，过期不自动弹登录页，由用户手动触发
   async checkLogin() {
+    this.stopRetryTimer();
     try {
       const cas = CasLoginService.getInstance();
       const loggedIn: boolean = await cas.checkAndAutoLogin();
@@ -225,15 +231,27 @@ struct MainPage {
         this.isLoggedIn = false;
         this.loginStatus = 'not_logged_in';
       } catch (_netErr) {
-        // checkEhallLogin 抛异常 → 网络不通 → 离线
         this.loginStatus = 'offline';
         this.isLoggedIn = false;
+        this.startRetryTimer();
       }
     } catch (e) {
-      // 网络连接失败 → 离线模式，不重试
       this.loginStatus = 'offline';
       this.isLoggedIn = false;
+      this.startRetryTimer();
     }
+  }
+
+  // ========== 断网重试 ==========
+  private startRetryTimer(): void {
+    this.stopRetryTimer();
+    this.retryTimer = setInterval(() => {
+      if (this.loginStatus === 'offline') { this.checkLogin(); }
+    }, 10000) as number;
+  }
+
+  private stopRetryTimer(): void {
+    if (this.retryTimer !== -1) { clearInterval(this.retryTimer); this.retryTimer = -1; }
   }
 
   // ==================== 重新登录：TGC 优先 → 滑块兜底（原地弹窗） ====================
@@ -1227,16 +1245,45 @@ struct MainPage {
           ForEach(ACCENT_PRESETS, (preset: string[], idx: number) => {
             Column() {
               Stack() {
-                Circle().width(44).height(44).fill(preset[0])
+                Circle().width(40).height(40).fill(preset[0])
                 if (idx === this.accentIdx) {
-                  Text('✓').fontSize(20).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+                  Text('✓').fontSize(18).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
                 }
               }
-              Text(preset[1]).fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
-            }.margin({ right: 12, bottom: 12 })
+              Text(preset[1]).fontSize(10).fontColor(ThemeColors.textSecondary).margin({ top: 3 })
+            }.margin({ right: 10, bottom: 10 })
             .onClick(() => { AccentColors.select(idx); this.showColorPicker = false; })
           }, (preset: string[], idx: number) => String(idx))
         }.width('100%')
+        // 自定义色号输入
+        Row() {
+          Text('自定义').fontSize(12).fontColor(ThemeColors.textHint)
+          Text('#').fontSize(13).fontColor(ThemeColors.textHint).margin({ left: 8, right: 2 })
+          TextInput({ placeholder: '色号', text: this.customHex })
+            .width(72).height(34).fontSize(13)
+            .maxLength(6)
+            .placeholderColor(ThemeColors.textHint)
+            .backgroundColor(ThemeColors.bgInput).borderRadius(8)
+            .onChange((v: string) => { this.customHex = v.replace(/[^0-9A-Fa-f]/g, ''); })
+          Row() {
+            Circle().width(16).height(16).fill(this.customHex.length === 6 ? ('#' + this.customHex) : '#CCCCCC')
+          }.width(32).height(32).borderRadius(8).backgroundColor(ThemeColors.bgInput)
+          .justifyContent(FlexAlign.Center).margin({ left: 6, right: 6 })
+          Button('应用').height(34).fontSize(12)
+            .backgroundColor(this.customHex.length === 6 ? this.accentColor : '#CCCCCC')
+            .fontColor('#FFFFFF').borderRadius(8)
+            .enabled(this.customHex.length === 6)
+            .onClick(() => {
+              if (AccentColors.selectCustom('#' + this.customHex)) {
+                this.showColorPicker = false;
+                this.customHex = '';
+              }
+            })
+          Button('调色').height(34).fontSize(12)
+            .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(8).margin({ left: 6 })
+            .onClick(() => { this.showWheelPicker = true; })
+        }.width('100%').margin({ top: 8 })
+        .padding({ top: 10 }).border({ width: { top: 1 }, color: '#E0E0E0', style: BorderStyle.Dashed })
       }
       .width('85%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
@@ -1247,6 +1294,33 @@ struct MainPage {
     .hitTestBehavior(this.showColorPicker ? HitTestMode.Default : HitTestMode.None)
     .visibility(this.showColorPicker ? Visibility.Visible : Visibility.None)
     .onClick(() => { this.showColorPicker = false; })
+    // 无极取色盘
+    if (this.showWheelPicker) {
+      Column() {
+        Column() {
+          Row() {
+            Text('无极取色').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+            Blank()
+            Row() { Text('✕').fontSize(18).fontColor('#999999') }
+              .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+              .justifyContent(FlexAlign.Center)
+              .onClick(() => { this.showWheelPicker = false; })
+          }.width('100%').margin({ bottom: 12 })
+          ColorWheelPicker({
+            onApply: () => {
+              this.showWheelPicker = false;
+              this.showColorPicker = false;
+            }
+          })
+        }
+        .width('90%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+        .shadow({ radius: 20, color: '#30000000' })
+      }
+      .width('100%').height('100%')
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .backgroundColor(ThemeColors.overlay)
+      .onClick(() => { this.showWheelPicker = false; })
+    }
     } // closes Stack
     .width('100%').height('100%')
   }
@@ -1474,7 +1548,7 @@ struct MainPage {
         }
       }
       .width('100%').height(60).padding({ left: 20, right: 16, top: 8 })
-      .linearGradient({ direction: GradientDirection.Right, colors: [['#2979FF', 0], ['#1565C0', 1]] })
+      .backgroundColor(this.accentColor)
 
       // 课表预览卡片
       this.ClassPreviewCard()

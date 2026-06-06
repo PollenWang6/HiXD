@@ -92,7 +92,7 @@ export struct ExamPage {
         Divider().color(ThemeColors.border)
 
         if (this.loading) {
-          Column() { LoadingProgress().width(40).height(40).color('#FB8C00'); Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); }
+          Column() { LoadingProgress().width(40).height(40).color(this.accentColor); Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.arranged.length === 0 && this.notArranged.length === 0) {
           Column() { Text('🎉').fontSize(48); Text('暂无考试安排').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); Text('本学期暂未发布考试信息').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 }); }
@@ -146,6 +146,7 @@ export struct ExamPage {
       .backgroundColor(ThemeColors.bgPage)
     }
     .title('考试安排', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {
       // NavDestination 初始化完成

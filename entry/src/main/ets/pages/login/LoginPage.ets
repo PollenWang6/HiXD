@@ -248,7 +248,7 @@ struct LoginPage {
           Text('登录').fontSize(20).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
           Blank()
           if (this.isSubmitting && !this.showCaptcha) {
-            LoadingProgress().width(24).height(24).color('#2979FF')
+            LoadingProgress().width(24).height(24).color((AppStorage.get('accent_color') as string ?? '#2979FF'))
           }
         }
         .width('100%').height(56).padding({ left: 16, right: 16 })
@@ -285,7 +285,7 @@ struct LoginPage {
               }.width('100%').margin({ bottom: 16 })
 
               if (this.isSubmitting) {
-                LoadingProgress().width(48).height(48).color('#2979FF').margin({ top: 60, bottom: 60 })
+                LoadingProgress().width(48).height(48).color((AppStorage.get('accent_color') as string ?? '#2979FF')).margin({ top: 60, bottom: 60 })
                 Text(this.statusText || '请稍候...').fontSize(14).fontColor(ThemeColors.textSecondary)
                 Blank()
               } else {
@@ -379,7 +379,7 @@ struct LoginPage {
       // 登录按钮
       Button(this.isSubmitting ? '正在加载...' : '登录')
         .width('100%').height(48).fontSize(16).fontColor('#FFFFFF')
-        .backgroundColor(this.isSubmitting ? '#90CAF9' : '#2979FF').borderRadius(8)
+        .backgroundColor(this.isSubmitting ? '#90CAF9' : (AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(8)
         .margin({ top: 32 })
         .enabled(!this.isSubmitting)
         .onClick(() => this.doLogin())
@@ -406,7 +406,7 @@ struct LoginPage {
   // 验证码加载中占位（绕开密码表单，不触发密码保险箱）
   @Builder buildCaptchaLoading() {
     Column() {
-      LoadingProgress().width(48).height(48).color('#2979FF')
+      LoadingProgress().width(48).height(48).color((AppStorage.get('accent_color') as string ?? '#2979FF'))
       Text(this.statusText || '正在准备验证...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 16 })
     }
     .width('100%').layoutWeight(1)

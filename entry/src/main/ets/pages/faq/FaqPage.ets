@@ -70,6 +70,7 @@ export struct FaqPage {
       .width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
     }
     .title(this.customTitle(), { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .hideBackButton(true)
   }

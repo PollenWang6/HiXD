@@ -18,6 +18,7 @@ export struct PortalWebPage {
   pageInfo: NavPathStack = new NavPathStack();
   @Prop title: string = '';
   @Prop url: string = '';
+  @State webUrl: string = '';  // 等 cookie 就绪后才设置，再加载 WebView
   @Prop useWeChatUA: boolean = false;
   @Prop keepWeChatUA: boolean = false;  // 移动门户：不清理 UA，页面内跳转保持一致
   @State isLoading: boolean = true;
@@ -34,19 +35,33 @@ export struct PortalWebPage {
     this.portalFullscreen = false;
   }
 
+  // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
+  async aboutToAppear(): Promise<void> {
+    console.info(TAG, 'aboutToAppear: url=' + this.url.substring(0, 80));
+    if (!this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('zfw')) {
+      const t0 = Date.now();
+      const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
+      console.info(TAG, 'checkAndAutoLogin: result=' + loginOk + ' cost=' + (Date.now() - t0) + 'ms');
+      // 等待 cookie 同步完成（内部先续 TGC 再写 WebView）
+      await CasLoginService.getInstance().syncCookiesToWebView();
+      console.info(TAG, 'syncCookies done, ready to load WebView');
+    } else {
+      console.info(TAG, 'syncCookies skip (non-CAS domain)');
+    }
+    this.webUrl = this.url;  // cookie 就绪，触发 WebView 加载
+  }
+
   build() {
     NavDestination() {
       Stack() {
         Column() {
 
-          // WebView 区域
+          // WebView 区域（等 cookie 就绪 webUrl 非空后才创建，避免空 src 加载）
           Stack() {
-            Web({ src: this.url, controller: this.webController })
+            if (this.webUrl.length > 0) {
+            Web({ src: this.webUrl, controller: this.webController })
               .onControllerAttached(() => {
-                // 只对 CAS 保护域名的页面同步 cookie，避免污染 libspace/sysj 等独立站点
-                if (!this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('zfw')) {
-                  CasLoginService.getInstance().syncCookiesToWebView();
-                }
+                console.info(TAG, 'onControllerAttached: webUrl loaded');
                 if (this.useWeChatUA) {
                   this.webController.setCustomUserAgent(WE_CHAT_UA);
                 }
@@ -62,10 +77,11 @@ export struct PortalWebPage {
               .onPageBegin(() => {
                 this.isLoading = true;
                 this.loadError = '';
+                console.info(TAG, 'onPageBegin: url=' + this.url.substring(0, 80));
               })
               .onPageEnd(() => {
                 this.isLoading = false;
-                console.info(TAG, 'PageOK: ' + this.url.substring(0, 60));
+                console.info(TAG, 'onPageEnd OK: ' + this.url.substring(0, 80));
                 if (this.useWeChatUA && !this.keepWeChatUA) {
                   this.webController.setCustomUserAgent('');
                 }
@@ -86,16 +102,20 @@ export struct PortalWebPage {
               })
               .onErrorReceive((event) => {
                 if (event) {
-                  console.error(TAG, 'PageFAIL: ' + this.url.substring(0, 60) + ' err=' + event.error.getErrorInfo());
-                  this.loadError = '加载失败: ' + event.error.getErrorInfo();
+                  const errInfo: string = event.error.getErrorInfo();
+                  const errCode: number = event.error.getErrorCode();
+                  console.error(TAG, 'onErrorReceive: code=' + errCode + ' info=' + errInfo + ' url=' + this.url.substring(0, 80));
+                  this.loadError = '加载失败: ' + errInfo;
                   this.isLoading = false;
                 }
               })
 
+            } // closes if(webUrl.length > 0)
+
             if (this.isLoading) {
               LoadingProgress()
                 .width(36).height(36)
-                .color('#00695C')
+                .color(this.accentColor)
             }
 
             if (this.loadError) {
@@ -129,6 +149,7 @@ export struct PortalWebPage {
       .height('100%')
     }
     .title(this.customTitle(), { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .hideBackButton(true)
 
