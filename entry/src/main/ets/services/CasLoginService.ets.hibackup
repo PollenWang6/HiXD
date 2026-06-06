@@ -411,10 +411,6 @@ export class CasLoginService {
       loopGuard++;
     }
 
-    // 跨域 Cookie 修复：NETSTACK getNoRedirect 按原始 URL 域名存 cookie，
-    // TGC 刷新出的 MOD_AUTH_CAS 会被存到 ids.xidian.edu.cn 下，
-    // 但 checkEhallLogin() 查的是 ehall.xidian.edu.cn，需要显式复制。
-    this.http.copyCookiesForDomain('ids.xidian.edu.cn', 'ehall.xidian.edu.cn');
     await this.http.saveCookies();
 
     const ehallCookies: string = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
@@ -513,45 +509,6 @@ export class CasLoginService {
       console.info(TAG, 'injectXxcappSession: done, ' + xxcappCookies.split('; ').length + ' cookies injected');
     } catch (e) {
       console.warn(TAG, 'injectXxcappSession: ' + String(e));
-    }
-  }
-
-  // ========== 研究生 (yjspt) API ==========
-
-  // 走 CAS OAuth 链建立 yjspt session cookie，后续 API 调用复用此 session
-  async navigateToYjspt(targetUrl: string): Promise<void> {
-    console.info(TAG, 'navigateToYjspt: ' + targetUrl.substring(0, 60));
-    try {
-      await this.http.get(targetUrl);
-      await this.http.saveCookies();
-      console.info(TAG, 'navigateToYjspt: done');
-    } catch (e) {
-      console.warn(TAG, 'navigateToYjspt: ' + String(e));
-    }
-  }
-
-  // 登录后检测是否为研究生账号（能否访问 yjspt）→ 设置 role 偏好
-  async checkWhetherPostgraduate(): Promise<void> {
-    console.info(TAG, 'checkWhetherPostgraduate: start');
-    try {
-      await this.navigateToYjspt('https://yjspt.xidian.edu.cn/');
-      const resp: HttpResponse = await this.http.post(
-        'https://yjspt.xidian.edu.cn/gsapp/sys/yjsemaphome/modules/pubWork/getUserInfo.do',
-        new Object()
-      );
-      if (resp.statusCode === 200 && resp.body.length > 200) {
-        const data: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
-        if (data['code'] === '0' && data['data']) {
-          PreferenceUtil.putBool('role', true);
-          console.info(TAG, 'checkWhetherPostgraduate: role=postgraduate');
-          return;
-        }
-      }
-      PreferenceUtil.putBool('role', false);
-      console.info(TAG, 'checkWhetherPostgraduate: role=undergraduate');
-    } catch (e) {
-      PreferenceUtil.putBool('role', false);
-      console.warn(TAG, 'checkWhetherPostgraduate: ' + String(e));
     }
   }
 

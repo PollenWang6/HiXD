@@ -1,7 +1,8 @@
 // EmptyClassroomPage.ets
 // 空闲教室页面：直接按日期查询，自动定位到今天
 import { ThemeColors } from '../../utils/ThemeColors';
-import { EhallService, SemesterUtil, EmptyClassroomItem, BuildingInfo } from '../../services/EhallService';
+import { EmptyClassroomItem, BuildingInfo } from '../../services/Models';
+import { EmptyClassroomService } from '../../services/EmptyClassroomService';
 
 @Component
 export struct EmptyClassroomPage {
@@ -15,7 +16,7 @@ export struct EmptyClassroomPage {
   @State errorMsg: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
-  private ehallsvc: EhallService = EhallService.getInstance();
+  private ehallsvc: EmptyClassroomService = EmptyClassroomService.getInstance();
 
   // 日期加减天数
   private addDays(d: Date, n: number): Date {
@@ -61,7 +62,7 @@ export struct EmptyClassroomPage {
     try {
       const rawBody: string = await this.ehallsvc.searchEmptyClassroomsByDate(this.selectedBuilding, this.selectedDate);
       console.info('EmptyClassroomPage', 'search response length: ' + rawBody.length);
-      this.rooms = EhallService.extractEmptyClassrooms(rawBody);
+      this.rooms = EmptyClassroomService.extractEmptyClassrooms(rawBody);
       console.info('EmptyClassroomPage', 'Parsed rooms: ' + this.rooms.length);
     } catch (e) {
       this.errorMsg = '加载失败: ' + (e as Error).message;

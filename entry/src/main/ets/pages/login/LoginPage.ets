@@ -22,6 +22,7 @@ struct LoginPage {
 
   // ===== 滑块状态 =====
   @State showCaptcha: boolean = false;
+  @State jumpToCaptcha: boolean = false;  // 绕过密码表单→直接走验证码
   @State captchaLoading: boolean = false;
   @State sliderLeftPx: number = 0;
   @State captchaError: string = '';
@@ -45,6 +46,15 @@ struct LoginPage {
   aboutToAppear(): void {
     this.username = PreferenceUtil.getString('ids_account');
     this.password = PreferenceUtil.getString('login_password');
+    // 从「登录已过期」入口进入：跳过密码表单，直接走验证码
+    try {
+      const params = router.getParams() as Record<string, Object>;
+      if (params && (params['jumpToCaptcha'] as boolean) === true) {
+        this.jumpToCaptcha = true;
+        this.statusText = '正在准备验证...';
+        setTimeout(() => { this.doLogin(); }, 300);
+      }
+    } catch (_e) { /* ignore */ }
   }
 
   // ===== 登录流程 =====
@@ -71,6 +81,7 @@ struct LoginPage {
 
       // TGC 有效 → CAS 直接 302 到 ehall，没有登录表单
       if (!fields.execution) {
+        await PreferenceUtil.putBool('is_logged_in', true);
         this.statusText = '自动登录成功！';
         setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 400);
         return;
@@ -133,7 +144,16 @@ struct LoginPage {
         PreferenceUtil.putString('ids_account', this.username);
         PreferenceUtil.putString('login_password', this.password);
         EhallService.getInstance().clearSessionCache();
+        await PreferenceUtil.putBool('is_logged_in', true);
         await this.cas.syncCookiesToWebView();
+        await this.cas.checkWhetherPostgraduate();
+        // 研究生：拉取 yjspt 学期码并缓存
+        if (PreferenceUtil.getBool('role')) {
+          try {
+            const sem: string = await EhallService.getInstance().getSemesterInfoYjspt();
+            PreferenceUtil.putString('yjspt_semester', sem);
+          } catch (_e) { /* 学期码非关键，失败不阻塞 */ }
+        }
         this.statusText = '登录成功！';
         setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 400);
       } else {
@@ -152,6 +172,11 @@ struct LoginPage {
     this.showCaptcha = false;
     this.captchaLoading = false;
     this.isSubmitting = false;
+    // 直接验证码模式：失败后重试验证码加载，不回到密码表单
+    if (this.jumpToCaptcha) {
+      this.statusText = '正在重新加载验证...';
+      setTimeout(() => { this.doLogin(); }, 500);
+    }
   }
 
   resetCaptcha(msg?: string): void {
@@ -216,36 +241,105 @@ struct LoginPage {
 
   // ========== UI ==========
   build() {
-    Column() {
-      // 标题栏
-      Row() {
-        Text('登录').fontSize(20).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-        Blank()
-        if (this.isSubmitting && !this.showCaptcha) {
-          LoadingProgress().width(24).height(24).color('#2979FF')
-        }
-      }
-      .width('100%').height(56).padding({ left: 16, right: 16 })
-      .backgroundColor(ThemeColors.bgCard)
-      .shadow({ radius: 2, color: '#00000010', offsetY: 1 })
-
-      if (!this.showCaptcha) {
-        // ===== 账号密码表单 =====
-        this.buildLoginForm()
-      } else {
-        // ===== 滑块验证码 =====
-        this.buildCaptcha()
-      }
-
-      // 底部提示
+    Stack() {
       Column() {
-        Text('请使用统一身份认证账号登录').fontSize(12).fontColor(ThemeColors.textSecondary)
-        Text('登录信息仅保存在本设备').fontSize(11).fontColor('#BBBBBB').margin({ top: 4 })
+        // 标题栏
+        Row() {
+          Text('登录').fontSize(20).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          if (this.isSubmitting && !this.showCaptcha) {
+            LoadingProgress().width(24).height(24).color('#2979FF')
+          }
+        }
+        .width('100%').height(56).padding({ left: 16, right: 16 })
+        .backgroundColor(ThemeColors.bgCard)
+        .shadow({ radius: 2, color: '#00000010', offsetY: 1 })
+
+        if (this.jumpToCaptcha && !this.showCaptcha) {
+          this.buildCaptchaLoading()
+        } else {
+          this.buildLoginForm()
+        }
+
+        // 底部提示
+        Column() {
+          Text('请使用统一身份认证账号登录').fontSize(12).fontColor(ThemeColors.textSecondary)
+          Text('登录信息仅保存在本设备').fontSize(11).fontColor('#BBBBBB').margin({ top: 4 })
+        }
+        .width('100%').padding({ top: 12, bottom: 20 })
+        .alignItems(HorizontalAlign.Center).backgroundColor(ThemeColors.bgPage)
       }
-      .width('100%').padding({ top: 12, bottom: 20 })
-      .alignItems(HorizontalAlign.Center).backgroundColor(ThemeColors.bgPage)
+      .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
+
+      // 滑块验证码 overlay（暗色遮罩 + 居中卡片）
+      if (this.showCaptcha) {
+        Column() {
+          Stack() {
+            Column() {
+              // 关闭按钮
+              Row() {
+                Blank()
+                Text('✕')
+                  .fontSize(20).fontColor('#999999')
+                  .onClick(() => { this.toForm(); })
+              }.width('100%').margin({ bottom: 16 })
+
+              if (this.isSubmitting) {
+                LoadingProgress().width(48).height(48).color('#2979FF').margin({ top: 60, bottom: 60 })
+                Text(this.statusText || '请稍候...').fontSize(14).fontColor(ThemeColors.textSecondary)
+                Blank()
+              } else {
+                // 验证码图片区域
+                Stack({ alignContent: Alignment.TopStart }) {
+                  if (this.puzzleBigPm) {
+                    Image(this.puzzleBigPm).width(280).height(155).objectFit(ImageFit.Fill)
+                  } else {
+                    Row().width(280).height(155).backgroundColor('#F5F5F5')
+                  }
+                  if (this.puzzleSmallPm) {
+                    Image(this.puzzleSmallPm).width(44).height(155).objectFit(ImageFit.Fill)
+                      .offset({ x: this.sliderLeftPx, y: 0 })
+                  }
+                }
+                .width(280).height(155).borderRadius(4)
+                .clip(true).backgroundColor('#F0F0F0')
+
+                // 滑块拖动区域
+                Stack({ alignContent: Alignment.TopStart }) {
+                  Row().width(280).height(10).backgroundColor('#E0E0E0').borderRadius(5)
+                  Row().width(Math.min(this.sliderLeftPx + 4, 280)).height(10)
+                    .backgroundColor('#4CAF50').borderRadius(5)
+                  Row() {
+                    Text('→').fontSize(18).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+                  }
+                  .width(this.THUMB_SIZE).height(this.THUMB_SIZE)
+                  .borderRadius(21).backgroundColor('#4CAF50')
+                  .justifyContent(FlexAlign.Center)
+                  .shadow({ radius: 6, color: '#00000030', offsetY: 2 })
+                  .offset({ x: this.thumbOffset(), y: -16 })
+                }
+                .width(280).height(this.THUMB_SIZE + 10).margin({ top: 33 })
+                .hitTestBehavior(HitTestMode.Default)
+                .onTouch((event: TouchEvent) => { this.handleTouch(event); })
+
+                if (this.captchaError.length > 0) {
+                  Text(this.captchaError).fontSize(13).fontColor('#FF6B6B').margin({ top: 12 })
+                }
+                Text(this.statusText || '请按住滑块拖动到最右端').fontSize(12).fontColor('#999999').margin({ top: 16 })
+              }
+            }
+            .width(320).padding(20)
+            .backgroundColor(ThemeColors.bgCard).borderRadius(16)
+            .alignItems(HorizontalAlign.Center)
+          }
+          .width('100%').height('100%')
+          .alignContent(Alignment.Center)
+        }
+        .width('100%').height('100%')
+        .backgroundColor('#00000080')
+      }
     }
-    .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
+    .width('100%').height('100%')
   }
 
   @Builder buildLoginForm() {
@@ -309,76 +403,14 @@ struct LoginPage {
     .backgroundColor(ThemeColors.bgCard)
   }
 
-  @Builder buildCaptcha() {
+  // 验证码加载中占位（绕开密码表单，不触发密码保险箱）
+  @Builder buildCaptchaLoading() {
     Column() {
-      if (this.isSubmitting) {
-        LoadingProgress().width(48).height(48).color('#2979FF').margin({ top: 60, bottom: 60 })
-        Text(this.statusText || '请稍候...').fontSize(14).fontColor(ThemeColors.textSecondary)
-        Blank()
-      } else {
-        // 验证码图片区域
-        Stack({ alignContent: Alignment.TopStart }) {
-          // 背景大图
-          if (this.puzzleBigPm) {
-            Image(this.puzzleBigPm).width(280).height(155).objectFit(ImageFit.Fill)
-          } else {
-            Row().width(280).height(155).backgroundColor('#F5F5F5')
-          }
-          // 滑块小片
-          if (this.puzzleSmallPm) {
-            Image(this.puzzleSmallPm).width(44).height(155).objectFit(ImageFit.Fill)
-              .offset({ x: this.sliderLeftPx, y: 0 })
-          }
-        }
-        .width(280).height(155).borderRadius(4)
-        .clip(true)
-        .backgroundColor('#F0F0F0')
-
-        // 滑块拖动区域
-        Stack({ alignContent: Alignment.TopStart }) {
-          // 滑轨背景
-          Row().width(280).height(10).backgroundColor('#E0E0E0').borderRadius(5)
-
-          // 已滑过区域
-          Row().width(Math.min(this.sliderLeftPx + 4, 280)).height(10)
-            .backgroundColor('#4CAF50').borderRadius(5)
-
-          // 拖动圆钮
-          Row() {
-            // 箭头图标
-            Text('→').fontSize(18).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
-          }
-          .width(this.THUMB_SIZE).height(this.THUMB_SIZE)
-          .borderRadius(21)
-          .backgroundColor('#4CAF50')
-          .justifyContent(FlexAlign.Center)
-          .shadow({ radius: 6, color: '#00000030', offsetY: 2 })
-          .offset({ x: this.thumbOffset(), y: -16 }) // 圆钮在滑轨上方
-        }
-        .width(280).height(this.THUMB_SIZE + 10)
-        .margin({ top: 33 })
-        .hitTestBehavior(HitTestMode.Default)
-        .onTouch((event: TouchEvent) => { this.handleTouch(event); })
-
-        // 错误提示
-        if (this.captchaError.length > 0) {
-          Text(this.captchaError).fontSize(13).fontColor('#FF6B6B').margin({ top: 12 })
-        }
-
-        // 状态文字
-        Text(this.statusText || '请按住滑块拖动到最右端').fontSize(12).fontColor('#999999').margin({ top: 16 })
-
-        // 返回按钮
-        Button('返回修改账号')
-          .fontSize(13).fontColor('#2979FF').backgroundColor(Color.Transparent)
-          .margin({ top: 8 })
-          .onClick(() => { this.toForm(); })
-      }
-
-      Blank()
+      LoadingProgress().width(48).height(48).color('#2979FF')
+      Text(this.statusText || '正在准备验证...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 16 })
     }
     .width('100%').layoutWeight(1)
-    .padding({ top: 32 })
+    .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .backgroundColor(ThemeColors.bgCard)
   }

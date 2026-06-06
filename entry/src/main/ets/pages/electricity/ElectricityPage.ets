@@ -100,12 +100,12 @@ export struct ElectricityPage {
   @State showMoreWater: boolean = false;
   @StorageLink('electricity_cache') @Watch('onCacheChanged') elCache: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+  @State webViewSrc: string = '';
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
   private isSilent: boolean = false;
   private http: HttpUtil = HttpUtil.getInstance();
   private ssoDone: boolean = false;
-  @State webViewSrc: string = '';
 
   async aboutToAppear(): Promise<void> {
     // 先同步 HTTP cookie 到 WebView，再加载 SSO 页面（避免 cookie 未就绪的竞态）

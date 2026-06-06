@@ -1,6 +1,7 @@
 ﻿// ExamPage.ets — 考试安排页面
 import { ThemeColors } from '../../utils/ThemeColors';
-import { EhallService, SemesterUtil, DataParser, ExamItemModel } from '../../services/EhallService';
+import { EhallService, SemesterUtil, ExamItemModel } from '../../services/EhallService';
+import { ExamService } from '../../services/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { router } from '@kit.ArkUI';
 
@@ -64,8 +65,8 @@ export struct ExamPage {
   async loadExams(): Promise<void> {
     this.loading = true; this.errorMsg = '';
     try {
-      const raw: string = await this.ehall.getExamSchedule(this.selectedSemester);
-      const items: ExamItemModel[] = DataParser.parseExamSchedule(raw);
+      const raw: string = await ExamService.getInstance().getExamSchedule(this.selectedSemester);
+      const items: ExamItemModel[] = ExamService.parseExamSchedule(raw);
       // 日志：打印完整考试数据，方便排查 ksmc 显示问题
       for (const it of items) {
         console.error('ExamPage', 'exam item: kcm=' + it.kcm + ' | ksmc=' + it.ksmc + ' | ksrq=' + it.ksrq + ' | jasmc=' + it.jasmc + ' | zw=' + it.zw);

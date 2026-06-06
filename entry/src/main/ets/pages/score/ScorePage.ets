@@ -1,5 +1,6 @@
 // ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
-import { EhallService, SemesterUtil, DataParser, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
+import { EhallService, SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
+import { ScoreService } from '../../services/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
 
 @Component
@@ -42,8 +43,8 @@ export struct ScorePage {
     this.loading = true;
     this.errorMsg = '';
     try {
-      const raw: string = await this.ehall.getScores('');
-      const items: ScoreItemModel[] = DataParser.parseScores(raw);
+      const raw: string = await ScoreService.getInstance().getScores('');
+      const items: ScoreItemModel[] = ScoreService.parseScores(raw);
       console.info('[ScorePage] parsed ' + items.length + ' items');
 
       this.allScores = items;
@@ -208,7 +209,7 @@ export struct ScorePage {
     this.animateShowCard();
 
     try {
-      const details = await this.ehall.getScoreDetail(item.jxbid, item.xnxqdm);
+      const details = await ScoreService.getInstance().getScoreDetail(item.jxbid, item.xnxqdm);
       this.currentDetail = details;
       this.detailCache.set(cacheKey, details);
     } catch (e) {
@@ -443,4 +444,12 @@ export struct ScorePage {
     }
     .title('成绩查询')
     .onReady((ctx: NavDestinationContext) => {})
+    .onBackPressed(() => {
+      if (this.selectedCell !== null) {
+        this.selectedCell = null;
+        this.cardScale = 0.85;
+        return true;
+      }
+      return false;
+    })
   }}

@@ -151,10 +151,10 @@ export struct ExperimentPage {
       let b2 = r2.body || '';
       console.info(TAG, 'login page got, len=' + b2.length);
 
-      // Step 3: CAS — NETSTACK 跟随重定向时，sysj 的 Set-Cookie 被错误存储到 ids 域名
-      // 用深拷贝保存当前 cookieStore 状态，CAS 完成后精确恢复被污染的域名
-      // 深拷贝优于字符串序列化：cookie 值可能含 = 或 ;，字符串序列化会丢数据
-      const cookieSnapshot = http.cloneCookieStore();
+      // Step 3: CAS — http.get() 会把重定向链中 sysj 的 cookie 错存到 ids 域名
+      // 先备份 ids/ehall cookie，CAS 完成后恢复，避免污染 portal 页面
+      let idsBackup: string = http.getAllCookies('ids.xidian.edu.cn');
+      let ehallBackup: string = http.getAllCookies('ehall.xidian.edu.cn');
       let casUrl = 'https://ids.xidian.edu.cn/authserver/oauth2.0/authorize?' +
         'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/uaa/xidian/callback') +
         '&response_type=code&state=' + state + '&client_id=1387116615722893312';
@@ -169,8 +169,9 @@ export struct ExperimentPage {
       // CAS 重定向到 sysj 后，Set-Cookie 被 HttpUtil 按原始 URL 存到了 ids 域名
       // sysj OAuth 需要这些 cookie 在 sysj.xidian.edu.cn 下，复制一份
       http.copyCookiesForDomain('ids.xidian.edu.cn', 'sysj.xidian.edu.cn');
-      // 恢复被污染的 ids/ehall 域名到 CAS 之前的状态（sysj 域名保留新 cookie）
-      http.restoreDomainsFromClone(cookieSnapshot, ['ids.xidian.edu.cn', 'ehall.xidian.edu.cn']);
+      // 恢复 ids/ehall 备份，撤销 CAS 步骤对 portal 页面的 cookie 污染
+      http.replaceCookiesForDomain('ids.xidian.edu.cn', idsBackup);
+      http.replaceCookiesForDomain('ehall.xidian.edu.cn', ehallBackup);
 
       // Step 4+5: 提取 code 和 password
       let code: string = '';
@@ -239,7 +240,24 @@ export struct ExperimentPage {
       for (let w = 1; w <= MAX_WEEKS; w++) {
         try {
           let r7 = await http.get(SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=' + String(w));
-          this.parseWeekData(r7.body, w, allItems);
+          if (r7.isOk && r7.body.length > 0 && r7.body.charAt(0) === '[') {
+            let raw = JSON.parse(r7.body) as Object[];
+            for (let i = 0; i < raw.length; i++) {
+              let d = raw[i] as Object[];
+              if (d.length < 15) continue;
+              let item: SysjScheduleItem = {
+                courseCode: (d[0] as string) || '', experimentName: (d[1] as string) || '',
+                department: (d[2] as string) || '', lab: (d[11] as string) || '',
+                weekday: (d[4] as string) || '', startSection: (d[5] as string) || '',
+                endSection: (d[6] as string) || '', week: (d[7] as string) || '',
+                unknown8: (d[8] as string) || '', teacher: (d[9] as string) || '',
+                unknown10: (d[10] as string) || '', className: (d[12] as string) || '',
+                groupId: (d[12] as string) || '', studentCount: (d[13] as string) || '',
+                experimentProject: (d[14] as string) || '', __week: w
+              } as SysjScheduleItem;
+              allItems.push(item);
+            }
+          }
         } catch (e) {
           console.warn(TAG, 'week ' + w + ' err: ' + String(e));
         }
@@ -335,14 +353,6 @@ export struct ExperimentPage {
         let bd = '__EVENTTARGET=&__EVENTARGUMENT=&__VIEWSTATE=%2FwEPDwUKMTEzNzM0MjM0OWQYAQUeX19Db250cm9sc1JlcXVpcmVQb3N0QmFja0tleV9fFgEFD2xvZ2luMSRidG5Mb2dpbkOuzGVaztce4Ict7jsIJ0F5pUDb%2BsmSbCCrNVSBlPML&__VIEWSTATEGENERATOR=EE008CD9&__EVENTVALIDATION=%2FwEdAAcKecdPGDB%2BfW8Tyghx7AeSpOzeiNZ7aaEg5p6LqSa9cODI2bZwNtRxUKPkisVLf8l8Vv4WhRVIIhZlyYNJO%2BySrDKOhP%2B%2FYMNbVIh74hA2rCYnBBSTsX9SjxiYNNk%2B5kglM%2B6pGIq22Oi5mNu6u6eC2WEBfKAmATKwSpsOL%2FPNcRyi9l8Dnp6JamksyAzjhW4%3D&login1%24StuLoginID='+encodeURIComponent(PreferenceUtil.getString('ids_account'))+'&login1%24StuPassword='+encodeURIComponent(pwd)+'&login1%24UserRole=Student&login1%24btnLogin.x=28&login1%24btnLogin.y=14';
         await http.postRaw('http://wlsy.xidian.edu.cn/PhyEws/default.aspx', bd, 'application/x-www-form-urlencoded');
         let r = await http.get('http://wlsy.xidian.edu.cn/PhyEws/student/select.aspx');
-        // 检测登录失败：select.aspx 返回登录页而非实验表格
-        if (r.body && r.body.indexOf('login1_Label1') >= 0) {
-          let errMsg: string = this.parsePhysicsError(r.body);
-          console.warn(TAG, 'physics login failed: ' + errMsg);
-          PreferenceUtil.putString(PHYSICS_CACHE_KEY, '');
-          this.onError(errMsg);
-          return;
-        }
         if (r.isOk) {
           pi = this.parsePhysicsHtml(r.body);
           let pc: ESObject = {'ts':Date.now(),'data':pi} as ESObject;
@@ -352,15 +362,6 @@ export struct ExperimentPage {
       if (pi.length > 0) this.buildCards(pi);
     } catch (e) { console.warn(TAG, 'physics err: '+String(e)); }
     if(this.cards.length===0)this.onError('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f'); else this.pageState=PageState.SUCCESS;
-  }
-
-  parsePhysicsError(html: string): string {
-    let m: RegExpMatchArray | null = html.match(/<span[^>]*id="login1_Label1"[^>]*>([\s\S]*?)<\/span>/i);
-    if (m) {
-      return m[1].replace(/<font[^>]*>/gi, '').replace(/<\/font>/gi, '')
-        .replace(/<br\s*\/?>/gi, '。').replace(/<[^>]+>/g, '').trim();
-    }
-    return '\u7269\u7406\u5b9e\u9a8c\u767b\u5f55\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u5bc6\u7801';
   }
 
   parsePhysicsHtml(html: string): SysjScheduleItem[] {

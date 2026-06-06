@@ -2,8 +2,9 @@
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
 import { ConfigurationConstant } from '@kit.AbilityKit';
-import { EhallService, SemesterUtil, DataParser, ClassItemModel } from '../services/EhallService';
-import { CasLoginService } from '../services/CasLoginService';
+import { EhallService, SemesterUtil, ClassItemModel } from '../services/EhallService';
+import { ClassService } from '../services/ClassService';
+import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, CasFormFields } from '../services/CasLoginService';
 import { HttpUtil } from '../utils/HttpUtil';
 import { router } from '@kit.ArkUI';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
@@ -23,6 +24,7 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import web_webview from '@ohos.web.webview';
+import { image } from '@kit.ImageKit';
 
 
 // 每日用电数据模型
@@ -75,10 +77,17 @@ class PreviewCell {
 @Entry
 @Component
 struct MainPage {
+  onBackPress(): boolean {
+    if (this.showThemeDialog) { this.showThemeDialog = false; return true; }
+    if (this.showPhyPwdDialog) { this.showPhyPwdDialog = false; return true; }
+    if (this.showCaptcha) { this.closeCaptcha(); return true; }
+    return false;
+  }
+
   @State currentIndex: number = 0;
   @State username: string = '';
   @State isLoggedIn: boolean = false;
-  @State loginStatus: string = ''; // '' | 'checking' | 'no_network' | 'expired' | 'not_logged_in' | 'ok'
+  @State loginStatus: string = ''; // '' | 'checking' | 'offline' | 'expired' | 'not_logged_in' | 'ok'
   @State previewCells: PreviewCell[] = [];
   @State previewLoaded: boolean = false;
   @State isTablet: boolean = deviceInfo.deviceType === 'tablet';
@@ -89,17 +98,41 @@ struct MainPage {
   pageInfo: NavPathStack = new NavPathStack();
   @StorageLink('electricity_cache') elCache: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+  @StorageLink('ct_updated') @Watch('onClassTableUpdated') ctUpdated: string = '';
+
+  onClassTableUpdated(): void {
+    if (this.ctUpdated.length > 0) { this.loadClassPreview(); }
+  }
   @State cacheSize: string = '计算中...';
   @State showPhyPwdDialog: boolean = false;
   @State phyPwdInput: string = '';
   @State phyPwdStatus: string = '未设置';
   @State showThemeDialog: boolean = false;
+  @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
+  @State currentThemeLabel: string = '当前：浅色模式';
   @State warmupActive: boolean = false;
   private warmupUrl: string = 'https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1';
 
+  // ==================== 滑块验证码 overlay（原地弹窗，不跳页） ====================
+  @State showCaptcha: boolean = false;
+  @State captchaBigPm: PixelMap | null = null;
+  @State captchaSmallPm: PixelMap | null = null;
+  @State captchaSliderLeft: number = 0;
+  @State captchaSubmitting: boolean = false;
+  @State captchaErr: string = '';
+  private captchaTracks: TrackPoint[] = [];
+  private captchaDragStartX: number = 0;
+  private captchaLastRecMs: number = 0;
+  private captchaLastA: number = -999;
+  private captchaLastB: number = -999;
+  private captchaActivePtr: number = -1;
+  private captchaFormFields: CasFormFields | null = null;
+  private captchaSmallBase64: string = '';
+  private readonly CAPTCHA_LIMIT: number = 240;
+  private readonly CAPTCHA_THUMB: number = 42;
+
   private tabsController: HdsTabsController = new HdsTabsController();
   private warmupController: web_webview.WebviewController = new web_webview.WebviewController();
-  private retryTimer: number = -1;
   private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
   // 应用级缓存目录（异步初始化，供 computeCacheSizeDirect 同步使用）
   private appCacheDir: string = '';
@@ -130,6 +163,9 @@ struct MainPage {
     const savedMode: number = PreferenceUtil.getNumber('theme_color_mode',
       ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     ThemeColors.init(savedMode, getContext());
+    // 同步初始标签
+    this.currentThemeLabel = this.buildThemeLabel(savedMode);
+    AppStorage.setOrCreate('currentColorMode', savedMode);
     this.loginStatus = 'checking';
     // TGC 优先 → 密码兜底，一步完成
     this.checkLogin();
@@ -148,57 +184,268 @@ struct MainPage {
     }
   }
 
-  aboutToDisappear() {
-    this.stopRetryTimer();
-  }
+  aboutToDisappear() {}
 
   // 自动登录检测：TGC → 密码，简单直接
+  // 网络失败不跳转不重试，过期不自动弹登录页，由用户手动触发
   async checkLogin() {
     try {
       const cas = CasLoginService.getInstance();
       const loggedIn: boolean = await cas.checkAndAutoLogin();
       if (loggedIn) {
-        // 验证 session 真实有效
         const ehall = EhallService.getInstance();
         const reallyLoggedIn: boolean = await ehall.checkEhallLogin();
         if (reallyLoggedIn) {
           this.isLoggedIn = true;
           this.loginStatus = 'ok';
+          await PreferenceUtil.putBool('is_logged_in', true);
           await cas.syncCookiesToWebView();
-          this.warmupActive = true;
+          // warmup disabled: pollutes CookieJar with Domain=.xidian.edu.cn cookies, breaking zfw/libspace
           this.startPreload();
           return;
         }
       }
-      this.isLoggedIn = false;
-      const hasCred: boolean = PreferenceUtil.getString('ids_account').length > 0;
-      this.loginStatus = hasCred ? 'expired' : 'not_logged_in';
-      if (hasCred && PreferenceUtil.getString('login_password').length > 0) {
-        setTimeout(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); }, 500);
+      // checkAndAutoLogin 返回 false → 确认是网络不通还是真的过期
+      try {
+        await EhallService.getInstance().checkEhallLogin();
+        // 网络通但没登录 → 真正过期，有凭证则自动弹出滑块
+        const hasCred: boolean = PreferenceUtil.getString('ids_account').length > 0;
+        if (hasCred) {
+          // 保留 isLoggedIn = true，"我的"页面继续显示菜单，滑块 overlay 在顶层
+          this.loginStatus = 'expired';
+          await this.doRelogin();
+          return;
+        }
+        this.isLoggedIn = false;
+        this.loginStatus = 'not_logged_in';
+      } catch (_netErr) {
+        // checkEhallLogin 抛异常 → 网络不通 → 离线
+        this.loginStatus = 'offline';
+        this.isLoggedIn = false;
       }
     } catch (e) {
-      this.loginStatus = 'no_network';
-      this.startRetryTimer();
+      // 网络连接失败 → 离线模式，不重试
+      this.loginStatus = 'offline';
+      this.isLoggedIn = false;
     }
   }
 
-  private startRetryTimer() {
-    this.retryTimer = setInterval(() => {
-      if (this.loginStatus === 'no_network') {
-        this.checkLogin();
+  // ==================== 重新登录：TGC 优先 → 滑块兜底（原地弹窗） ====================
+  async doRelogin(): Promise<void> {
+    this.loginStatus = 'checking';
+    try {
+      const cas: CasLoginService = CasLoginService.getInstance();
+      // Step 1: 先用 TGC 尝试恢复
+      const restored: boolean = await cas.tryAutoRestoreLogin();
+      if (restored) {
+        const ehall: EhallService = EhallService.getInstance();
+        const reallyLoggedIn: boolean = await ehall.checkEhallLogin();
+        if (reallyLoggedIn) {
+          this.isLoggedIn = true;
+          this.loginStatus = 'ok';
+          await PreferenceUtil.putBool('is_logged_in', true);
+          await cas.syncCookiesToWebView();
+          // warmup disabled
+          this.startPreload();
+          return;
+        }
       }
-    }, 10000) as number;
+      // Step 2: TGC 无效 → 获取表单和验证码
+      const fields: CasFormFields = await cas.getLoginPageForm();
+      if (!fields.execution) {
+        // 拉表单时 TGC 又生效了（CAS 302 到 ehall）
+        const ehall = EhallService.getInstance();
+        const reallyLoggedIn: boolean = await ehall.checkEhallLogin();
+        if (reallyLoggedIn) {
+          this.isLoggedIn = true;
+          this.loginStatus = 'ok';
+          await PreferenceUtil.putBool('is_logged_in', true);
+          await cas.syncCookiesToWebView();
+          // warmup disabled
+          this.startPreload();
+          return;
+        }
+      }
+      this.captchaFormFields = fields;
+      const puzzle: SliderPuzzle = await cas.getSliderCaptcha();
+      const pieces: PuzzleImages = cas.getPuzzleImages(puzzle);
+      this.captchaSmallBase64 = puzzle.smallImage;
+      this.captchaBigPm = await this.bytesToPm(pieces.bigPm);
+      this.captchaSmallPm = await this.bytesToPm(pieces.smallPm);
+      this.captchaSliderLeft = 0;
+      this.captchaTracks = [];
+      this.captchaErr = '';
+      this.showCaptcha = true;
+      this.loginStatus = 'expired';  // 对应 HiXD 标题下显示「登录已过期」
+    } catch (e) {
+      this.loginStatus = 'offline';
+    }
   }
 
-  private stopRetryTimer() {
-    if (this.retryTimer !== -1) {
-      clearInterval(this.retryTimer);
-      this.retryTimer = -1;
+  // Uint8Array → PixelMap
+  private async bytesToPm(data: Uint8Array): Promise<PixelMap> {
+    const buf: ArrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    const imgSrc: image.ImageSource = image.createImageSource(buf as ArrayBuffer);
+    const opts: image.DecodingOptions = { desiredSize: { width: 280, height: 155 } };
+    return await imgSrc.createPixelMap(opts);
+  }
+
+  // 滑块触摸
+  private handleCaptchaTouch(event: TouchEvent): void {
+    if (this.captchaSubmitting || !this.showCaptcha) { return; }
+    if (event.type === TouchType.Down) {
+      const touch: TouchObject = event.touches[0];
+      this.captchaActivePtr = touch.id;
+      this.captchaDragStartX = touch.x;
+      this.captchaLastRecMs = Date.now();
+      this.captchaTracks = [{ a: 0, b: 0, c: 0 }];
+      this.captchaLastA = 0;
+      this.captchaLastB = 0;
+      this.captchaErr = '';
+    } else if (event.type === TouchType.Move) {
+      const found: TouchObject | undefined = event.touches.find((t: TouchObject) => t.id === this.captchaActivePtr);
+      if (!found) { return; }
+      const dx: number = found.x - this.captchaDragStartX;
+      if (dx < 0 || dx > this.CAPTCHA_LIMIT) { return; }
+      this.captchaSliderLeft = dx;
+      const nowMs: number = Date.now();
+      const elapsed: number = nowMs - this.captchaLastRecMs;
+      if (elapsed < 20) { return; }
+      const a: number = Math.round(dx);
+      const b: number = 0;
+      const dist: number = (a - this.captchaLastA) * (a - this.captchaLastA)
+        + (b - this.captchaLastB) * (b - this.captchaLastB);
+      if (dist < 4) { return; }
+      this.captchaTracks.push({ a: a, b: b, c: elapsed });
+      this.captchaLastA = a;
+      this.captchaLastB = b;
+      this.captchaLastRecMs = nowMs;
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      this.captchaActivePtr = -1;
+      if (event.type === TouchType.Up && this.captchaTracks.length > 0) {
+        const finalDx: number = this.captchaSliderLeft;
+        this.captchaTracks.push({ a: Math.round(finalDx), b: 0, c: Date.now() - this.captchaLastRecMs });
+        this.submitCaptcha();
+      }
     }
+  }
+
+  // 验证码提交验证
+  private async submitCaptcha(): Promise<void> {
+    if (this.captchaTracks.length === 0 || !this.captchaFormFields) {
+      this.captchaErr = '请拖动滑块';
+      return;
+    }
+    this.captchaSubmitting = true;
+    this.captchaErr = '';
+    try {
+      const cas: CasLoginService = CasLoginService.getInstance();
+      const verified: boolean = await cas.verifySliderCaptcha(this.captchaTracks, this.captchaSmallBase64);
+      if (!verified) {
+        this.captchaErr = '验证失败，请重试';
+        this.resetCaptchaState();
+        return;
+      }
+      const username: string = PreferenceUtil.getString('ids_account');
+      const password: string = PreferenceUtil.getString('login_password');
+      const success: boolean = await cas.postLogin(username, password, this.captchaFormFields);
+      if (success) {
+        EhallService.getInstance().clearSessionCache();
+        await cas.syncCookiesToWebView();
+        this.showCaptcha = false;
+        this.isLoggedIn = true;
+        this.loginStatus = 'ok';
+        // warmup disabled
+        this.startPreload();
+      } else {
+        this.captchaErr = '登录失败，请重试';
+        this.resetCaptchaState();
+      }
+    } catch (e) {
+      this.captchaErr = String(e);
+      this.resetCaptchaState();
+    }
+  }
+
+  private resetCaptchaState(): void {
+    this.captchaSubmitting = false;
+    this.captchaTracks = [];
+    this.captchaSliderLeft = 0;
+  }
+
+  private closeCaptcha(): void {
+    this.showCaptcha = false;
+    this.loginStatus = 'expired';
+  }
+
+  // ====== 滑块验证码 Overlay ======
+  @Builder CaptchaOverlay() {
+    Stack() {
+      Column() {
+        // 关闭
+        Text('✕')
+          .fontSize(20).fontColor('#999999')
+          .margin({ bottom: 16 })
+          .onClick(() => { this.closeCaptcha(); })
+
+        if (this.captchaSubmitting) {
+          LoadingProgress().width(48).height(48).color('#2979FF').margin({ top: 60, bottom: 60 })
+          Text('请稍候...').fontSize(14).fontColor('#999999')
+          Blank()
+        } else {
+          // 拼图图片
+          Stack({ alignContent: Alignment.TopStart }) {
+            if (this.captchaBigPm) {
+              Image(this.captchaBigPm).width(280).height(155).objectFit(ImageFit.Fill)
+            } else {
+              Row().width(280).height(155).backgroundColor('#F5F5F5')
+            }
+            if (this.captchaSmallPm) {
+              Image(this.captchaSmallPm).width(44).height(155).objectFit(ImageFit.Fill)
+                .offset({ x: this.captchaSliderLeft, y: 0 })
+            }
+          }
+          .width(280).height(155).borderRadius(4).clip(true).backgroundColor('#F0F0F0')
+
+          // 滑块轨道
+          Stack({ alignContent: Alignment.TopStart }) {
+            Row().width(280).height(10).backgroundColor('#E0E0E0').borderRadius(5)
+            Row().width(Math.min(this.captchaSliderLeft + 4, 280)).height(10)
+              .backgroundColor('#4CAF50').borderRadius(5)
+            Row() {
+              Text('→').fontSize(18).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+            }
+            .width(this.CAPTCHA_THUMB).height(this.CAPTCHA_THUMB)
+            .borderRadius(21).backgroundColor('#4CAF50')
+            .justifyContent(FlexAlign.Center)
+            .shadow({ radius: 6, color: '#00000030', offsetY: 2 })
+            .offset({ x: this.captchaThumbOff(), y: -16 })
+          }
+          .width(280).height(this.CAPTCHA_THUMB + 10).margin({ top: 33 })
+          .onTouch((event: TouchEvent) => { this.handleCaptchaTouch(event); })
+
+          if (this.captchaErr.length > 0) {
+            Text(this.captchaErr).fontSize(13).fontColor('#FF6B6B').margin({ top: 12 })
+          }
+          Text('请按住滑块拖动到最右端').fontSize(12).fontColor('#999999').margin({ top: 16 })
+        }
+      }
+      .width(320).padding(20)
+      .backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .alignItems(HorizontalAlign.Center)
+    }
+    .width('100%').height('100%')
+    .backgroundColor('#00000080')
+    .alignContent(Alignment.Center)
+  }
+
+  private captchaThumbOff(): number {
+    return Math.max(0, Math.min(this.captchaSliderLeft - 1, 280 - this.CAPTCHA_THUMB));
   }
 
   // 登录成功后预加载课表、考试、实验数据
   private startPreload(): void {
+    AppStorage.setOrCreate('login_state', String(Date.now()));
     EhallService.getInstance().preloadAllData().catch((e: Error) => {
       console.warn('MainPage', 'preload failed: ' + String(e));
     });
@@ -316,7 +563,7 @@ struct MainPage {
         return;
       }
       // 解析classGrid（与ClassTablePage renderClassTable逻辑一致）
-      const items: ClassItemModel[] = DataParser.parseClassTable(raw);
+      const items: ClassItemModel[] = ClassService.parseClassTable(raw);
       const grid: PreviewCell[][][] = []; // [day][startSection] = PreviewCell[]
       for (let d = 0; d <= 7; d++) {
         grid[d] = [];
@@ -725,6 +972,8 @@ struct MainPage {
       FaqPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Dianfei') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , useWeChatUA: true , isTablet: this.isTablet })
+    } else if (name === 'PortalWeb_Physics') {
+      PortalWebPage({ pageInfo: this.pageInfo, title: '物理计算', url: 'https://experiment-helper.wizzstudio.com/#/', isTablet: this.isTablet })
     }
   }
 
@@ -754,14 +1003,39 @@ struct MainPage {
   }
 
   // ── 主题弹窗 ──
+  onColorModeChange(): void {
+    // @StorageProp + @Watch 确保 AppStorage 变化时 @State 自动同步
+    this.currentThemeLabel = this.buildThemeLabel(this.systemColorMode);
+  }
+
   selectTheme(mode: number): void {
     this.showThemeDialog = false;
     PreferenceUtil.putNumber('theme_color_mode', mode);
+    // 直接更新 @State 标签（确保 TabContent 内 Builder 实时刷新）
+    this.currentThemeLabel = this.buildThemeLabel(mode);
+    AppStorage.setOrCreate('currentColorMode', mode);
     if (mode === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET) {
       ThemeColors.applyFollowSystem(getContext());
     } else {
       ThemeColors.applyManual(mode, getContext());
     }
+  }
+
+  // 切换到"我的"Tab时刷新主题标签（非激活Tab被HdsTabs冻结，@State不触发重渲染）
+  refreshThemeLabel(): void {
+    const savedMode: number = PreferenceUtil.getNumber('theme_color_mode',
+      ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+    this.currentThemeLabel = this.buildThemeLabel(savedMode);
+  }
+
+  buildThemeLabel(mode: number): string {
+    if (mode === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET) return '当前：跟随系统';
+    if (mode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK) return '当前：深色模式';
+    return '当前：浅色模式';
+  }
+
+  getThemeLabel(): string {
+    return this.currentThemeLabel;
   }
 
   build() {
@@ -814,7 +1088,7 @@ struct MainPage {
         .onAnimationStart((_index: number, targetIndex: number) => {
           this.currentIndex = targetIndex;
           if (targetIndex === 0) { this.loadClassPreview(); }
-          else if (targetIndex === 2) { this.computeCacheSizeDirect(); }
+          else if (targetIndex === 2) { this.computeCacheSizeDirect(); this.refreshThemeLabel(); }
         })
         .width('100%')
         .layoutWeight(1)
@@ -838,7 +1112,7 @@ struct MainPage {
         .onChange((index: number) => {
           this.currentIndex = index;
           if (index === 0) { this.loadClassPreview(); }
-          else if (index === 2) { this.computeCacheSizeDirect(); }
+          else if (index === 2) { this.computeCacheSizeDirect(); this.refreshThemeLabel(); }
         })
         .width('100%')
         .layoutWeight(1)
@@ -855,10 +1129,21 @@ struct MainPage {
     .onNavigationModeChange((mode: NavigationMode) => {
       this.isSplit = mode;
     })
+    // 滑块验证码 overlay（原地弹窗，不跳页）—— 必须在 Navigation 之后，确保显示在最上层
+    if (this.showCaptcha) {
+      this.CaptchaOverlay()
+    }
     // 物理实验密码弹窗（始终渲染，visibility 控制显示，确保触摸事件正常）
     Column() {
       Column() {
-        Text('物理实验设置（test）').fontSize(18).fontWeight(FontWeight.Bold).margin({ bottom: 16 })
+        Row() {
+          Text('物理实验设置（test）').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Row() { Text('✕').fontSize(18).fontColor('#999999') }
+            .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => { this.showPhyPwdDialog = false; })
+        }.width('100%').margin({ bottom: 16 })
         TextInput({ placeholder: '输入物理实验密码', text: this.phyPwdInput })
           .type(InputType.Password)
           .width('100%').height(44).fontSize(15)
@@ -891,7 +1176,14 @@ struct MainPage {
     // 深色模式选择弹窗
     Column() {
       Column() {
-        Text('深色设置').fontSize(18).fontWeight(FontWeight.Bold).margin({ bottom: 16 }).fontColor(ThemeColors.textPrimary)
+        Row() {
+          Text('深色设置').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Row() { Text('✕').fontSize(18).fontColor('#999999') }
+            .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => { this.showThemeDialog = false; })
+        }.width('100%').margin({ bottom: 16 })
         Button('浅色').width('100%').height(44)
           .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT ? '#2979FF' : ThemeColors.bgInput)
           .fontColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT ? '#FFFFFF' : ThemeColors.textPrimary)
@@ -904,9 +1196,6 @@ struct MainPage {
           .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET ? '#2979FF' : ThemeColors.bgInput)
           .fontColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET ? '#FFFFFF' : ThemeColors.textPrimary)
           .onClick(() => { this.selectTheme(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET); })
-        Button('关闭').width('100%').height(40).margin({ top: 12 })
-          .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
-          .onClick(() => { this.showThemeDialog = false; })
       }
       .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
@@ -916,12 +1205,15 @@ struct MainPage {
     .backgroundColor(ThemeColors.overlay)
     .hitTestBehavior(this.showThemeDialog ? HitTestMode.Default : HitTestMode.None)
     .visibility(this.showThemeDialog ? Visibility.Visible : Visibility.None)
+    .onClick(() => { this.showThemeDialog = false; })
     } // closes Stack
     .width('100%').height('100%')
   }
   // 课表预览卡片
   @Builder
   ClassPreviewCard() {
+    // 强制感知课表数据变化
+    if (this.ctUpdated.length > 0) { /* do nothing, trigger re-eval */ }
     if (this.previewLoaded && this.previewCells.length > 0) {
       Column() {
         // 标题行
@@ -1113,8 +1405,8 @@ struct MainPage {
             Text('登录已过期').fontSize(11).fontColor('#FFCC8080')
           } else if (this.loginStatus === 'not_logged_in') {
             Text('未登录').fontSize(11).fontColor('#FFFFFF88')
-          } else if (this.loginStatus === 'no_network') {
-            Text('当前无网络').fontSize(11).fontColor('#FFFFCC80')
+          } else if (this.loginStatus === 'offline') {
+            Text('离线模式').fontSize(11).fontColor('#FFFFCC80')
           } else if (this.loginStatus === 'checking') {
             Text('正在验证...').fontSize(11).fontColor('#FFFFFF88')
           }
@@ -1127,11 +1419,17 @@ struct MainPage {
           }.width(32).height(32)
           Text(this.username || '已登录').fontSize(13).fontColor('#FFFFFFCC').margin({ left: 8 })
         } else {
-          Button('登录')
+          Button(this.loginStatus === 'expired' ? '重新登录' : '登录')
             .height(28).fontSize(12).fontColor('#FFFFFF')
             .backgroundColor('#FFFFFF33').borderRadius(14)
             .padding({ left: 12, right: 12 })
-            .onClick(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); })
+            .onClick(() => {
+              if (this.loginStatus === 'expired' || this.loginStatus === 'offline') {
+                this.doRelogin();
+              } else {
+                router.pushUrl({ url: 'pages/login/LoginPage' });
+              }
+            })
         }
       }
       .width('100%').height(60).padding({ left: 20, right: 16, top: 8 })
@@ -1177,10 +1475,12 @@ struct MainPage {
               () => { this.pageInfo.clear();
                 this.pageInfo.pushPath({ name: 'SchoolCardPage' }); })
           }
+          if (!PreferenceUtil.getBool('role')) {
           ListItem() {
             this.MenuItemBuilder('🔬', '实验信息', '查看实验课程安排', '#5C6BC0',
               () => { this.pageInfo.clear();
                 this.pageInfo.pushPath({ name: 'ExperimentPage' }); })
+          }
           }
           ListItem() {
             this.MenuItemBuilder('\u26a1', '水电查询', '查看宿舍水费电费', '#FF6D00',
@@ -1235,6 +1535,10 @@ struct MainPage {
             () => { this.pageInfo.pushPath({ name: 'PortalWeb_Ruisi' }); })
         }
         ListItem() {
+          this.MenuItemBuilder('🔬', '物理计算', '实验数据处理助手', '#00897B',
+            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Physics' }); })
+        }
+        ListItem() {
           this.MenuItemBuilder('🌐', '校园网登录', '登录校园网自助服务平台', '#00ACC1',
             () => { this.pageInfo.pushPath({ name: 'PortalWeb_Net' }); })
         }
@@ -1257,34 +1561,35 @@ struct MainPage {
       .backgroundColor(ThemeColors.bgCard)
       Divider().color('#F0F0F0')
 
-      if (!this.isLoggedIn) {
+      // 用户区域：已登录显示信息卡片，未登录显示登录入口，下方菜单始终可见
+      if (this.isLoggedIn) {
+        // 用户信息卡片
         Column() {
-          Text('👤').fontSize(64)
-          Text('请先登录').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-          Button('去登录').margin({ top: 16 })
-            .onClick(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          Row() {
+            Stack() {
+              Circle().width(56).height(56).fill('#2979FF')
+              Text('👤').fontSize(30).fontColor('#FFFFFF')
+            }.width(56).height(56)
+            Column() {
+              Text(this.username || '已登录')
+                .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              Text('西电校园助手').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
+            }.margin({ left: 16 })
+          }.width('100%')
+        }
+        .width('100%').padding(20).backgroundColor(ThemeColors.bgCard)
+        .margin({ left: 16, right: 16, top: 16 }).borderRadius(16)
       } else {
-        Column() {
-          // 用户信息卡片
-          Column() {
-            Row() {
-              Stack() {
-                Circle().width(56).height(56).fill('#2979FF')
-                Text('👤').fontSize(30).fontColor('#FFFFFF')
-              }.width(56).height(56)
-              Column() {
-                Text(this.username || '已登录')
-                  .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-                Text('西电校园助手').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
-              }.margin({ left: 16 })
-            }.width('100%')
-          }
-          .width('100%').padding(20).backgroundColor(ThemeColors.bgCard)
-          .margin({ left: 16, right: 16, top: 16 }).borderRadius(16)
+        // 未登录提示
+        Button('登录以使用完整功能')
+          .width('90%').height(44).fontSize(15).fontColor('#FFFFFF')
+          .backgroundColor('#2979FF').borderRadius(22)
+          .margin({ top: 24 })
+          .onClick(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); })
+      }
 
-          // 菜单
-          List({ space: 8 }) {
+      // 菜单（始终显示）
+      List({ space: 8 }) {
             ListItem() {
               this.MenuItemBuilder('🧪', '物理实验设置（test）',
                 this.phyPwdStatus,
@@ -1295,10 +1600,22 @@ struct MainPage {
                 })
             }
             ListItem() {
-              this.MenuItemBuilder('🌓', '深色设置',
-                '点击设置软件颜色偏好',
-                '#FF6D00',
-                () => { this.showThemeDialog = true; })
+              // 深色设置——内联实现（不用 MenuItemBuilder），desc 直接读 @State 才能实时刷新
+              Row() {
+                Stack({ alignContent: Alignment.Center }) {
+                  Circle().width(44).height(44).fill('#FF6D0022')
+                  Text('🌓').fontSize(22)
+                }.margin({ right: 16 })
+                Column() {
+                  Text('深色设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                  Text(this.currentThemeLabel).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                }.layoutWeight(1)
+                Text('›').fontSize(20).fontColor('#CCCCCC')
+              }
+              .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+              .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+              .onClick(() => { this.showThemeDialog = true; })
             }
             ListItem() {
               this.MenuItemBuilder('❓', '常见问题', '使用帮助和问题反馈', '#795548',
@@ -1338,8 +1655,6 @@ struct MainPage {
           }
           .padding({ left: 16, right: 16, top: 8 })
           .layoutWeight(1)
-        }.width('100%').layoutWeight(1)
-      }
     }
     .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
   }

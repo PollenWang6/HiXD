@@ -1,6 +1,8 @@
 // ClassTablePage.ets — 支持点击查看所有冲突课程版（已修复重叠课程覆盖问题）
 import { ThemeColors } from '../../utils/ThemeColors';
-import { EhallService, SemesterUtil, DataParser, ClassItemModel, ExamItemModel } from '../../services/EhallService';
+import { EhallService, SemesterUtil, ClassItemModel, ExamItemModel } from '../../services/EhallService';
+import { ClassService } from '../../services/ClassService';
+import { ExamService } from '../../services/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { HttpUtil } from '../../utils/HttpUtil';
 
@@ -90,6 +92,8 @@ class ClassCell {
 export struct ClassTablePage {
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
+  @State loadProgress: string = '';  // 加载进度文字
+  @State syncProgress: string = '';  // 后台同步状态（缓存已显示，服务器同步中）
   @State errorMsg: string = '';
   @State addFormToast: string = '';
   @State currentWeek: number = 1;
@@ -132,6 +136,7 @@ export struct ClassTablePage {
   @State customReminderInput: string = '30';
 
   private ehall = EhallService.getInstance();
+  private classSvc = ClassService.getInstance();
   private localFilePath: string = '';
   private readonly EXP_CACHE_KEY: string = 'sysj_exp_cache';
   private lastRenderedRaw: string = '';
@@ -140,11 +145,40 @@ export struct ClassTablePage {
   @State slideOffsetX: number = 0;
   @State slideOpacity: number = 1;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+  @StorageLink('preload_status') preloadStatus: string = '';
+  @StorageLink('login_state') @Watch('onLoginDetected') loginState: string = '';
+  @StorageLink('preload_progress') preloadProgress: string = '';
+  private _preloadWasRunning: boolean = false;
+  private _loginHandled: boolean = false;
+  private _preloadDone: boolean = false;
   private isAnimating: boolean = false;
+
+  onLoginDetected(): void {
+    if (this.loginState.length > 0 && !this._loginHandled) {
+      this._loginHandled = true;
+      if (!this.hasCache) {
+        // 无缓存：全屏加载
+        this.loadProgress = '登录成功，加载中...';
+        this._preloadWasRunning = true;
+        this.fetchAndSave();
+      } else {
+        // 已有缓存：后台同步，显示状态条
+        this._preloadWasRunning = true;
+        this.syncProgress = '正在同步最新数据...';
+        this.fetchAndSave();
+      }
+    }
+  }
 
   aboutToAppear(): void {
     this.semesterCode = SemesterUtil.getCurrentSemesterCode();
     this.currentWeek = SemesterUtil.calcCurrentWeekFromNow();
+    this._preloadWasRunning = (this.preloadStatus === 'loading');
+    // 研究生优先用 yjspt API 返回的实际周数
+    if (PreferenceUtil.getBool('role')) {
+      const yw: number = PreferenceUtil.getNumber('yjspt_current_week', 0);
+      if (yw > 0) { this.currentWeek = yw; }
+    }
     this.initGrid();
     this.waitAndLoad();
   }
@@ -248,21 +282,23 @@ export struct ClassTablePage {
 
   private async fetchAndSave(): Promise<void> {
     this.errorMsg = '';
+    this.loading = true;  // 确保加载动画显示（onLoginDetected 直接调用时 loading 可能为 false）
     const sid: string = PreferenceUtil.getString('ids_account');
     // Step 1: 缓存优先 — 有缓存先显示
     try {
       let cached: string | null = this.readLocalClassTable();
       if (!cached || cached.length < 100) {
-        cached = await this.ehall.getCachedClassTableStale(this.semesterCode, sid);
+        cached = await this.classSvc.getCachedClassTableStale(this.semesterCode, sid);
       }
       if (cached && cached.length >= 100) {
         this.renderClassTable(cached);
         this.lastRenderedRaw = cached;
         this.hasCache = true;
-        this.loading = false;
+        this.loading = false;  // 有缓存立即显示课表
         this.mergeExperimentDataIntoGrid();
-        if (!this.dataHint) {
-          this.dataHint = '📦 使用缓存数据，后台刷新中...';
+        // 有缓存且需后台同步：设置进度
+        if (this._preloadWasRunning) {
+          this.syncProgress = '正在同步最新数据...';
         }
       }
     } catch (_e) { /* ignore */ }
@@ -270,61 +306,66 @@ export struct ClassTablePage {
     // Step 2: 后台拉最新数据（需登录）
     const isLoggedIn = PreferenceUtil.getBool('is_logged_in');
     if (!isLoggedIn) {
-      this.dataHint = '⚠️ 未登录，显示缓存数据';
-      setTimeout(() => { this.dataHint = ''; }, 3000);
+      this.loadProgress = '⚠️ 未登录，显示缓存数据';
+      setTimeout(() => { this.loadProgress = ''; }, 3000);
       this.loading = false;
       return;
     }
 
     try {
       let raw: string | null = null;
-      raw = await this.ehall.getCachedClassTable(this.semesterCode, sid);
+      raw = await this.classSvc.getCachedClassTable(this.semesterCode, sid);
       if (!raw || raw.length < 100) {
-        this.dataHint = '🔄 正在同步课表数据...';
-        raw = await this.ehall.getClassTable(this.semesterCode, sid, true);
+        // 首次登录/预加载时显示同步提示，后续进入不显示
+        if (this._preloadWasRunning || !this.hasCache) {
+          this.syncProgress = '正在获取课表数据...';
+        }
+        raw = await this.classSvc.getClassTable(this.semesterCode, sid, true);
       }
       // 只有数据变化或首次加载才重新渲染
-      if (raw !== this.lastRenderedRaw || !this.hasCache) {
+      if (raw && (raw !== this.lastRenderedRaw || !this.hasCache)) {
         this.renderClassTable(raw);
         this.lastRenderedRaw = raw;
         this.hasCache = true;
       }
-      this.writeLocalClassTable(raw);
+      if (raw) { this.writeLocalClassTable(raw); }
       console.info('ClassTablePage', 'fetchAndSave: step3 exp+exam');
 
-      // Step 3: 同步实验和考试（网络获取）
-      let expCount = 0;
-      try {
-        expCount = await this.ehall.preloadOtherExperimentsDirect();
-        if (expCount > 0) { this.mergeExperimentDataIntoGrid(); }
-      } catch (_e) { /* ignore */ }
-      // 物理实验（独立于其他实验，没有密码或没数据也不报错）
-      try { await this.mergePhysicsExperiments(); } catch (_e) { /* ignore */ }
-      console.info('ClassTablePage', 'syncComplete: exp=' + expCount);
+      // Step 3: 同步实验和考试（仅在首登/无缓存时后台同步）
+      if (this._preloadWasRunning || !this.hasCache) {
+        this.syncProgress = '正在同步实验数据...';
+        let expCount = 0;
+        try {
+          expCount = await this.ehall.preloadOtherExperimentsDirect();
+          if (expCount > 0) { this.mergeExperimentDataIntoGrid(); }
+        } catch (_e) { /* ignore */ }
+        try { await this.mergePhysicsExperiments(); } catch (_e) { /* ignore */ }
+        console.info('ClassTablePage', 'syncComplete: exp=' + expCount);
 
-      this.loadExamDataInPlace().then((examCount: number) => {
-        console.info('ClassTablePage', 'syncComplete: exam=' + examCount);
-        const expPart = expCount > 0 ? '实验' : '';
-        const examPart = examCount > 0 ? '考试(' + examCount + '门)' : '';
-        const both = [expPart, examPart].filter(s => s.length > 0).join('、');
-        this.dataHint = both.length > 0 ? ('✅ 已同步' + both) : '✅ 已经是最新';
-        setTimeout(() => { this.dataHint = ''; }, 3000);
-      }).catch((e: Error) => {
-        console.error('ClassTablePage', 'loadExamDataInPlace error: ' + String(e));
-        this.dataHint = '';
-      });
-      // 兜底：最多 6 秒后自动消掉缓存提示
-      setTimeout(() => {
-        if (this.dataHint === '📦 使用缓存数据，后台刷新中...' ||
-            this.dataHint === '🔄 正在同步课表数据...') {
-          this.dataHint = '';
-        }
-      }, 6000);
+        this.syncProgress = '正在同步考试数据...';
+        this.loadExamDataInPlace().then((examCount: number) => {
+          console.info('ClassTablePage', 'syncComplete: exam=' + examCount);
+          this.syncProgress = '';
+          this.loading = false;
+        }).catch((e: Error) => {
+          console.error('ClassTablePage', 'loadExamDataInPlace error: ' + String(e));
+          this.syncProgress = '';
+          this.loading = false;
+        });
+      } else {
+        this.loading = false;
+        this.syncProgress = '';
+      }
+
+      // 首次登录：预加载实验/考试数据可能还未就绪，轮询等待后合并
+      if (this._preloadWasRunning && !this._preloadDone) {
+        this.schedulePreloadRetry(0);
+      }
     } catch (e) {
       if (this.hasCache && this.lastRenderedRaw && this.lastRenderedRaw.length > 0) {
         // 有缓存，网络失败可以接受
-        this.dataHint = '⚠️ 刷新失败，显示缓存数据';
-        setTimeout(() => { this.dataHint = ''; }, 3000);
+        this.loadProgress = '⚠️ 刷新失败，显示缓存数据';
+        setTimeout(() => { this.loadProgress = ''; }, 3000);
       } else {
         this.errorMsg = '加载课程表失败，请检查网络';
       }
@@ -334,18 +375,42 @@ export struct ClassTablePage {
     }
   }
 
+  // 轮询等待预加载完成（最多重试 6 次，每次间隔 3 秒 = 最长 18 秒）
+  private schedulePreloadRetry(retryCount: number): void {
+    if (retryCount >= 6) {
+      console.warn('ClassTablePage', 'schedulePreloadRetry: exhausted retries');
+      return;
+    }
+    setTimeout(() => {
+      if (this.preloadStatus === 'done') {
+        console.info('ClassTablePage', 'schedulePreloadRetry: preload done, re-merging');
+        if (!PreferenceUtil.getBool('role')) { this.mergeExperimentDataIntoGrid(); }
+        try { this.mergePhysicsExperiments(); } catch (_e) {}
+        this.loadExamDataInPlace();
+        this._preloadDone = true;
+      } else if (PreferenceUtil.getBool('is_logged_in')) {
+        console.info('ClassTablePage', 'schedulePreloadRetry: still loading, retry=' + retryCount);
+        this.schedulePreloadRetry(retryCount + 1);
+      }
+    }, 3000);
+  }
+
   async loadTable(forceRefresh: boolean = false): Promise<void> {
     if (forceRefresh) {
       this.refreshing = true;
       this.errorMsg = '';
       const sid: string = PreferenceUtil.getString('ids_account');
       try {
-        const raw: string = await this.ehall.getClassTable(this.semesterCode, sid, true);
+        const raw: string = await this.classSvc.getClassTable(this.semesterCode, sid, true);
         if (raw !== this.lastRenderedRaw) {
           this.renderClassTable(raw);
           this.lastRenderedRaw = raw;
         }
         this.writeLocalClassTable(raw);
+        // 刷新后重新合并实验和考试
+        this.mergeExperimentDataIntoGrid();
+        try { await this.mergePhysicsExperiments(); } catch (_e) {}
+        await this.loadExamDataInPlace();
       } catch (e) {
         this.errorMsg = '刷新失败，请检查网络';
       } finally {
@@ -364,7 +429,7 @@ export struct ClassTablePage {
   }
 
   private renderClassTable(raw: string): void {
-    const items: ClassItemModel[] = DataParser.parseClassTable(raw);
+    const items: ClassItemModel[] = ClassService.parseClassTable(raw);
     const nameColorMap = new Map<string, number>();
     let colorIdx = 0;
     const grid: ClassCell[][][] = [];
@@ -457,7 +522,7 @@ export struct ClassTablePage {
     console.info('ClassTablePage', 'loadExamDataInPlace: cacheLen=' + cached.length);
     if (cached.length === 0) return 0;
     try {
-      const items: ExamItemModel[] = DataParser.parseExamSchedule(cached);
+      const items: ExamItemModel[] = ExamService.parseExamSchedule(cached);
       console.info('ClassTablePage', 'loadExamDataInPlace: parsed=' + items.length);
       if (items.length > 0) {
         this.applyExamItems(items);
@@ -685,8 +750,9 @@ export struct ClassTablePage {
   build() {
     NavDestination() {
       Stack() {
-        // 第一层：主页面内容
-        Column() {
+        // 第一层：主页面内容（官方下拉刷新）
+        Refresh({ refreshing: $$this.refreshing }) {
+          Column() {
           this.buildHeader()
           if (this.showCacheBanner) {
             Row() {
@@ -694,17 +760,20 @@ export struct ClassTablePage {
             }.width('100%').height(28).justifyContent(FlexAlign.Center)
             .backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
           }
-          if (this.dataHint.length > 0) {
-            Row() {
-              Text(this.dataHint).fontSize(12).fontColor('#FFFFFF')
-            }.width('100%').height(28).justifyContent(FlexAlign.Center)
-            .backgroundColor('#43A047')
-          }
           Divider().color('#F0F0F0')
+          // 后台同步状态条（缓存已显示，正在后台拉取最新数据）
+          if (this.syncProgress.length > 0) {
+            Row() {
+              LoadingProgress().width(14).height(14).color('#2979FF').margin({ right: 8 })
+              Text(this.syncProgress).fontSize(13).fontColor('#2979FF')
+            }.width('100%').height(32).justifyContent(FlexAlign.Center)
+            .backgroundColor(ThemeColors.isDark ? '#1A2A3A' : '#E3F2FD')
+          }
           if (this.loading && !this.hasCache) {
             Column() {
               LoadingProgress().width(40).height(40).color('#2979FF')
-              Text('正在从学校服务器获取课程表...').fontSize(15).fontColor(ThemeColors.textPrimary).margin({ top: 16 })
+              Text(this.loadProgress.length > 0 ? this.loadProgress : '正在从学校服务器获取课程表...')
+                .fontSize(15).fontColor(ThemeColors.textPrimary).margin({ top: 16 })
               Text('首次加载约需 3~5 秒，请耐心等待').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 8 })
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else if (this.errorMsg.length > 0) {
@@ -724,6 +793,7 @@ export struct ClassTablePage {
           }
         }.width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
         .zIndex(0)
+        }.onRefreshing(() => { this.loadTable(true); })
 
         // 第二层：半透明背景遮罩
         if (this.showDetailDialog) {
@@ -733,17 +803,6 @@ export struct ClassTablePage {
             .opacity(this.maskOpacity)
             .onClick(() => { this.hideCellDetail(); })
             .zIndex(1)
-        }
-
-        // 刷新遮罩
-        if (this.refreshing) {
-          Column() {
-            LoadingProgress().width(40).height(40).color('#2979FF')
-            Text('刷新中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-          }.width('100%').height('100%')
-          .backgroundColor(ThemeColors.isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)')
-          .justifyContent(FlexAlign.Center)
-          .zIndex(2)
         }
 
         // 第三层：课程详情弹窗（支持显示多个冲突课程）
@@ -847,60 +906,86 @@ export struct ClassTablePage {
           .zIndex(2)
         }
 
-        // 手动添加课程弹窗
+        // 手动添加课程弹窗（overlay + 暗色背景 + 滚动区域）
         if (this.showAddCourseDialog) {
-          Column() {
-            Text('添加课程').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary).margin({ bottom: 16 })
-            Column({ space: 10 }) {
-              Row() { Text('课程名称').fontSize(14).fontColor(ThemeColors.textSecondary).width(72); TextInput({ placeholder: '必填', text: this.addCourseName }).onChange((v: string) => { this.addCourseName = v; }).layoutWeight(1).fontSize(14) }.width('100%')
-              Row() { Text('教师').fontSize(14).fontColor(ThemeColors.textSecondary).width(72); TextInput({ placeholder: '选填', text: this.addCourseTeacher }).onChange((v: string) => { this.addCourseTeacher = v; }).layoutWeight(1).fontSize(14) }.width('100%')
-              Row() { Text('教室').fontSize(14).fontColor(ThemeColors.textSecondary).width(72); TextInput({ placeholder: '选填', text: this.addCourseClassroom }).onChange((v: string) => { this.addCourseClassroom = v; }).layoutWeight(1).fontSize(14) }.width('100%')
-              Row() { Text('上课周次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72).alignSelf(ItemAlign.Start) }.width('100%')
-              Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-                ForEach(this.buildWeekOptions(), (week: number) => {
-                  Stack() {
-                    Circle()
-                      .width(36).height(36)
-                      .fill(this.addCourseWeekList[week - 1] ? '#2979FF' : '#F0F0F0')
-                    Text(String(week))
-                      .fontSize(14).fontColor(this.addCourseWeekList[week - 1] ? '#FFFFFF' : ThemeColors.textSecondary)
-                  }
-                  .margin({ right: 6, bottom: 8 })
-                  .onClick(() => {
-                    this.addCourseWeekList[week - 1] = !this.addCourseWeekList[week - 1];
-                  })
-                })
-              }.width('100%').margin({ top: 6 })
-              Row() { Text('星期').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
-                Select([
-                  { value: '请选择星期' },
-                  { value: '周一' },
-                  { value: '周二' },
-                  { value: '周三' },
-                  { value: '周四' },
-                  { value: '周五' },
-                  { value: '周六' },
-                  { value: '周日' }
-                ])
-                  .selected(this.addCourseDay).onSelect((idx: number) => { this.addCourseDay = idx; }).layoutWeight(1)
-              }.width('100%')
-              Row() { Text('开始节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
-                Select(this.buildSectionOptions())
-                  .selected(this.addCourseStartSection).onSelect((idx: number) => { this.addCourseStartSection = idx; }).layoutWeight(1)
-              }.width('100%')
-              Row() { Text('结束节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
-                Select(this.buildSectionOptions())
-                  .selected(this.addCourseEndSection).onSelect((idx: number) => { this.addCourseEndSection = idx; }).layoutWeight(1)
-              }.width('100%')
-            }.width('100%')
-            Row({ space: 12 }) {
-              Button('取消').layoutWeight(1).backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
-                .onClick(() => { this.showAddCourseDialog = false; this.resetAddCourseForm(); })
-              Button('添加').layoutWeight(1).backgroundColor('#2979FF').fontColor('#FFFFFF')
-                .onClick(() => { this.addCustomCourse(); })
-            }.margin({ top: 16 }).width('100%')
-          }.width('85%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(12)
-          .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetY: 10 }).zIndex(3)
+          Stack() {
+            Column()
+              .width('100%').height('100%')
+              .backgroundColor('rgba(0,0,0,0.5)')
+              .onClick(() => { this.showAddCourseDialog = false; this.resetAddCourseForm(); })
+            Column() {
+              // 标题栏
+              Row() {
+                Text('添加课程').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                Blank()
+                Row() { Text('✕').fontSize(20).fontColor('#999999') }
+                  .width(32).height(32).borderRadius(16).backgroundColor(ThemeColors.bgInput)
+                  .justifyContent(FlexAlign.Center)
+                  .onClick(() => { this.showAddCourseDialog = false; this.resetAddCourseForm(); })
+              }.width('100%').margin({ bottom: 16 })
+              // 滚动内容
+              Scroll() {
+                Column({ space: 10 }) {
+                  Row() { Text('课程名称').fontSize(14).fontColor(ThemeColors.textSecondary).width(72); TextInput({ placeholder: '必填', text: this.addCourseName }).onChange((v: string) => { this.addCourseName = v; }).layoutWeight(1).fontSize(14) }.width('100%')
+                  Row() { Text('教师').fontSize(14).fontColor(ThemeColors.textSecondary).width(72); TextInput({ placeholder: '选填', text: this.addCourseTeacher }).onChange((v: string) => { this.addCourseTeacher = v; }).layoutWeight(1).fontSize(14) }.width('100%')
+                  Row() { Text('教室').fontSize(14).fontColor(ThemeColors.textSecondary).width(72); TextInput({ placeholder: '选填', text: this.addCourseClassroom }).onChange((v: string) => { this.addCourseClassroom = v; }).layoutWeight(1).fontSize(14) }.width('100%')
+                  Row() { Text('上课周次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72).alignSelf(ItemAlign.Start) }.width('100%')
+                  Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+                    ForEach(this.buildWeekOptions(), (week: number) => {
+                      Stack() {
+                        // 当前周：蓝色圆环 (外圈)
+                        if (week === this.currentWeek) {
+                          Circle()
+                            .width(30).height(30)
+                            .fill('#00000000')
+                            .stroke('#2979FF')
+                            .strokeWidth(2)
+                        }
+                        // 内圈
+                        Circle()
+                          .width(26).height(26)
+                          .fill(this.addCourseWeekList[week - 1] ? '#2979FF' : ThemeColors.bgInput)
+                        Text(String(week))
+                          .fontSize(13).fontColor(this.addCourseWeekList[week - 1] ? '#FFFFFF' : ThemeColors.textSecondary)
+                      }
+                      .margin({ right: 4, bottom: 6 })
+                      .onClick(() => {
+                        this.addCourseWeekList[week - 1] = !this.addCourseWeekList[week - 1];
+                      })
+                    })
+                  }.width('100%').margin({ top: 4 })
+                  Row() { Text('星期').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
+                    Select([
+                      { value: '请选择星期' },
+                      { value: '周一' },
+                      { value: '周二' },
+                      { value: '周三' },
+                      { value: '周四' },
+                      { value: '周五' },
+                      { value: '周六' },
+                      { value: '周日' }
+                    ])
+                      .selected(this.addCourseDay).onSelect((idx: number) => { this.addCourseDay = idx; }).layoutWeight(1)
+                  }.width('100%')
+                  Row() { Text('开始节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
+                    Select(this.buildSectionOptions())
+                      .selected(this.addCourseStartSection).onSelect((idx: number) => { this.addCourseStartSection = idx; }).layoutWeight(1)
+                  }.width('100%')
+                  Row() { Text('结束节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
+                    Select(this.buildSectionOptions())
+                      .selected(this.addCourseEndSection).onSelect((idx: number) => { this.addCourseEndSection = idx; }).layoutWeight(1)
+                  }.width('100%')
+                }.width('100%')
+              }.width('100%').height(360).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
+              Row({ space: 12 }) {
+                Button('取消').layoutWeight(1).backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
+                  .onClick(() => { this.showAddCourseDialog = false; this.resetAddCourseForm(); })
+                Button('添加').layoutWeight(1).backgroundColor('#2979FF').fontColor('#FFFFFF')
+                  .onClick(() => { this.addCustomCourse(); })
+              }.margin({ top: 16 }).width('100%')
+            }.width('82%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(12)
+            .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetY: 10 })
+          }.width('100%').height('100%').zIndex(3)
         }
 
         // 日历提醒选择弹窗
@@ -980,6 +1065,24 @@ export struct ClassTablePage {
     .hideBackButton(true)
     .title({ builder: this.customTitle(), height: 56 })
     .onReady(() => {})
+    .onBackPressed(() => {
+      if (this.showAddCourseDialog) {
+        this.showAddCourseDialog = false;
+        this.resetAddCourseForm();
+        return true;
+      }
+      if (this.showDetailDialog) {
+        this.showDetailDialog = false;
+        this.currentConflictCells = [];
+        this.cardScale = 0.85;
+        return true;
+      }
+      if (this.showReminderDialog) {
+        this.showReminderDialog = false;
+        return true;
+      }
+      return false;
+    })
   }
 
   @Builder DetailRow(label: string, value: string) {
