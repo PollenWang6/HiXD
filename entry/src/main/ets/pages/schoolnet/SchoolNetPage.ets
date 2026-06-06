@@ -2,6 +2,7 @@
 import { ThemeColors } from '../../utils/ThemeColors';
 import { SchoolnetService } from '../../services/SchoolnetService';
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct SchoolNetPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -133,7 +134,8 @@ export struct SchoolNetPage {
       }
     }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
   }
-    .title('校园网', { backgroundColor: ThemeColors.bgCard })
+    .title('校园网', { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }
 }

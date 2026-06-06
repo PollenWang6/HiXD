@@ -34,6 +34,7 @@ interface BorrowItem {
 }
 
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct LibraryPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -242,7 +243,8 @@ export struct LibraryPage {
       modalTransition: ModalTransition.DEFAULT,
       backgroundColor: Color.Transparent
     })
-    .title('图书馆', { backgroundColor: ThemeColors.bgCard })
+    .title('图书馆', { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
   }
   @Builder
   bookDetailBuilder() {

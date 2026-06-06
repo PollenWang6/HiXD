@@ -4,6 +4,7 @@ import { ThemeColors } from '../../utils/ThemeColors';
 import { EmptyClassroomItem, BuildingInfo } from '../../services/Models';
 import { EmptyClassroomService } from '../../services/EmptyClassroomService';
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct EmptyClassroomPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -171,7 +172,8 @@ export struct EmptyClassroomPage {
       }
     }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
   }
-    .title('空闲教室', { backgroundColor: ThemeColors.bgCard })
+    .title('空闲教室', { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }
 }

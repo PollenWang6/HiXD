@@ -79,6 +79,7 @@ function base64Encode(u8: Uint8Array): string {
   return result;
 }
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ElectricityPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -688,7 +689,8 @@ export struct ElectricityPage {
       }
       .width('100%').height('100%')
     }
-    .title('水电查询', { backgroundColor: ThemeColors.bgCard })
+    .title('水电查询', { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }
 }

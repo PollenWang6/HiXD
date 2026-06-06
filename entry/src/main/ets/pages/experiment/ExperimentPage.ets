@@ -32,6 +32,7 @@ interface ExpCard {
 function formatDate(d: Date): string { let m=String(d.getMonth()+1).padStart(2,'0'); let day=String(d.getDate()).padStart(2,'0'); return d.getFullYear()+'-'+m+'-'+day; }
 function getWeekdayName(w: number): string { let i=w-1; return (i>=0&&i<7)?WEEKDAY_NAMES[i]:''; }
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ExperimentPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -436,7 +437,8 @@ export struct ExperimentPage {
           }
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
-    }.title('\u5b9e\u9a8c\u4fe1\u606f', { backgroundColor: ThemeColors.bgCard })
+    }.title('\u5b9e\u9a8c\u4fe1\u606f', { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
   }
 
   @Builder

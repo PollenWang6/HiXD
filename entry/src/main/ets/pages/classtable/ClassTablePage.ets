@@ -88,6 +88,7 @@ class ClassCell {
 }
 
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ClassTablePage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -1063,7 +1064,8 @@ export struct ClassTablePage {
       }.width('100%').height('100%')
     }
     .hideBackButton(true)
-    .title({ builder: this.customTitle(), height: 56 }, { backgroundColor: ThemeColors.bgCard })
+    .title({ builder: this.customTitle(), height: 56 }, { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .onReady(() => {})
     .onBackPressed(() => {
       if (this.showAddCourseDialog) {

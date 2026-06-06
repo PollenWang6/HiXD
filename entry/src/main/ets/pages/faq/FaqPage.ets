@@ -1,6 +1,7 @@
 // FaqPage.ets — 常见问题
 import { ThemeColors } from '../../utils/ThemeColors';
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct FaqPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -68,7 +69,8 @@ export struct FaqPage {
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
     }
-    .title(this.customTitle(), { backgroundColor: ThemeColors.bgCard })
+    .title(this.customTitle(), { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .hideBackButton(true)
   }
 

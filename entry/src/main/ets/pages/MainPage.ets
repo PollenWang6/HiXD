@@ -1,6 +1,7 @@
 // MainPage.ets - 底部Tab栏主页(主页·更多功能·我的)
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
+import { AccentColors, ACCENT_PRESETS } from '../utils/AccentColors';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { EhallService, SemesterUtil, ClassItemModel } from '../services/EhallService';
 import { ClassService } from '../services/ClassService';
@@ -78,6 +79,7 @@ class PreviewCell {
 @Component
 struct MainPage {
   onBackPress(): boolean {
+    if (this.showColorPicker) { this.showColorPicker = false; return true; }
     if (this.showThemeDialog) { this.showThemeDialog = false; return true; }
     if (this.showPhyPwdDialog) { this.showPhyPwdDialog = false; return true; }
     if (this.showCaptcha) { this.closeCaptcha(); return true; }
@@ -108,6 +110,9 @@ struct MainPage {
   @State phyPwdInput: string = '';
   @State phyPwdStatus: string = '未设置';
   @State showThemeDialog: boolean = false;
+  @State showColorPicker: boolean = false;
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('accent_index') accentIdx: number = 0;
   @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
   @State currentThemeLabel: string = '当前：浅色模式';
   @State warmupActive: boolean = false;
@@ -163,6 +168,7 @@ struct MainPage {
     const savedMode: number = PreferenceUtil.getNumber('theme_color_mode',
       ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     ThemeColors.init(savedMode, getContext());
+    AccentColors.init();
     // 同步初始标签
     this.currentThemeLabel = this.buildThemeLabel(savedMode);
     AppStorage.setOrCreate('currentColorMode', savedMode);
@@ -1206,6 +1212,41 @@ struct MainPage {
     .hitTestBehavior(this.showThemeDialog ? HitTestMode.Default : HitTestMode.None)
     .visibility(this.showThemeDialog ? Visibility.Visible : Visibility.None)
     .onClick(() => { this.showThemeDialog = false; })
+    // 主题色选择弹窗
+    Column() {
+      Column() {
+        Row() {
+          Text('选择主题色').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Row() { Text('✕').fontSize(18).fontColor('#999999') }
+            .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => { this.showColorPicker = false; })
+        }.width('100%').margin({ bottom: 16 })
+        Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+          ForEach(ACCENT_PRESETS, (preset: string[], idx: number) => {
+            Column() {
+              Stack() {
+                Circle().width(44).height(44).fill(preset[0])
+                if (idx === this.accentIdx) {
+                  Text('✓').fontSize(20).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+                }
+              }
+              Text(preset[1]).fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
+            }.margin({ right: 12, bottom: 12 })
+            .onClick(() => { AccentColors.select(idx); this.showColorPicker = false; })
+          }, (preset: string[], idx: number) => String(idx))
+        }.width('100%')
+      }
+      .width('85%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 20, color: '#30000000' })
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(ThemeColors.overlay)
+    .hitTestBehavior(this.showColorPicker ? HitTestMode.Default : HitTestMode.None)
+    .visibility(this.showColorPicker ? Visibility.Visible : Visibility.None)
+    .onClick(() => { this.showColorPicker = false; })
     } // closes Stack
     .width('100%').height('100%')
   }
@@ -1616,6 +1657,24 @@ struct MainPage {
               .borderRadius(12).backgroundColor(ThemeColors.bgCard)
               .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
               .onClick(() => { this.showThemeDialog = true; })
+            }
+            ListItem() {
+              // 主题色选择——内联实现，实时显示当前色
+              Row() {
+                Stack({ alignContent: Alignment.Center }) {
+                  Circle().width(44).height(44).fill(this.accentColor + '22')
+                  Circle().width(20).height(20).fill(this.accentColor)
+                }.margin({ right: 16 })
+                Column() {
+                  Text('主题色').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                  Text(AccentColors.currentName).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                }.layoutWeight(1)
+                Text('›').fontSize(20).fontColor('#CCCCCC')
+              }
+              .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+              .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+              .onClick(() => { this.showColorPicker = true; })
             }
             ListItem() {
               this.MenuItemBuilder('❓', '常见问题', '使用帮助和问题反馈', '#795548',

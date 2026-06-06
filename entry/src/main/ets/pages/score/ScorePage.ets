@@ -3,6 +3,7 @@ import { EhallService, SemesterUtil, ScoreItemModel, ComposeDetail } from '../..
 import { ScoreService } from '../../services/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ScorePage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -442,7 +443,8 @@ export struct ScorePage {
       .width('100%')
       .height('100%')
     }
-    .title('成绩查询', { backgroundColor: ThemeColors.bgCard })
+    .title('成绩查询', { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
     .onBackPressed(() => {
       if (this.selectedCell !== null) {

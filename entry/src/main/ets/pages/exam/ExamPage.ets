@@ -16,6 +16,7 @@ const EXAM_CARD_COLORS: string[][] = [
 ];
 
 
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ExamPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -144,7 +145,8 @@ export struct ExamPage {
       .height('100%')
       .backgroundColor(ThemeColors.bgPage)
     }
-    .title('考试安排', { backgroundColor: ThemeColors.bgCard })
+    .title('考试安排', { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {
       // NavDestination 初始化完成
     })
