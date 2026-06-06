@@ -88,9 +88,9 @@ class ClassCell {
 }
 
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ClassTablePage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State loadProgress: string = '';  // 加载进度文字

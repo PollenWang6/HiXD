@@ -34,9 +34,9 @@ interface BorrowItem {
 }
 
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct LibraryPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State searchWord: string = '';
   @State books: BookItem[] = [];

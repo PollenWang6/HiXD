@@ -16,9 +16,9 @@ const EXAM_CARD_COLORS: string[][] = [
 ];
 
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ExamPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State errorMsg: string = '';

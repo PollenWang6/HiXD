@@ -32,9 +32,9 @@ interface ExpCard {
 function formatDate(d: Date): string { let m=String(d.getMonth()+1).padStart(2,'0'); let day=String(d.getDate()).padStart(2,'0'); return d.getFullYear()+'-'+m+'-'+day; }
 function getWeekdayName(w: number): string { let i=w-1; return (i>=0&&i<7)?WEEKDAY_NAMES[i]:''; }
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ExperimentPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State pageState: PageState = PageState.IDLE;
   @State statusText: string = '';

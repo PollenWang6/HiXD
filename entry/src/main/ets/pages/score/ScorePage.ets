@@ -3,9 +3,9 @@ import { EhallService, SemesterUtil, ScoreItemModel, ComposeDetail } from '../..
 import { ScoreService } from '../../services/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ScorePage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State errorMsg: string = '';

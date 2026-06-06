@@ -79,9 +79,9 @@ function base64Encode(u8: Uint8Array): string {
   return result;
 }
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct ElectricityPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State isLoading: boolean = true;
   @State loadError: string = '';

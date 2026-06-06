@@ -6,9 +6,9 @@ const TAG = 'SchoolCardPage';
 
 const SCHOOL_CARD_URL = 'https://v8scan.xidian.edu.cn/home/openXDOAuth2Page';
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct SchoolCardPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State isLoading: boolean = true;
   @State loadError: string = '';

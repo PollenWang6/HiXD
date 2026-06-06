@@ -2,9 +2,9 @@
 import { ThemeColors } from '../../utils/ThemeColors';
 import { SchoolnetService } from '../../services/SchoolnetService';
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct SchoolNetPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State errorMsg: string = '';

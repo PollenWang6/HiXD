@@ -4,9 +4,9 @@ import { ThemeColors } from '../../utils/ThemeColors';
 import { EmptyClassroomItem, BuildingInfo } from '../../services/Models';
 import { EmptyClassroomService } from '../../services/EmptyClassroomService';
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct EmptyClassroomPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State loadingBuildings: boolean = false;

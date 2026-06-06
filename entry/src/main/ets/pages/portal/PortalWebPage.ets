@@ -12,9 +12,9 @@ const EXTERNAL_SCHEMES: string[] = ['weixin://', 'alipays://', 'wechat://'];
 // 伪装微信浏览器 UA，绕过移动门户的微信限制
 const WE_CHAT_UA: string = 'Mozilla/5.0 (Linux; Android 12; HarmonyOS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36 MicroMessenger/8.0.50';
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct PortalWebPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @Prop title: string = '';
   @Prop url: string = '';

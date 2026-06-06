@@ -1,9 +1,9 @@
 // FaqPage.ets — 常见问题
 import { ThemeColors } from '../../utils/ThemeColors';
 
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
 @Component
 export struct FaqPage {
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @Prop isTablet: boolean = false;
