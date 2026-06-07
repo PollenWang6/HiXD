@@ -2,6 +2,7 @@
 // 替代 WebView 自动填表方案，消除 Cookie 隔离问题
 import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, LoginProgress, CasFormFields } from '../../services/CasLoginService';
 import { EhallService } from '../../services/EhallService';
+import { UserInfoService } from '../../services/UserInfoService';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { router } from '@kit.ArkUI';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
@@ -12,7 +13,6 @@ const TAG = 'LoginPage';
 @Entry
 @Component
 struct LoginPage {
-  // ===== 表单状态 =====
   @State username: string = '';
   @State password: string = '';
   @State passwordVisible: boolean = false;
@@ -20,16 +20,15 @@ struct LoginPage {
   @State isSubmitting: boolean = false;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
-  // ===== 滑块状态 =====
+  // 滑块验证码状态
   @State showCaptcha: boolean = false;
-  @State jumpToCaptcha: boolean = false;  // 绕过密码表单→直接走验证码
+  @State jumpToCaptcha: boolean = false;
   @State captchaLoading: boolean = false;
   @State sliderLeftPx: number = 0;
   @State captchaError: string = '';
-  @State puzzleBigPm: PixelMap | null = null;
-  @State puzzleSmallPm: PixelMap | null = null;
+  @State puzzleBigPm: image.PixelMap | null = null;
+  @State puzzleSmallPm: image.PixelMap | null = null;
 
-  // ===== 内部变量 =====
   private cas: CasLoginService = CasLoginService.getInstance();
   private tracks: TrackPoint[] = [];
   private dragStartX: number = 0;
@@ -41,12 +40,12 @@ struct LoginPage {
   private readonly RECORD_INTERVAL_MS: number = 20;
   private readonly RECORD_DISTANCE_PX: number = 2;
   private readonly THUMB_SIZE: number = 42;
-  private readonly dragLimit: number = 240; // PUZZLE_WIDTH - SLIDER_RIGHT_PADDING = 280-40
+  private readonly dragLimit: number = 240;
 
   aboutToAppear(): void {
     this.username = PreferenceUtil.getString('ids_account');
     this.password = PreferenceUtil.getString('login_password');
-    // 从「登录已过期」入口进入：跳过密码表单，直接走验证码
+    // 从已过期入口进入：跳过密码表单，直接走验证码
     try {
       const params = router.getParams() as Record<string, Object>;
       if (params && (params['jumpToCaptcha'] as boolean) === true) {
@@ -57,7 +56,6 @@ struct LoginPage {
     } catch (_e) { /* ignore */ }
   }
 
-  // ===== 登录流程 =====
   private formFields: CasFormFields | null = null;
   private captchaSmallBase64: string = '';
 
@@ -74,14 +72,14 @@ struct LoginPage {
     this.formFields = null;
 
     try {
-      // Step 1-2: 获取登录表单 + 验证码图片
       const fields: CasFormFields = await this.cas.getLoginPageForm((p: LoginProgress) => {
         this.statusText = p.message;
       });
 
-      // TGC 有效 → CAS 直接 302 到 ehall，没有登录表单
       if (!fields.execution) {
         await PreferenceUtil.putBool('is_logged_in', true);
+        // 异步抓取 xgxt 用户基本信息
+        this.runXgxtFetch();
         this.statusText = '自动登录成功！';
         setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 400);
         return;
@@ -94,11 +92,10 @@ struct LoginPage {
       });
       this.captchaSmallBase64 = puzzle.smallImage;
 
-      // 解码图片
       const imgs: PuzzleImages = this.cas.getPuzzleImages(puzzle);
       this.pieces = imgs;
-      const bigPm: PixelMap = await this.bytesToPixelMap(imgs.bigPm);
-      const smallPm: PixelMap = await this.bytesToPixelMap(imgs.smallPm);
+      const bigPm: image.PixelMap = await this.bytesToPixelMap(imgs.bigPm);
+      const smallPm: image.PixelMap = await this.bytesToPixelMap(imgs.smallPm);
       this.puzzleBigPm = bigPm;
       this.puzzleSmallPm = smallPm;
       this.showCaptcha = true;
@@ -125,13 +122,11 @@ struct LoginPage {
     this.statusText = '正在验证...';
 
     try {
-      // Step 3: 验证滑块轨迹（不再重新拉表单和验证码）
       const verified: boolean = await this.cas.verifySliderCaptcha(this.tracks, this.captchaSmallBase64);
       if (!verified) {
         throw new Error('验证码校验失败');
       }
 
-      // Step 4: POST 登录
       this.statusText = '正在登录...';
       const success: boolean = await this.cas.postLogin(
         this.username,
@@ -147,12 +142,14 @@ struct LoginPage {
         await PreferenceUtil.putBool('is_logged_in', true);
         await this.cas.syncCookiesToWebView();
         await this.cas.checkWhetherPostgraduate();
+        // 异步抓取 xgxt 用户基本信息
+        this.runXgxtFetch();
         // 研究生：拉取 yjspt 学期码并缓存
         if (PreferenceUtil.getBool('role')) {
           try {
             const sem: string = await EhallService.getInstance().getSemesterInfoYjspt();
             PreferenceUtil.putString('yjspt_semester', sem);
-          } catch (_e) { /* 学期码非关键，失败不阻塞 */ }
+          } catch (_e) { /* 非关键 */ }
         }
         this.statusText = '登录成功！';
         setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 400);
@@ -163,16 +160,25 @@ struct LoginPage {
     } catch (e) {
       const msg: string = String(e);
       this.statusText = msg;
-      this.toForm();  // 不管什么错误都回到表单，不再重试
+      this.toForm();
       this.isSubmitting = false;
     }
+  }
+
+  // 异步抓取 ehall 用户信息 + 诊断日志
+  private runXgxtFetch(): void {
+    console.info(TAG, 'runXgxtFetch: start, username=' + this.username);
+    UserInfoService.getInstance().fetchFromEhall(this.username).then((ok: boolean) => {
+      console.info(TAG, 'runXgxtFetch: result=' + String(ok));
+    }).catch((e: Error) => {
+      console.error(TAG, 'runXgxtFetch: exception=' + e.message);
+    });
   }
 
   toForm(): void {
     this.showCaptcha = false;
     this.captchaLoading = false;
     this.isSubmitting = false;
-    // 直接验证码模式：失败后重试验证码加载，不回到密码表单
     if (this.jumpToCaptcha) {
       this.statusText = '正在重新加载验证...';
       setTimeout(() => { this.doLogin(); }, 500);
@@ -186,7 +192,6 @@ struct LoginPage {
     this.isSubmitting = false;
   }
 
-  // ========== 滑块触摸处理 ==========
   private handleTouch(event: TouchEvent): void {
     if (this.isSubmitting) { return; }
 
@@ -209,7 +214,7 @@ struct LoginPage {
       const elapsed: number = now - this.lastRecordTime;
       if (elapsed < this.RECORD_INTERVAL_MS) { return; }
       const a: number = Math.round(dx);
-      const b: number = Math.round(0); // y抖动忽略（简单化）
+      const b: number = Math.round(0);
       const dist: number = (a - this.lastTrackA) * (a - this.lastTrackA) + (b - this.lastTrackB) * (b - this.lastTrackB);
       if (dist < this.RECORD_DISTANCE_PX * this.RECORD_DISTANCE_PX) { return; }
       this.tracks.push({ a: a, b: b, c: elapsed });
@@ -226,10 +231,9 @@ struct LoginPage {
     }
   }
 
-  // ========== 工具方法 ==========
-  private async bytesToPixelMap(data: Uint8Array): Promise<PixelMap> {
+  private async bytesToPixelMap(data: Uint8Array): Promise<image.PixelMap> {
     const buffer: ArrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-    const imageSource: image.ImageSource = image.createImageSource(buffer as ArrayBuffer);
+    const imageSource: image.ImageSource = image.createImageSource(buffer);
     const opts: image.DecodingOptions = { desiredSize: { width: 280, height: 155 } };
     const pm: image.PixelMap = await imageSource.createPixelMap(opts);
     return pm;
@@ -239,16 +243,14 @@ struct LoginPage {
     return Math.max(0, Math.min(this.sliderLeftPx - 1, 280 - this.THUMB_SIZE));
   }
 
-  // ========== UI ==========
   build() {
     Stack() {
       Column() {
-        // 标题栏
         Row() {
           Text('登录').fontSize(20).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
           Blank()
           if (this.isSubmitting && !this.showCaptcha) {
-            LoadingProgress().width(24).height(24).color((AppStorage.get('accent_color') as string ?? '#2979FF'))
+            LoadingProgress().width(24).height(24).color('#2979FF')
           }
         }
         .width('100%').height(56).padding({ left: 16, right: 16 })
@@ -261,7 +263,6 @@ struct LoginPage {
           this.buildLoginForm()
         }
 
-        // 底部提示
         Column() {
           Text('请使用统一身份认证账号登录').fontSize(12).fontColor(ThemeColors.textSecondary)
           Text('登录信息仅保存在本设备').fontSize(11).fontColor('#BBBBBB').margin({ top: 4 })
@@ -271,12 +272,10 @@ struct LoginPage {
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
 
-      // 滑块验证码 overlay（暗色遮罩 + 居中卡片）
       if (this.showCaptcha) {
         Column() {
           Stack() {
             Column() {
-              // 关闭按钮
               Row() {
                 Blank()
                 Text('✕')
@@ -285,11 +284,10 @@ struct LoginPage {
               }.width('100%').margin({ bottom: 16 })
 
               if (this.isSubmitting) {
-                LoadingProgress().width(48).height(48).color((AppStorage.get('accent_color') as string ?? '#2979FF')).margin({ top: 60, bottom: 60 })
+                LoadingProgress().width(48).height(48).color('#2979FF').margin({ top: 60, bottom: 60 })
                 Text(this.statusText || '请稍候...').fontSize(14).fontColor(ThemeColors.textSecondary)
                 Blank()
               } else {
-                // 验证码图片区域
                 Stack({ alignContent: Alignment.TopStart }) {
                   if (this.puzzleBigPm) {
                     Image(this.puzzleBigPm).width(280).height(155).objectFit(ImageFit.Fill)
@@ -304,7 +302,6 @@ struct LoginPage {
                 .width(280).height(155).borderRadius(4)
                 .clip(true).backgroundColor('#F0F0F0')
 
-                // 滑块拖动区域
                 Stack({ alignContent: Alignment.TopStart }) {
                   Row().width(280).height(10).backgroundColor('#E0E0E0').borderRadius(5)
                   Row().width(Math.min(this.sliderLeftPx + 4, 280)).height(10)
@@ -352,7 +349,6 @@ struct LoginPage {
       }
       .width('100%').alignItems(HorizontalAlign.Start)
 
-      // 学号
       Row() {
         TextInput({ placeholder: '请输入学号', text: this.username })
           .width('100%').height(48).fontSize(16)
@@ -363,7 +359,6 @@ struct LoginPage {
           .onChange((value: string) => { this.username = value; })
       }.width('100%')
 
-      // 密码
       Row() {
         TextInput({ placeholder: '请输入密码', text: this.password })
           .width('100%').height(48).fontSize(16)
@@ -376,24 +371,21 @@ struct LoginPage {
       }
       .width('100%').margin({ top: 16 })
 
-      // 登录按钮
       Button(this.isSubmitting ? '正在加载...' : '登录')
         .width('100%').height(48).fontSize(16).fontColor('#FFFFFF')
-        .backgroundColor(this.isSubmitting ? '#90CAF9' : (AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(8)
+        .backgroundColor(this.isSubmitting ? '#90CAF9' : '#2979FF').borderRadius(8)
         .margin({ top: 32 })
         .enabled(!this.isSubmitting)
         .onClick(() => this.doLogin())
 
-      // 状态/错误提示
       if (this.statusText.length > 0) {
         Text(this.statusText)
           .fontSize(13)
-          .fontColor(this.statusText.indexOf('失败') >= 0 || this.statusText.indexOf('误') >= 0 ?
+          .fontColor(this.statusText.indexOf('失败') >= 0 || this.statusText.indexOf('错') >= 0 ?
             '#FF6B6B' : '#666666')
           .margin({ top: 16 })
       }
 
-      // 隐私说明
       Text('账号密码仅保存在本设备，不会上传至任何服务器').fontSize(12).fontColor('#BBBBBB')
         .margin({ top: 24 })
     }
@@ -403,10 +395,9 @@ struct LoginPage {
     .backgroundColor(ThemeColors.bgCard)
   }
 
-  // 验证码加载中占位（绕开密码表单，不触发密码保险箱）
   @Builder buildCaptchaLoading() {
     Column() {
-      LoadingProgress().width(48).height(48).color((AppStorage.get('accent_color') as string ?? '#2979FF'))
+      LoadingProgress().width(48).height(48).color('#2979FF')
       Text(this.statusText || '正在准备验证...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 16 })
     }
     .width('100%').layoutWeight(1)

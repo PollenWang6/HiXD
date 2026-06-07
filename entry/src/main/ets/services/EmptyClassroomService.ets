@@ -258,9 +258,10 @@ export class EmptyClassroomService {
   }
 
   private calcSemesterDate(semYear: string, semPart: string, week: number, day: number): string {
+    const swift: number = PreferenceUtil.getNumber('week_swift', 0);
     const startDate = SemesterUtil.getSemesterStartDate(semYear, semPart);
     const dayMs = 24 * 60 * 60 * 1000;
-    const target = new Date(startDate.getTime() + (week - 1) * 7 * dayMs + (day - 1) * dayMs);
+    const target = new Date(startDate.getTime() + (week - 1 - swift) * 7 * dayMs + (day - 1) * dayMs);
     const y = target.getFullYear();
     const m = String(target.getMonth() + 1).padStart(2, '0');
     const d = String(target.getDate()).padStart(2, '0');

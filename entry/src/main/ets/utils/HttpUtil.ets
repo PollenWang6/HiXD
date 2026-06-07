@@ -500,6 +500,19 @@ export class HttpUtil {
 
       const httpMethod = method === 'GET' ? http.RequestMethod.GET : http.RequestMethod.POST;
 
+      // 捕获中间重定向的 Set-Cookie（不阻止重定向，只存 cookie）
+      req.on('headersReceive', (header: Object) => {
+        const hdr = header as Record<string, string | number | string[]>;
+        const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
+        if (sc) {
+          const loc = hdr['location'] || hdr['Location'] || '';
+          const locStr: string = typeof loc === 'string' ? loc : String(loc);
+          const redirectDomain: string = locStr.length > 0 ? this.getDomain(locStr) : this.getDomain(url);
+          this.saveResponseCookies(redirectDomain, typeof sc === 'string' ? sc : String(sc));
+          this.saveCookies().catch(() => {});
+        }
+      });
+
       req.request(
         url,
         {

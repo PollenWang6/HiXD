@@ -21,12 +21,17 @@ import { PortalWebPage } from './portal/PortalWebPage';
 import { SchoolNetPage } from './schoolnet/SchoolNetPage';
 import { ElectricityPage } from './electricity/ElectricityPage';
 import { FaqPage } from './faq/FaqPage';
+import { AttendancePage } from './attendance/AttendancePage';
+import { UserInfoService } from '../services/UserInfoService';
 import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
-import { fileIo } from '@kit.CoreFileKit';
+import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import web_webview from '@ohos.web.webview';
 import { image } from '@kit.ImageKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { VersionService, VersionInfo } from '../services/VersionService';
 
 
 // 每日用电数据模型
@@ -80,19 +85,112 @@ class PreviewCell {
 @Component
 struct MainPage {
   onBackPress(): boolean {
-    if (this.showSemesterDialog) { this.showSemesterDialog = false; return true; }
-    if (this.showWheelPicker) { this.showWheelPicker = false; return true; }
-    if (this.showColorPicker) { this.showColorPicker = false; return true; }
-    if (this.showThemeDialog) { this.showThemeDialog = false; return true; }
-    if (this.showPhyPwdDialog) { this.showPhyPwdDialog = false; return true; }
+    if (this.showSemesterDialog) { this.closeSemesterDialog(); return true; }
+    if (this.showWheelPicker) { this.closeWheelPickerDialog(); return true; }
+    if (this.showColorPicker) { this.closeColorPickerDialog(); return true; }
+    if (this.showThemeDialog) { this.closeThemeDialog(); return true; }
+    if (this.showPhyPwdDialog) { this.closePhyPwdDialog(); return true; }
+    if (this.showLogoutDialog) { this.closeLogoutDialog(); return true; }
+    if (this.showBgDialog) { this.closeBgDialog(); return true; }
+    if (this.showUpdateDialog) { this.showUpdateDialog = false; return true; }
     if (this.showCaptcha) { this.closeCaptcha(); return true; }
     return false;
+  }
+
+  // 弹窗动画关闭方法
+  closePhyPwdDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.phyOpacity = 0; this.phyTranslate = 30; });
+    setTimeout(() => { this.showPhyPwdDialog = false; }, 200);
+  }
+  closeThemeDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.themeOpacity = 0; this.themeTranslate = 30; });
+    setTimeout(() => { this.showThemeDialog = false; }, 200);
+  }
+  closeColorPickerDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.colorOpacity = 0; this.colorTranslate = 30; });
+    setTimeout(() => { this.showColorPicker = false; }, 200);
+  }
+  closeWheelPickerDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.wheelOpacity = 0; this.wheelTranslate = 30; });
+    setTimeout(() => { this.showWheelPicker = false; }, 200);
+  }
+  closeSemesterDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.semOpacity = 0; this.semTranslate = 30; });
+    setTimeout(() => { this.showSemesterDialog = false; }, 200);
+  }
+  closeLogoutDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.logoutOpacity = 0; this.logoutTranslate = 30; });
+    setTimeout(() => { this.showLogoutDialog = false; }, 200);
+  }
+  closeBgDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.bgOpacity = 0; this.bgTranslate = 30; });
+    setTimeout(() => { this.showBgDialog = false; }, 200);
+  }
+  // 选择背景图片
+  selectBgImage(): void {
+    try {
+      const photoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
+      photoSelectOptions.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      photoSelectOptions.maxSelectNumber = 1;
+      const photoPicker = new photoAccessHelper.PhotoViewPicker();
+      photoPicker.select(photoSelectOptions).then((result: photoAccessHelper.PhotoSelectResult) => {
+        if (result.photoUris.length > 0 && result.photoUris[0] !== undefined) {
+          this.bgPath = result.photoUris[0];
+          // 提取真实路径，保存时用于复制文件
+          this.bgOriPath = new fileUri.FileUri(this.bgPath).path;
+          if (!this.bgShow) {
+            this.bgShow = true;
+          }
+        }
+      }).catch((err: BusinessError) => {
+        console.error(TAG, 'PhotoViewPicker failed: ' + JSON.stringify(err));
+      });
+    } catch (error) {
+      console.error(TAG, 'PhotoViewPicker failed: ' + JSON.stringify(error));
+    }
+  }
+  // 保存背景设置
+  async saveBgSettings(): Promise<void> {
+    try {
+      if (this.bgShow && this.bgOriPath.length > 0) {
+        // 新选择了图片：复制到应用沙箱
+        const destPath: string = this.context.filesDir + '/class_bg_image';
+        try { await fileIo.copyFile(this.bgOriPath, destPath); } catch (_) {}
+        await PreferenceUtil.putString('class_bg_path', destPath);
+      } else if (!this.bgShow) {
+        // 关闭自定义背景
+        await PreferenceUtil.putString('class_bg_path', '');
+      }
+      // 如果 bgShow 为 true 但未新选图片，保留已有路径不变
+      await PreferenceUtil.putBool('class_bg_show', this.bgShow);
+      await PreferenceUtil.putNumber('class_bg_opacity', this.bgOpacityVal);
+    } catch (_) {}
+    this.closeBgDialog();
+  }
+  // 恢复默认
+  resetBgSettings(): void {
+    this.bgShow = false;
+    this.bgPath = '';
+    this.bgOriPath = '';
+    this.bgOpacityVal = 60;
+    PreferenceUtil.putString('class_bg_path', '');
+    PreferenceUtil.putBool('class_bg_show', false);
+    PreferenceUtil.putNumber('class_bg_opacity', 60);
   }
 
   @State currentIndex: number = 0;
   @State username: string = '';
   @State isLoggedIn: boolean = false;
   @State loginStatus: string = ''; // '' | 'checking' | 'offline' | 'expired' | 'not_logged_in' | 'ok'
+  @State userDisplayName: string = '';  // 真实姓名
+  @State userAvatarUrl: string = '';    // 头像 URL
+  @State userMajor: string = '';        // 专业
+  @State userCollege: string = '';      // 学院
+  @State userGrade: string = '';        // 年级
+  @State userGender: string = '';       // 性别
+  @State xgxtWebSrc: string = '';       // 隐藏 WebView 加载 xgxt 的 URL
+  xgxtController: web_webview.WebviewController = new web_webview.WebviewController();
+  private xgxtPageCount: number = 0;
   @State previewCells: PreviewCell[] = [];
   @State previewLoaded: boolean = false;
   @State isTablet: boolean = deviceInfo.deviceType === 'tablet';
@@ -110,23 +208,53 @@ struct MainPage {
   }
   @State cacheSize: string = '计算中...';
   @State showPhyPwdDialog: boolean = false;
+  @State phyOpacity: number = 0;
+  @State phyTranslate: number = 30;
   @State phyPwdInput: string = '';
   @State phyPwdStatus: string = '未设置';
   @State showThemeDialog: boolean = false;
+  @State themeOpacity: number = 0;
+  @State themeTranslate: number = 30;
   @State showColorPicker: boolean = false;
+  @State colorOpacity: number = 0;
+  @State colorTranslate: number = 30;
   @State showWheelPicker: boolean = false;
+  @State wheelOpacity: number = 0;
+  @State wheelTranslate: number = 30;
   @State customHex: string = '';
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('accent_index') accentIdx: number = 0;
   private retryTimer: number = -1;
   @State showSemesterDialog: boolean = false;
+  @State semOpacity: number = 0;
+  @State semTranslate: number = 30;
+  @State showLogoutDialog: boolean = false;
+  @State logoutOpacity: number = 0;
+  @State logoutTranslate: number = 30;
   @State pickSemYear: number = 2025;
   @State pickSemPart: number = 2;
   @State pickWeekSwift: number = 0;
+  @State semesterToast: string = '';
+  // 自定义课表背景
+  @State showBgDialog: boolean = false;
+  @State bgOpacity: number = 0;
+  @State bgTranslate: number = 30;
+  @State bgShow: boolean = false;
+  @State bgPath: string = '';       // 预览用的 URI
+  @State bgOriPath: string = '';    // 原始文件路径
+  @State bgOpacityVal: number = 60; // 不透明度，存储为整数（60=60%）
   @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
   @State currentThemeLabel: string = '当前：浅色模式';
   @State warmupActive: boolean = false;
   private warmupUrl: string = 'https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1';
+
+  // ==================== 版本更新弹窗 ====================
+  @State showUpdateDialog: boolean = false;
+  @State updateInfo: VersionInfo | null = null;
+  @State hasUpdate: boolean = false;
+  @State skipVersion: string = '';
+  updateChecked: boolean = false;
+  currentVersion: string = '';
 
   // ==================== 滑块验证码 overlay（原地弹窗，不跳页） ====================
   @State showCaptcha: boolean = false;
@@ -187,6 +315,10 @@ struct MainPage {
     this.checkLogin();
     this.loadClassPreview();
     this.initCacheDirs();
+    // 后台检查版本更新（不阻塞 UI）
+    this.checkVersionUpdate();
+    // 获取当前版本号用于 UI 显示
+    VersionService.getCurrentVersion().then((v: string) => { this.currentVersion = v; });
   }
 
   // 异步获取应用级缓存目录（WebView 缓存存在这里，不在 HAP 级目录）
@@ -198,6 +330,26 @@ struct MainPage {
     } catch (e) {
       console.error('MainPage', 'initCacheDirs error: ' + String(e));
     }
+  }
+
+  // 后台检查版本更新
+  private async checkVersionUpdate(showNotNeeded: boolean = false): Promise<void> {
+    if (!showNotNeeded && this.updateChecked) return;
+    this.updateChecked = true;
+    try {
+      const info = await VersionService.checkForUpdate();
+      if (info) {
+        this.updateInfo = info;
+        this.hasUpdate = true;
+        // 自动检查且已跳过此版本 → 不弹窗；手动检查始终弹窗
+        const skipped = PreferenceUtil.getString('skip_version');
+        if (showNotNeeded || skipped !== info.version) {
+          this.showUpdateDialog = true;
+        }
+      } else {
+        this.hasUpdate = false;
+      }
+    } catch (_) {}
   }
 
   aboutToDisappear() { this.stopRetryTimer(); }
@@ -217,6 +369,7 @@ struct MainPage {
           this.loginStatus = 'ok';
           await PreferenceUtil.putBool('is_logged_in', true);
           await cas.syncCookiesToWebView();
+          this.loadUserInfo();  // 异步获取名字/头像/专业
           // warmup disabled: pollutes CookieJar with Domain=.xidian.edu.cn cookies, breaking zfw/libspace
           this.startPreload();
           return;
@@ -274,6 +427,7 @@ struct MainPage {
           this.loginStatus = 'ok';
           await PreferenceUtil.putBool('is_logged_in', true);
           await cas.syncCookiesToWebView();
+          this.loadUserInfo();
           // warmup disabled
           this.startPreload();
           return;
@@ -290,6 +444,7 @@ struct MainPage {
           this.loginStatus = 'ok';
           await PreferenceUtil.putBool('is_logged_in', true);
           await cas.syncCookiesToWebView();
+          this.loadUserInfo();
           // warmup disabled
           this.startPreload();
           return;
@@ -384,6 +539,7 @@ struct MainPage {
         this.showCaptcha = false;
         this.isLoggedIn = true;
         this.loginStatus = 'ok';
+        this.loadUserInfo();
         // warmup disabled
         this.startPreload();
       } else {
@@ -478,6 +634,113 @@ struct MainPage {
     EhallService.getInstance().preloadAllData().catch((e: Error) => {
       console.warn('MainPage', 'preload failed: ' + String(e));
     });
+  }
+
+  // 异步加载用户信息（名字/头像/专业），失败用缓存兜底
+  private loadUserInfo(): void {
+    // 先打印原始 Preference 值，便于诊断
+    const rawName: string = PreferenceUtil.getString('user_name');
+    const rawAvatar: string = PreferenceUtil.getString('user_avatar');
+    const rawMajor: string = PreferenceUtil.getString('user_major');
+    const rawCollege: string = PreferenceUtil.getString('user_college');
+    console.info(TAG, 'loadUserInfo: raw prefs name=' + rawName +
+      ' college=' + rawCollege + ' major=' + rawMajor +
+      ' avatarLen=' + String(rawAvatar.length));
+
+    UserInfoService.getInstance().fetchAll().then((info) => {
+      if (info.name) {
+        this.userDisplayName = info.name;
+      }
+      if (info.avatar) {
+        this.userAvatarUrl = info.avatar;
+      }
+      if (info.major) {
+        this.userMajor = info.major;
+      }
+      if (info.college) {
+        this.userCollege = info.college;
+      }
+      if (info.grade) {
+        this.userGrade = info.grade;
+      }
+      if (info.gender) {
+        this.userGender = info.gender;
+      }
+      console.info(TAG, 'loadUserInfo: OK name=' + this.userDisplayName +
+        ' college=' + this.userCollege + ' major=' + this.userMajor +
+        ' grade=' + this.userGrade + ' gender=' + this.userGender);
+    }).catch((e: Error) => {
+      console.warn(TAG, 'loadUserInfo failed: ' + String(e));
+      // 用缓存兜底
+      this.userDisplayName = rawName;
+      this.userAvatarUrl = rawAvatar;
+      this.userMajor = rawMajor;
+      this.userCollege = rawCollege;
+    });
+  }
+
+  // 从隐藏 WebView 提取 xgxt cookie → 调 API 获取用户信息
+  private async xgxtExtractAndFetch(): Promise<void> {
+    try {
+      const cookieStr: string = web_webview.WebCookieManager.fetchCookieSync(
+        'https://xgxt.xidian.edu.cn/'
+      );
+      console.info(TAG, 'xgxtExtractAndFetch: cookie=' + cookieStr.substring(0, 120));
+
+      if (cookieStr.length === 0) {
+        console.warn(TAG, 'xgxtExtractAndFetch: no cookie from xgxt');
+        this.xgxtWebSrc = '';
+        return;
+      }
+
+      // 注入 xgxt cookie 到 HttpUtil
+      const http = HttpUtil.getInstance();
+      http.replaceCookiesForDomain('xgxt.xidian.edu.cn', cookieStr);
+
+      // 调用 xgxt API
+      const xh: string = this.username || PreferenceUtil.getString('ids_account');
+      const apiUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do';
+      const headers: Record<string, string> = {
+        'Referer': 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      };
+      const formData: Record<string, string> = {
+        'requestParamStr': '{"XSBH":"' + xh + '"}'
+      };
+      const resp = await http.postForm(apiUrl, formData, headers);
+      console.info(TAG, 'xgxtExtractAndFetch: API status=' + String(resp.statusCode) +
+        ' body=' + resp.body.substring(0, 200));
+
+      if (resp.statusCode !== 200 || !resp.body) {
+        console.warn(TAG, 'xgxtExtractAndFetch: API failed');
+        this.xgxtWebSrc = '';
+        return;
+      }
+
+      const obj: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
+      const data: Record<string, Object> = obj['data'] as Record<string, Object>;
+      if (!data) { return; }
+
+      const name: string = String(data['XM'] ?? '');
+      const college: string = String(data['DWDM_DISPLAY'] ?? '');
+      const major: string = String(data['ZYDM_DISPLAY'] ?? '');
+      const grade: string = String(data['XZNJ'] ?? '');
+      const gender: string = String(data['XBDM_DISPLAY'] ?? '');
+
+      if (name) PreferenceUtil.putString('user_name', name);
+      if (college) PreferenceUtil.putString('user_college', college);
+      if (major) PreferenceUtil.putString('user_major', major);
+      if (grade) PreferenceUtil.putString('user_grade', grade);
+      if (gender) PreferenceUtil.putString('user_gender', gender);
+
+      console.info(TAG, 'xgxtExtractAndFetch: OK name=' + name + ' college=' + college + ' major=' + major);
+      this.loadUserInfo();
+    } catch (e) {
+      console.error(TAG, 'xgxtExtractAndFetch error: ' + String(e));
+    } finally {
+      this.xgxtWebSrc = '';
+    }
   }
 
   // 同步 Cookie 后跳转 Portal WebView
@@ -964,6 +1227,130 @@ struct MainPage {
     .backgroundColor(ThemeColors.bgCard)
   }
 
+  // ===== 我的 Tab 行组件 =====
+  @Builder themeRow() {
+    Row() {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(44).height(44).fill('#FF6D0022')
+        Text('🌓').fontSize(22)
+      }.margin({ right: 16 })
+      Column() {
+        Text('深色设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+        Text(this.currentThemeLabel).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+      }.layoutWeight(1)
+      Text('›').fontSize(20).fontColor('#CCCCCC')
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .onClick(() => { this.showThemeDialog = true; animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.themeOpacity = 1; this.themeTranslate = 0; }); })
+  }
+
+  @Builder colorRow() {
+    Row() {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(44).height(44).fill(this.accentColor + '22')
+        Circle().width(20).height(20).fill(this.accentColor)
+      }.margin({ right: 16 })
+      Column() {
+        Text('主题色').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+        Text(this.accentIdx === -1 ? '自定义' : (ACCENT_PRESETS[this.accentIdx]?.[2] ?? '')).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+      }.layoutWeight(1)
+      Text('›').fontSize(20).fontColor('#CCCCCC')
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .onClick(() => { this.showColorPicker = true; animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.colorOpacity = 1; this.colorTranslate = 0; }); })
+  }
+
+  @Builder bgRow() {
+    Row() {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(44).height(44).fill('#607D8B22')
+        Text('🖼️').fontSize(22)
+      }.margin({ right: 16 })
+      Column() {
+        Text('课表背景').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+        Text(this.bgShow ? '已设置图片' : '未自定义').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+      }.layoutWeight(1)
+      Text('›').fontSize(20).fontColor('#CCCCCC')
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .onClick(() => {
+      // 加载当前设置
+      this.bgShow = PreferenceUtil.getBool('class_bg_show', false);
+      this.bgOpacityVal = PreferenceUtil.getNumber('class_bg_opacity', 60);
+      const savedPath: string = PreferenceUtil.getString('class_bg_path', '');
+      if (savedPath.length > 0) {
+        try {
+          this.bgPath = fileUri.getUriFromPath(savedPath);
+        } catch (_) {
+          this.bgPath = '';
+        }
+      } else {
+        this.bgPath = '';
+      }
+      this.showBgDialog = true;
+      animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.bgOpacity = 1; this.bgTranslate = 0; });
+    })
+  }
+
+  @Builder semesterRow() {
+    Row() {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(44).height(44).fill('#546E7A22')
+        Text('📅').fontSize(22)
+      }.margin({ right: 16 })
+      Column() {
+        Text('学期设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+        Text(SemesterUtil.formatSemester(SemesterUtil.getCurrentSemesterCode())).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+      }.layoutWeight(1)
+      Text('›').fontSize(20).fontColor('#CCCCCC')
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .onClick(() => {
+      const cur = SemesterUtil.getCurrentSemesterCode();
+      const parts = cur.split('-');
+      this.pickSemYear = parseInt(parts[0]);
+      this.pickSemPart = parseInt(parts[2]) || 2;
+      this.pickWeekSwift = PreferenceUtil.getNumber('week_swift', 0);
+      this.showSemesterDialog = true;
+      animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.semOpacity = 1; this.semTranslate = 0; });
+    })
+  }
+
+  @Builder logoutRow() {
+    Row() {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(44).height(44).fill('#FF525222')
+        Text('🔓').fontSize(22)
+      }.margin({ right: 16 })
+      Column() {
+        Text('退出登录').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+        Text('清除登录状态').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+      }.layoutWeight(1)
+      Text('›').fontSize(20).fontColor('#CCCCCC')
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .onClick(() => {
+      this.showLogoutDialog = true;
+      animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.logoutOpacity = 1; this.logoutTranslate = 0; });
+    })
+  }
+
+  @Builder cacheRow() {
+    Row() {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(44).height(44).fill('#8BC34A22')
+        Text('🗑️').fontSize(22)
+      }.margin({ right: 16 })
+      Column() {
+        Text('清除缓存').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+        Text('当前 ' + this.cacheSize).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+      }.layoutWeight(1)
+      Text('›').fontSize(20).fontColor('#CCCCCC')
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .onClick(() => { this.clearCache(); })
+  }
+
   // 侧边栏菜单点击路由
   @Builder
   navDestinationBuilder(name: string) {
@@ -993,6 +1380,8 @@ struct MainPage {
       PortalWebPage({ pageInfo: this.pageInfo, title: '睿思导航', url: 'https://nav.xdruisi.cn/', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Net') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '校园网登录', url: 'https://zfw.xidian.edu.cn/', isTablet: this.isTablet })
+    } else if (name === 'PortalWeb_Mail') {
+      PortalWebPage({ pageInfo: this.pageInfo, title: '学生邮箱', url: 'https://edu.icoremail.net/', isTablet: this.isTablet })
     } else if (name === 'SchoolNetPage') {
       SchoolNetPage({ pageInfo: this.pageInfo })
     } else if (name === 'ElectricityPage') {
@@ -1003,6 +1392,8 @@ struct MainPage {
       PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , useWeChatUA: true , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Physics') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '物理计算', url: 'https://experiment-helper.wizzstudio.com/#/', isTablet: this.isTablet })
+    } else if (name === 'AttendancePage') {
+      AttendancePage({ pageInfo: this.pageInfo })
     }
   }
 
@@ -1038,7 +1429,7 @@ struct MainPage {
   }
 
   selectTheme(mode: number): void {
-    this.showThemeDialog = false;
+    this.closeThemeDialog();
     PreferenceUtil.putNumber('theme_color_mode', mode);
     // 直接更新 @State 标签（确保 TabContent 内 Builder 实时刷新）
     this.currentThemeLabel = this.buildThemeLabel(mode);
@@ -1048,6 +1439,11 @@ struct MainPage {
     } else {
       ThemeColors.applyManual(mode, getContext());
     }
+    // 切换主题时刷新主题色（深/浅模式不同色值）
+    const idx: number = AppStorage.get('accent_index') as number ?? 0;
+    const isDark = mode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK ||
+      (mode === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET && ThemeColors.isDark);
+    AppStorage.setOrCreate('accent_color', AccentColors.colorForTheme(isDark, idx));
   }
 
   // 切换到"我的"Tab时刷新主题标签（非激活Tab被HdsTabs冻结，@State不触发重渲染）
@@ -1141,7 +1537,7 @@ struct MainPage {
         .onChange((index: number) => {
           this.currentIndex = index;
           if (index === 0) { this.loadClassPreview(); }
-          else if (index === 2) { this.computeCacheSizeDirect(); this.refreshThemeLabel(); }
+          else if (index === 2) { this.computeCacheSizeDirect(); this.refreshThemeLabel(); this.loadUserInfo(); }
         })
         .width('100%')
         .layoutWeight(1)
@@ -1162,16 +1558,17 @@ struct MainPage {
     if (this.showCaptcha) {
       this.CaptchaOverlay()
     }
-    // 物理实验密码弹窗（始终渲染，visibility 控制显示，确保触摸事件正常）
+    // 物理实验密码弹窗
+    if (this.showPhyPwdDialog || this.phyOpacity > 0) {
     Column() {
       Column() {
         Row() {
-          Text('物理实验设置（test）').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Text('物理实验设置').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
           Blank()
           Row() { Text('✕').fontSize(18).fontColor('#999999') }
             .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
             .justifyContent(FlexAlign.Center)
-            .onClick(() => { this.showPhyPwdDialog = false; })
+            .onClick(() => { this.closePhyPwdDialog(); })
         }.width('100%').margin({ bottom: 16 })
         TextInput({ placeholder: '输入物理实验密码', text: this.phyPwdInput })
           .type(InputType.Password)
@@ -1181,28 +1578,32 @@ struct MainPage {
         Row() {
           Button('取消').layoutWeight(1).height(40)
             .backgroundColor(ThemeColors.bgInput)
-            .onClick(() => { this.showPhyPwdDialog = false; })
+            .onClick(() => { this.closePhyPwdDialog(); })
           Button('保存').layoutWeight(1).height(40).margin({ left: 12 })
-            .backgroundColor('#7B1FA2').fontColor('#FFFFFF')
+            .backgroundColor(this.accentColor).fontColor('#FFFFFF')
             .onClick(() => {
               if (this.phyPwdInput.length > 0) {
                 PreferenceUtil.putString('physics_pwd', this.phyPwdInput);
                 this.phyPwdStatus = '已设置';
-                this.showPhyPwdDialog = false;
+                this.closePhyPwdDialog();
               }
             })
         }.width('100%').margin({ top: 16 })
       }
       .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.phyOpacity)
+      .translate({ y: this.phyTranslate })
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.showPhyPwdDialog ? '#80000000' : '#00000000')
+    .backgroundColor(ThemeColors.overlay)
+    .opacity(this.phyOpacity)
     .hitTestBehavior(this.showPhyPwdDialog ? HitTestMode.Default : HitTestMode.None)
-    .visibility(this.showPhyPwdDialog ? Visibility.Visible : Visibility.None)
-    .onClick(() => { this.showPhyPwdDialog = false; })
+    .onClick(() => { this.closePhyPwdDialog(); })
+    }
     // 深色模式选择弹窗
+    if (this.showThemeDialog || this.themeOpacity > 0) {
     Column() {
       Column() {
         Row() {
@@ -1211,31 +1612,35 @@ struct MainPage {
           Row() { Text('✕').fontSize(18).fontColor('#999999') }
             .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
             .justifyContent(FlexAlign.Center)
-            .onClick(() => { this.showThemeDialog = false; })
+            .onClick(() => { this.closeThemeDialog(); })
         }.width('100%').margin({ bottom: 16 })
         Button('浅色').width('100%').height(44)
-          .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT ? '#2979FF' : ThemeColors.bgInput)
+          .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT ? this.accentColor : ThemeColors.bgInput)
           .fontColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT ? '#FFFFFF' : ThemeColors.textPrimary)
           .onClick(() => { this.selectTheme(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT); })
         Button('深色').width('100%').height(44).margin({ top: 8 })
-          .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_DARK ? '#2979FF' : ThemeColors.bgInput)
+          .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_DARK ? this.accentColor : ThemeColors.bgInput)
           .fontColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_DARK ? '#FFFFFF' : ThemeColors.textPrimary)
           .onClick(() => { this.selectTheme(ConfigurationConstant.ColorMode.COLOR_MODE_DARK); })
         Button('跟随系统').width('100%').height(44).margin({ top: 8 })
-          .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET ? '#2979FF' : ThemeColors.bgInput)
+          .backgroundColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET ? this.accentColor : ThemeColors.bgInput)
           .fontColor(ThemeColors.currentPref === ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET ? '#FFFFFF' : ThemeColors.textPrimary)
           .onClick(() => { this.selectTheme(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET); })
       }
       .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.themeOpacity)
+      .translate({ y: this.themeTranslate })
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor(ThemeColors.overlay)
+    .opacity(this.themeOpacity)
     .hitTestBehavior(this.showThemeDialog ? HitTestMode.Default : HitTestMode.None)
-    .visibility(this.showThemeDialog ? Visibility.Visible : Visibility.None)
-    .onClick(() => { this.showThemeDialog = false; })
+    .onClick(() => { this.closeThemeDialog(); })
+    }
     // 主题色选择弹窗
+    if (this.showColorPicker || this.colorOpacity > 0) {
     Column() {
       Column() {
         Row() {
@@ -1244,20 +1649,20 @@ struct MainPage {
           Row() { Text('✕').fontSize(18).fontColor('#999999') }
             .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
             .justifyContent(FlexAlign.Center)
-            .onClick(() => { this.showColorPicker = false; })
+            .onClick(() => { this.closeColorPickerDialog(); })
         }.width('100%').margin({ bottom: 16 })
         Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
           ForEach(ACCENT_PRESETS, (preset: string[], idx: number) => {
             Column() {
               Stack() {
-                Circle().width(40).height(40).fill(preset[0])
+                Circle().width(40).height(40).fill(ThemeColors.isDark ? preset[1] : preset[0])
                 if (idx === this.accentIdx) {
                   Text('✓').fontSize(18).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
                 }
               }
-              Text(preset[1]).fontSize(10).fontColor(ThemeColors.textSecondary).margin({ top: 3 })
+              Text(preset[2]).fontSize(10).fontColor(ThemeColors.textSecondary).margin({ top: 3 })
             }.margin({ right: 10, bottom: 10 })
-            .onClick(() => { AccentColors.select(idx); this.showColorPicker = false; })
+            .onClick(() => { AccentColors.select(idx); this.closeColorPickerDialog(); })
           }, (preset: string[], idx: number) => String(idx))
         }.width('100%')
         // 自定义色号输入
@@ -1280,56 +1685,63 @@ struct MainPage {
             .enabled(this.customHex.length === 6)
             .onClick(() => {
               if (AccentColors.selectCustom('#' + this.customHex)) {
-                this.showColorPicker = false;
+                this.closeColorPickerDialog();
                 this.customHex = '';
               }
             })
           Button('调色').height(34).fontSize(12)
             .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(8).margin({ left: 6 })
-            .onClick(() => { this.showWheelPicker = true; })
+            .onClick(() => { this.showWheelPicker = true; animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.wheelOpacity = 1; this.wheelTranslate = 0; }); })
         }.width('100%').margin({ top: 8 })
         .padding({ top: 10 }).border({ width: { top: 1 }, color: '#E0E0E0', style: BorderStyle.Dashed })
       }
       .width('85%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.colorOpacity)
+      .translate({ y: this.colorTranslate })
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor(ThemeColors.overlay)
+    .opacity(this.colorOpacity)
     .hitTestBehavior(this.showColorPicker ? HitTestMode.Default : HitTestMode.None)
-    .visibility(this.showColorPicker ? Visibility.Visible : Visibility.None)
-    .onClick(() => { this.showColorPicker = false; })
+    .onClick(() => { this.closeColorPickerDialog(); })
+    }
     // 无极取色盘
-    if (this.showWheelPicker) {
+    if (this.showWheelPicker || this.wheelOpacity > 0) {
+    Column() {
       Column() {
-        Column() {
-          Row() {
-            Text('无极取色').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-            Blank()
-            Row() { Text('✕').fontSize(18).fontColor('#999999') }
-              .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
-              .justifyContent(FlexAlign.Center)
-              .onClick(() => { this.showWheelPicker = false; })
-          }.width('100%').margin({ bottom: 12 })
-          ColorWheelPicker({
-            onCancel: () => {
-              this.showWheelPicker = false;
-              this.showColorPicker = false;
-            }
-          })
-        }
-        .width('310vp').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
-        .shadow({ radius: 20, color: '#30000000' })
-        .onClick(() => { /* 吞掉事件，阻止穿透到遮罩关闭 */ })
+        Row() {
+          Text('无极取色').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Row() { Text('✕').fontSize(18).fontColor('#999999') }
+            .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => { this.closeWheelPickerDialog(); })
+        }.width('100%').margin({ bottom: 12 })
+        ColorWheelPicker({
+          onCancel: () => {
+            this.closeWheelPickerDialog();
+            this.closeColorPickerDialog();
+          }
+        })
       }
-      .width('100%').height('100%')
-      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-      .backgroundColor(ThemeColors.overlay)
-      .onClick(() => { this.showWheelPicker = false; })
+      .width('310vp').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.wheelOpacity)
+      .translate({ y: this.wheelTranslate })
+      .onClick(() => { /* 吞掉事件 */ })
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(ThemeColors.overlay)
+    .opacity(this.wheelOpacity)
+    .hitTestBehavior(this.showWheelPicker ? HitTestMode.Default : HitTestMode.None)
+    .onClick(() => { this.closeWheelPickerDialog(); })
     }
     // 学期设置弹窗
-    if (this.showSemesterDialog) {
-      Column() {
+    if (this.showSemesterDialog || this.semOpacity > 0) {
+    Column() {
         Column() {
           Row() {
             Text('学期设置').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
@@ -1337,7 +1749,7 @@ struct MainPage {
             Row() { Text('✕').fontSize(18).fontColor('#999999') }
               .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
               .justifyContent(FlexAlign.Center)
-              .onClick(() => { this.showSemesterDialog = false; })
+              .onClick(() => { this.closeSemesterDialog(); })
           }.width('100%').margin({ bottom: 14 })
           // 当前学期
           Text(SemesterUtil.formatSemester(SemesterUtil.getCurrentSemesterCode()))
@@ -1394,7 +1806,9 @@ struct MainPage {
               .onClick(() => {
                 PreferenceUtil.putString('current_semester', '');
                 PreferenceUtil.putNumber('week_swift', 0);
-                this.showSemesterDialog = false;
+                this.pickWeekSwift = 0;
+                this.semesterToast = '已恢复默认开学日期设置';
+                setTimeout(() => { this.semesterToast = ''; }, 1200);
               })
             Button('保存').height(40).fontSize(14)
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
@@ -1403,18 +1817,188 @@ struct MainPage {
                 const code = this.pickSemYear + '-' + (this.pickSemYear + 1) + '-' + this.pickSemPart;
                 PreferenceUtil.putString('current_semester', code);
                 PreferenceUtil.putNumber('week_swift', this.pickWeekSwift);
-                this.showSemesterDialog = false;
+                this.closeSemesterDialog();
               })
           }.width('100%')
+          if (this.semesterToast.length > 0) {
+            Text(this.semesterToast).fontSize(13).fontColor('#4CAF50').margin({ top: 12 })
+          }
         }
         .width('85%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
         .shadow({ radius: 20, color: '#30000000' })
+        .opacity(this.semOpacity)
+        .translate({ y: this.semTranslate })
         .onClick(() => {})
       }
       .width('100%').height('100%')
       .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
       .backgroundColor(ThemeColors.overlay)
-      .onClick(() => { this.showSemesterDialog = false; })
+      .opacity(this.semOpacity)
+      .hitTestBehavior(this.showSemesterDialog ? HitTestMode.Default : HitTestMode.None)
+      .onClick(() => { this.closeSemesterDialog(); })
+    }
+    // 退出登录确认弹窗
+    if (this.showLogoutDialog || this.logoutOpacity > 0) {
+    Column() {
+      Column() {
+        Text('⚠️').fontSize(40).margin({ bottom: 8 })
+        Text('确认退出登录？').fontSize(18).fontWeight(FontWeight.Bold)
+          .fontColor(ThemeColors.textPrimary).margin({ bottom: 4 })
+        Text('退出后需重新输入账号密码登录').fontSize(13)
+          .fontColor(ThemeColors.textSecondary).margin({ bottom: 20 })
+        Row() {
+          Button('取消').layoutWeight(1).height(40)
+            .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary)
+            .borderRadius(10)
+            .onClick(() => { this.closeLogoutDialog(); })
+          Button('确认退出').layoutWeight(1).height(40).margin({ left: 12 })
+            .backgroundColor('#FF5252').fontColor('#FFFFFF').borderRadius(10)
+            .onClick(async () => {
+              this.closeLogoutDialog();
+              await PreferenceUtil.putString('ids_account', '');
+              await PreferenceUtil.putString('login_password', '');
+              await HttpUtil.getInstance().clearCookies();
+              this.isLoggedIn = false;
+              this.username = '';
+              this.loginStatus = 'not_logged_in';
+            })
+        }.width('100%')
+      }
+      .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.logoutOpacity)
+      .translate({ y: this.logoutTranslate })
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(ThemeColors.overlay)
+    .opacity(this.logoutOpacity)
+    .hitTestBehavior(this.showLogoutDialog ? HitTestMode.Default : HitTestMode.None)
+    .onClick(() => { this.closeLogoutDialog(); })
+    }
+    // 自定义课表背景弹窗
+    if (this.showBgDialog || this.bgOpacity > 0) {
+    Column() {
+      Column() {
+        // 标题
+        Text('自定义课表背景').fontSize(18).fontWeight(FontWeight.Bold)
+          .fontColor(ThemeColors.textPrimary).margin({ bottom: 16 })
+        // 开关
+        Row() {
+          Text('启用自定义背景').fontSize(15).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Toggle({ type: ToggleType.Switch, isOn: this.bgShow })
+            .selectedColor(this.accentColor)
+            .onChange((value: boolean) => {
+              this.bgShow = value;
+            })
+        }.width('100%').margin({ bottom: 12 })
+        // 图片预览
+        Stack({ alignContent: Alignment.Center }) {
+          Image(this.bgPath.length > 0 ? this.bgPath : $r('app.media.background'))
+            .width('100%')
+            .aspectRatio(4 / 3)
+            .constraintSize({ maxHeight: 300 })
+            .objectFit(ImageFit.Cover)
+            .borderRadius(10)
+            .opacity(this.bgPath.length > 0 ? this.bgOpacityVal / 100 : 0.06)
+            .interpolation(ImageInterpolation.Medium)
+          if (this.bgPath.length === 0) {
+            Text('📷 点此选择图片').fontSize(14).fontColor(ThemeColors.textHint)
+          }
+        }
+        .width('100%').borderRadius(10)
+        .backgroundColor(ThemeColors.bgInput)
+        .onClick(() => { this.selectBgImage(); })
+        .margin({ bottom: 12 })
+        // 选择图片按钮
+        Button('选择图片').fontSize(14)
+          .backgroundColor(ThemeColors.isDark ? '#1A3A5C' : '#E3F2FD')
+          .fontColor(this.accentColor)
+          .borderRadius(8)
+          .margin({ bottom: 12 })
+          .onClick(() => { this.selectBgImage(); })
+        // 不透明度滑动条
+        Row() {
+          Text('不透明度').fontSize(13).fontColor(ThemeColors.textSecondary)
+          Slider({
+            value: this.bgOpacityVal,
+            min: 30,
+            max: 100,
+            step: 5
+          }).width('60%')
+            .trackColor(ThemeColors.bgInput)
+            .selectedColor(this.accentColor)
+            .onChange((value: number) => { this.bgOpacityVal = value; })
+          Text(this.bgOpacityVal + '%').fontSize(13)
+            .fontColor(ThemeColors.textPrimary).width(36).textAlign(TextAlign.End)
+        }.width('100%').margin({ bottom: 16 })
+        // 按钮行
+        Row({ space: 10 }) {
+          Button('取消').layoutWeight(1).height(40)
+            .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary)
+            .borderRadius(10)
+            .onClick(() => { this.closeBgDialog(); })
+          Button('保存').layoutWeight(1).height(40)
+            .backgroundColor(this.accentColor).fontColor('#FFFFFF')
+            .borderRadius(10)
+            .onClick(() => { this.saveBgSettings(); })
+        }.width('100%')
+      }
+      .width('85%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.bgOpacity)
+      .translate({ y: this.bgTranslate })
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(ThemeColors.overlay)
+    .opacity(this.bgOpacity)
+    .hitTestBehavior(this.showBgDialog ? HitTestMode.Default : HitTestMode.None)
+    .onClick(() => { this.closeBgDialog(); })
+    }
+    // 版本更新提示弹窗
+    if (this.showUpdateDialog && this.updateInfo) {
+    Column() {
+      Column() {
+        Text('🎉 发现新版本').fontSize(18).fontWeight(FontWeight.Bold)
+          .fontColor(ThemeColors.textPrimary).margin({ bottom: 8 })
+        Text('最新版本：v' + this.updateInfo.version).fontSize(14).fontColor(ThemeColors.textSecondary).margin({ bottom: 16 })
+        Row({ space: 10 }) {
+          Button('稍后再说').layoutWeight(1).height(40)
+            .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary)
+            .borderRadius(10)
+            .onClick(() => {
+              this.showUpdateDialog = false;
+              if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
+            })
+          Button('立即查看').layoutWeight(1).height(40)
+            .backgroundColor(this.accentColor).fontColor('#FFFFFF')
+            .borderRadius(10)
+            .onClick(() => {
+              this.showUpdateDialog = false;
+              if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
+              if (this.updateInfo) {
+                try { this.context.openLink(this.updateInfo.url); } catch (_) {}
+              }
+            })
+        }.width('100%')
+        // 以后不再提示
+        Row() {
+          Checkbox({ name: 'skip_' + (this.updateInfo?.version ?? ''), group: 'update_skip' })
+            .selectedColor(this.accentColor)
+            .width(16).height(16)
+            .onChange((value: boolean) => { this.skipVersion = value ? (this.updateInfo?.version ?? '') : ''; })
+          Text('此版本不再提示').fontSize(12).fontColor(ThemeColors.textHint).margin({ left: 6 })
+        }.margin({ top: 12 })
+      }
+      .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 20, color: '#30000000' })
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(ThemeColors.overlay)
+    .onClick(() => { this.showUpdateDialog = false; })
     }
     } // closes Stack
     .width('100%').height('100%')
@@ -1458,7 +2042,7 @@ struct MainPage {
             .fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
           Blank()
           Text('查看课表 >')
-            .fontSize(12).fontColor('#2979FF')
+            .fontSize(12).fontColor(this.accentColor)
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 8 })
@@ -1649,7 +2233,7 @@ struct MainPage {
         if (this.loginStatus === 'ok') {
           Stack() {
             Circle().width(32).height(32).fill('#FFFFFF33')
-            Text('👤').fontSize(18).fontColor('#FFFFFFCC')
+            Text('🎓').fontSize(18).fontColor('#FFFFFFCC')
           }.width(32).height(32)
           Text(this.username || '已登录').fontSize(13).fontColor('#FFFFFFCC').margin({ left: 8 })
         } else {
@@ -1709,6 +2293,11 @@ struct MainPage {
               () => { this.pageInfo.clear();
                 this.pageInfo.pushPath({ name: 'SchoolCardPage' }); })
           }
+          ListItem() {
+            this.MenuItemBuilder('📋', '考勤查询', '查看课程签到和到课率', '#E91E63',
+              () => { this.pageInfo.clear();
+                this.pageInfo.pushPath({ name: 'AttendancePage' }); })
+          }
           if (!PreferenceUtil.getBool('role')) {
           ListItem() {
             this.MenuItemBuilder('🔬', '实验信息', '查看实验课程安排', '#5C6BC0',
@@ -1721,6 +2310,7 @@ struct MainPage {
               () => { this.pageInfo.clear();
                 this.pageInfo.pushPath({ name: 'ElectricityPage' }); })
           }
+          ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 60 : 48)
         }
         .padding({ left: 16, right: 16, top: 8 })
         .layoutWeight(1)
@@ -1773,9 +2363,14 @@ struct MainPage {
             () => { this.pageInfo.pushPath({ name: 'PortalWeb_Physics' }); })
         }
         ListItem() {
+          this.MenuItemBuilder('📧', '学生邮箱', '查看icoremail邮件', '#D32F2F',
+            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Mail' }); })
+        }
+        ListItem() {
           this.MenuItemBuilder('🌐', '校园网登录', '登录校园网自助服务平台', '#00ACC1',
             () => { this.pageInfo.pushPath({ name: 'PortalWeb_Net' }); })
         }
+        ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 60 : 48)
       }
       .padding({ left: 16, right: 16, top: 8 })
       .layoutWeight(1)
@@ -1800,19 +2395,30 @@ struct MainPage {
         // 用户信息卡片
         Column() {
           Row() {
+            // 头像
             Stack() {
-              Circle().width(56).height(56).fill('#2979FF')
-              Text('👤').fontSize(30).fontColor('#FFFFFF')
+              Circle().width(56).height(56).fill(this.accentColor + '18')
+              Text('🎓').fontSize(28)
             }.width(56).height(56)
+            .border({ width: 2.5, color: this.accentColor + '40', radius: 28 })
+
             Column() {
               Text(this.username || '已登录')
                 .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-              Text('西电校园助手').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
-            }.margin({ left: 16 })
+              Row() {
+                Text(PreferenceUtil.getBool('role') ? '研究生' : '本科生')
+                  .fontSize(11).fontColor(this.accentColor)
+                  .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                  .backgroundColor(this.accentColor + '14')
+                  .borderRadius(4)
+              }.margin({ top: 6 })
+            }.margin({ left: 16 }).layoutWeight(1).alignItems(HorizontalAlign.Start)
           }.width('100%')
         }
-        .width('100%').padding(20).backgroundColor(ThemeColors.bgCard)
-        .margin({ left: 16, right: 16, top: 16 }).borderRadius(16)
+        .width('100%').padding({ left: 18, right: 18, top: 20, bottom: 20 })
+        .backgroundColor(ThemeColors.bgCard)
+        .borderRadius(14).shadow({ radius: 4, color: '#0000000C', offsetY: 2 })
+        .margin({ left: 16, right: 16, top: 12 })
       } else {
         // 未登录提示
         Button('登录以使用完整功能')
@@ -1822,117 +2428,133 @@ struct MainPage {
           .onClick(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); })
       }
 
+      // 隐藏 WebView：静默加载 xgxt 获取 session cookie
+      if (this.xgxtWebSrc.length > 0) {
+        Web({ src: this.xgxtWebSrc, controller: this.xgxtController })
+          .width(1).height(1)
+          .opacity(0)
+          .javaScriptAccess(true)
+          .domStorageAccess(true)
+          .onPageEnd(() => {
+            this.xgxtPageCount++;
+            console.info(TAG, 'xgxt WebView pageEnd #' + String(this.xgxtPageCount));
+            if (this.xgxtPageCount >= 2) {
+              const testCookie: string = web_webview.WebCookieManager.fetchCookieSync(
+                'https://xgxt.xidian.edu.cn/'
+              );
+              console.info(TAG, 'xgxt cookie at pageEnd:#2: ' + testCookie.substring(0, 120));
+              // 直接同步调用
+              try {
+                this.xgxtExtractAndFetch();
+              } catch (err) {
+                console.error(TAG, 'xgxt call error: ' + String(err));
+              }
+            }
+          })
+          .onErrorReceive(() => {
+            console.error(TAG, 'xgxt WebView load error');
+            this.xgxtWebSrc = '';
+          })
+      }
+
       // 菜单（始终显示）
-      List({ space: 8 }) {
-            ListItem() {
-              this.MenuItemBuilder('🧪', '物理实验设置（test）',
-                this.phyPwdStatus,
-                '#7B1FA2',
-                () => {
-                  this.phyPwdInput = PreferenceUtil.getString('physics_pwd');
-                  this.showPhyPwdDialog = true;
-                })
-            }
-            ListItem() {
-              // 深色设置——内联实现（不用 MenuItemBuilder），desc 直接读 @State 才能实时刷新
-              Row() {
-                Stack({ alignContent: Alignment.Center }) {
-                  Circle().width(44).height(44).fill('#FF6D0022')
-                  Text('🌓').fontSize(22)
-                }.margin({ right: 16 })
-                Column() {
-                  Text('深色设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                  Text(this.currentThemeLabel).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-                }.layoutWeight(1)
-                Text('›').fontSize(20).fontColor('#CCCCCC')
-              }
-              .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-              .borderRadius(12).backgroundColor(ThemeColors.bgCard)
-              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-              .onClick(() => { this.showThemeDialog = true; })
-            }
-            ListItem() {
-              // 主题色选择——内联实现，实时显示当前色
-              Row() {
-                Stack({ alignContent: Alignment.Center }) {
-                  Circle().width(44).height(44).fill(this.accentColor + '22')
-                  Circle().width(20).height(20).fill(this.accentColor)
-                }.margin({ right: 16 })
-                Column() {
-                  Text('主题色').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                  Text(this.accentIdx === -1 ? '自定义' : (ACCENT_PRESETS[this.accentIdx]?.[1] ?? '')).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-                }.layoutWeight(1)
-                Text('›').fontSize(20).fontColor('#CCCCCC')
-              }
-              .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-              .borderRadius(12).backgroundColor(ThemeColors.bgCard)
-              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-              .onClick(() => { this.showColorPicker = true; })
-            }
-            ListItem() {
-              this.MenuItemBuilder('❓', '常见问题', '使用帮助和问题反馈', '#795548',
-                () => { this.pageInfo.clear();
-                  this.pageInfo.pushPath({ name: 'FaqPage' }); })
-            }
-            if (this.isLoggedIn) {
-            ListItem() {
-              Row() {
-                Stack({ alignContent: Alignment.Center }) {
-                  Circle().width(44).height(44).fill('#546E7A22')
-                  Text('📅').fontSize(22)
-                }.margin({ right: 16 })
-                Column() {
-                  Text('学期设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                  Text(SemesterUtil.formatSemester(SemesterUtil.getCurrentSemesterCode())).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-                }.layoutWeight(1)
-                Text('›').fontSize(20).fontColor('#CCCCCC')
-              }
-              .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-              .borderRadius(12).backgroundColor(ThemeColors.bgCard)
-              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-              .onClick(() => {
-                const cur = SemesterUtil.getCurrentSemesterCode();
-                const parts = cur.split('-');
-                this.pickSemYear = parseInt(parts[0]);
-                this.pickSemPart = parseInt(parts[2]) || 2;
-                this.pickWeekSwift = PreferenceUtil.getNumber('week_swift', 0);
-                this.showSemesterDialog = true;
-              })
-            }
-            }
-            ListItem() {
-              this.MenuItemBuilder('🔓', '退出登录', '清除登录状态', '#FF5252',
-                async () => {
-                  await PreferenceUtil.putString('ids_account', '');
-                  await PreferenceUtil.putString('login_password', '');
-                  await HttpUtil.getInstance().clearCookies();
-                  this.isLoggedIn = false;
-                  this.username = '';
-                  this.loginStatus = 'not_logged_in';
-                })
-            }
-            ListItem() {
-              Row() {
-                Stack({ alignContent: Alignment.Center }) {
-                  Circle().width(44).height(44).fill('#8BC34A22')
-                  Text('🗑️').fontSize(22)
-                }.margin({ right: 16 })
-                Column() {
-                  Text('清除缓存').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                  Text('当前 ' + this.cacheSize).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-                }.layoutWeight(1)
-                Text('›').fontSize(20).fontColor('#CCCCCC')
-              }
-              .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-              .borderRadius(12).backgroundColor(ThemeColors.bgCard)
-              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-              .onClick(() => {
-                this.clearCache();
-              })
-            }
+      List({ space: 12 }) {
+        // ===== 个性化 =====
+        ListItem() {
+          Column() {
+            Text('个性化').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              .padding({ left: 16, top: 14, bottom: 10 })
+            Divider().color('#E0E0E0').strokeWidth(0.5).margin({ left: 16, right: 16 })
+            this.themeRow()
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            this.colorRow()
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            this.bgRow()
           }
-          .padding({ left: 16, right: 16, top: 8 })
-          .layoutWeight(1)
+          .borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
+          .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+        }
+
+        // ===== 学习 =====
+        if (this.isLoggedIn) {
+        ListItem() {
+          Column() {
+            Text('学习').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              .padding({ left: 16, top: 14, bottom: 10 })
+            Divider().color('#E0E0E0').strokeWidth(0.5).margin({ left: 16, right: 16 })
+            this.semesterRow()
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            // 物理实验设置
+            Row() {
+              Stack({ alignContent: Alignment.Center }) {
+                Circle().width(44).height(44).fill('#7B1FA222')
+                Text('⚛️').fontSize(22)
+              }.margin({ right: 16 })
+              Column() {
+                Text('物理实验设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text(this.phyPwdStatus).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .onClick(() => {
+              this.phyPwdInput = PreferenceUtil.getString('physics_pwd');
+              this.showPhyPwdDialog = true;
+              animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.phyOpacity = 1; this.phyTranslate = 0; });
+            })
+          }
+          .borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
+          .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+        }
+        }
+
+        // ===== 其他 =====
+        ListItem() {
+          Column() {
+            Text('其他').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              .padding({ left: 16, top: 14, bottom: 10 })
+            Divider().color('#E0E0E0').strokeWidth(0.5).margin({ left: 16, right: 16 })
+            // 常见问题
+            Row() {
+              Stack({ alignContent: Alignment.Center }) {
+                Circle().width(44).height(44).fill('#79554822')
+                Text('❓').fontSize(22)
+              }.margin({ right: 16 })
+              Column() {
+                Text('常见问题').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text('使用帮助和问题反馈').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .onClick(() => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'FaqPage' }); })
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            // 检测更新
+            Row() {
+              Stack({ alignContent: Alignment.Center }) {
+                Circle().width(44).height(44).fill('#2196F322')
+                Text('🔄').fontSize(22)
+              }.margin({ right: 16 })
+              Column() {
+                Text('检测更新').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text(this.hasUpdate ? '发现新版本 v' + (this.updateInfo?.version ?? '') : (this.currentVersion ? '当前 v' + this.currentVersion + ' · 已是最新' : '检查是否有新版本')).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .onClick(() => { this.checkVersionUpdate(true); })
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            this.logoutRow()
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            this.cacheRow()
+          }
+          .borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
+          .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+        }
+        ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 60 : 48)
+      }
+      .padding({ left: 16, right: 16, top: 8 })
+      .layoutWeight(1)
     }
     .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
   }

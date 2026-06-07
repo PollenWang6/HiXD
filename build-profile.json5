@@ -7,11 +7,11 @@
         "material": {
           "certpath": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B65CC8EAA5E70FDE92AE4F466DCD4C8EFA651FB8CB40611CFC35B403E89C4507BD14C79CB930828",
+          "keyPassword": "0000001BCA594C7F0893A1A6B9EB53E1F5DBCF4961BA35A1DE37978DAB55FCA5F88752E37774182AF176F6",
           "profile": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.p12",
-          "storePassword": "0000001B078EB752C01B4E10391BFFBA5CBD45BC24D39A3B626734ECE12456ABDAB8950E92F21E9B01C270"
+          "storePassword": "0000001BA8735F17AC97372456ED8A53B090D928CD03AC43E2112172CD29786795501871D9639A998ADFEE"
         }
       }
     ],

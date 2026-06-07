@@ -222,11 +222,64 @@ export class ExamService {
     const key = 'exam_' + semCode;
     return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
       await this.activateAppSession(EHALL_APP_EXAM);
-      return (await this.appPost(
+      // 已安排考试
+      const arranged = (await this.appPost(
         '/jwapp/sys/studentWdksapApp/modules/wdksap/wdksap.do',
         { 'XNXQDM': semCode, '*order': '-KSRQ,-KSSJMS' }
       )).body;
+      // 未安排考试（已选课但考试未排定）
+      const notArranged = await this.getNotArrangedExamsEhall(semCode);
+      return ExamService.mergeExamResults(arranged, notArranged);
     }, 5 * 60 * 1000);
+  }
+
+  // 未安排考试列表（本科生 ehall）
+  async getNotArrangedExamsEhall(semCode: string): Promise<string> {
+    try {
+      const resp = await this.appPost(
+        '/jwapp/sys/studentWdksapApp/modules/wdksap/cxyxkwapkwdkc.do',
+        { 'XNXQDM': semCode }
+      );
+      return resp.body;
+    } catch (_) {
+      return '{"datas":{"cxyxkwapkwdkc":{"rows":[]}}}';
+    }
+  }
+
+  // 合并已安排和未安排考试
+  static mergeExamResults(arranged: string, notArranged: string): string {
+    try {
+      const arrObj: Record<string, Object> = JSON.parse(arranged) as Record<string, Object>;
+      const naObj: Record<string, Object> = JSON.parse(notArranged) as Record<string, Object>;
+      // 从 notArranged 中提取课程名，转成考试行格式（无日期/时间）
+      const naDatas: Record<string, Object> = naObj['datas'] as Record<string, Object>;
+      const naModule: Record<string, Object> = naDatas['cxyxkwapkwdkc'] as Record<string, Object>;
+      const naRows: Object[] = (naModule ? naModule['rows'] as Object[] : []) ?? [];
+      const naExamRows: Record<string, string>[] = [];
+      for (const row of naRows) {
+        const r: Record<string, Object> = row as Record<string, Object>;
+        naExamRows.push({
+          'KCM': String(r['KCM'] ?? ''),
+          'KSSJMS': '',
+          'KSRQ': '',
+          'KSMC': '',
+          'JASMC': '',
+          'ZWH': ''
+        });
+      }
+      if (naExamRows.length > 0) {
+        const arrDatas: Record<string, Object> = arrObj['datas'] as Record<string, Object>;
+        const arrMod: Record<string, Object> = arrDatas['wdksap'] as Record<string, Object>;
+        const existingRows: Object[] = (arrMod ? arrMod['rows'] as Object[] : []) ?? [];
+        const merged: Object[] = [...existingRows, ...naExamRows];
+        // 写回
+        const wdksObj: Record<string, Object> = arrObj['datas'] as Record<string, Object>;
+        (wdksObj['wdksap'] as Record<string, Object>)['rows'] = merged;
+      }
+      return JSON.stringify(arrObj);
+    } catch (_) {
+      return arranged;
+    }
   }
 
   // ==================== 研究生 (yjspt) API ====================
@@ -258,7 +311,11 @@ export class ExamService {
       const out: Record<string, string> = {};
       out['KCM'] = String(row['KCMC'] ?? '');
       out['JASMC'] = String(row['JASMC'] ?? '');
-      out['KSSJMS'] = String(row['KSSJMS'] ?? '');
+      const kssjms: string = String(row['KSSJMS'] ?? '');
+      out['KSSJMS'] = kssjms;
+      // 从 KSSJMS 提取日期部分作为 KSRQ（格式："2026-04-22 13:00-15:00(星期三)" → "2026-04-22"）
+      const spaceIdx: number = kssjms.indexOf(' ');
+      out['KSRQ'] = spaceIdx > 0 ? kssjms.substring(0, spaceIdx) : kssjms;
       out['KSMC'] = String(row['KSLXDM_DISPLAY'] ?? '');
       out['SFMR'] = '';
       wrapped.push(out);

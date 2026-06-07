@@ -3,7 +3,7 @@ import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { CacheService } from './CacheService';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { CasLoginService } from './CasLoginService';
-import { ClassItemModel, ClassTableRow, EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE, EHALL_APP_EMPTY_CLASSROOM } from './Models';
+import { ClassItemModel, ClassTableRow, UnscheduledCourse, ClassChange, EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE, EHALL_APP_EMPTY_CLASSROOM } from './Models';
 
 const TAG = 'ClassService';
 
@@ -248,6 +248,44 @@ export class ClassService {
     }, 7 * 24 * 60 * 60 * 1000, forceRefresh);
   }
 
+  // 未排课列表（本科生 ehall：已选课但尚未排入课表）
+  async getUnscheduledCoursesEhall(semCode: string, sid: string): Promise<string> {
+    await this.init();
+    const key = 'unscheduled_' + semCode;
+    return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
+      try {
+        await this.activateAppSession(EHALL_APP_CLASS_TABLE);
+      } catch (_) {}
+      const resp = await this.appPost(
+        '/jwapp/sys/wdkb/modules/xskcb/cxxsllsywpk.do',
+        { 'XNXQDM': semCode, 'XH': sid }
+      );
+      return resp.body;
+    }, 7 * 24 * 60 * 60 * 1000);
+  }
+
+  // 解析未排课列表
+  static parseUnscheduledCourses(body: string): UnscheduledCourse[] {
+    const out: UnscheduledCourse[] = [];
+    try {
+      const obj: Record<string, Object> = JSON.parse(body) as Record<string, Object>;
+      const datas: Record<string, Object> = obj['datas'] as Record<string, Object>;
+      const cxxsllsywpk: Record<string, Object> = datas['cxxsllsywpk'] as Record<string, Object>;
+      const rows: Object[] = cxxsllsywpk['rows'] as Object[];
+      if (!rows) return out;
+      for (const r of rows) {
+        const row: Record<string, Object> = r as Record<string, Object>;
+        out.push({
+          name: String(row['KCM'] ?? ''),
+          code: String(row['KCH'] ?? ''),
+          number: String(row['KXH'] ?? ''),
+          teacher: String(row['SKJS'] ?? '')
+        });
+      }
+    } catch (_) {}
+    return out;
+  }
+
   async getCachedClassTable(semCode: string, sid: string): Promise<string | null> {
     await this.init();
     const key = 'ct_' + semCode;
@@ -258,6 +296,65 @@ export class ClassService {
     await this.init();
     const key = 'ct_' + semCode;
     return this.cache.getStale(key);
+  }
+
+  // 课程变更列表（本科生 ehall：调课/停课/补课）
+  async getClassChangesEhall(semCode: string): Promise<string> {
+    await this.init();
+    const key = 'changes_' + semCode;
+    return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
+      try {
+        await this.activateAppSession(EHALL_APP_CLASS_TABLE);
+      } catch (_) {}
+      const resp = await this.appPost(
+        '/jwapp/sys/wdkb/modules/xskcb/xsdkkc.do',
+        { 'XNXQDM': semCode, '*order': '-SQSJ' }
+      );
+      return resp.body;
+    }, 30 * 60 * 1000);  // 30 分钟缓存
+  }
+
+  // 解析课程变更列表
+  static parseClassChanges(body: string): ClassChange[] {
+    const out: ClassChange[] = [];
+    try {
+      const obj: Record<string, Object> = JSON.parse(body) as Record<string, Object>;
+      const datas: Record<string, Object> = obj['datas'] as Record<string, Object>;
+      const xsdkkc: Record<string, Object> = datas['xsdkkc'] as Record<string, Object>;
+      const rows: Object[] = xsdkkc['rows'] as Object[];
+      if (!rows) return out;
+      for (const r of rows) {
+        const row: Record<string, Object> = r as Record<string, Object>;
+        const tklxdm: string = String(row['TKLXDM'] ?? '');
+        let typeStr = '调课';
+        if (tklxdm === '02') typeStr = '停课';
+        else if (tklxdm === '03') typeStr = '补课';
+        // 周次字符串转描述
+        const origDayNum: string = String(row['TKXQ'] ?? '');
+        const newDayNum: string = String(row['XSKXQ'] ?? '');
+        const dayMap: Record<string, string> = { '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六', '7': '日' };
+        // 周次字符串转描述
+        const origWeeks: string = String(row['SKZC'] ?? '');
+        const newWeeks: string = String(row['XSKZC'] ?? '');
+        out.push({
+          type: typeStr,
+          courseName: String(row['KCM'] ?? ''),
+          courseCode: String(row['KCH'] ?? ''),
+          classNumber: String(row['KXH'] ?? ''),
+          originalWeeks: origWeeks,
+          originalDay: '周' + (dayMap[origDayNum] || origDayNum),
+          originalSection: String(row['TKKSJC'] ?? '') + '-' + String(row['TKJSJC'] ?? ''),
+          originalRoom: String(row['JASMC'] ?? ''),
+          originalTeacher: String(row['TKJS'] ?? ''),
+          newWeeks: newWeeks,
+          newDay: '周' + (dayMap[newDayNum] || newDayNum),
+          newSection: String(row['XSKKSJC'] ?? '') + '-' + String(row['XSKJSJC'] ?? ''),
+          newRoom: String(row['XJASMC'] ?? ''),
+          newTeacher: String(row['XJSXM'] ?? '')
+        });
+      }
+    } catch (_) {}
+    return out;
   }
 
   // ==================== 研究生 (yjspt) API ====================

@@ -1,5 +1,5 @@
 // ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
-import { EhallService, SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
+import { SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
 import { ScoreService } from '../../services/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
 
@@ -22,7 +22,6 @@ export struct ScorePage {
   @State currentDetail: ComposeDetail[] = [];
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
-  private ehall = EhallService.getInstance();
   private allScores: ScoreItemModel[] = [];
   private detailCache: Map<string, ComposeDetail[]> = new Map();
 

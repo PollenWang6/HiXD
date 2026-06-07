@@ -299,19 +299,41 @@ export class ScoreService {
       const out: Record<string, string> = {};
       out['XNXQDM'] = String(row['XNXQDM_DISPLAY'] ?? '');
       out['XSKCM'] = String(row['KCMC'] ?? '');
-      out['ZCJ'] = String(row['DYBFZCJ'] ?? '');
+      // CJFZDM: 0=百分制, 1=三级, 2=五级, 3=两级
+      const cjfzdm: string = String(row['CJFZDM'] ?? '0');
+      const cjxsz: string = String(row['CJXSZ'] ?? '');
+      // DJCJLXDM_DISPLAY — 分制显示名（ScorePage 用 '五级成绩' 判断分制）
+      if (cjfzdm === '1') out['DJCJLXDM_DISPLAY'] = '三级成绩';
+      else if (cjfzdm === '2') out['DJCJLXDM_DISPLAY'] = '五级成绩';
+      else if (cjfzdm === '3') out['DJCJLXDM_DISPLAY'] = '两级成绩';
+      else out['DJCJLXDM_DISPLAY'] = '';
+      // ZCJ — 统一为数值，非百分制时从等级文字映射为数值
+      if (cjfzdm === '0' || cjfzdm === '') {
+        out['ZCJ'] = String(row['DYBFZCJ'] ?? '');
+      } else {
+        out['ZCJ'] = ScoreService.mapCjxsToNumber(cjxsz);
+      }
       out['XF'] = String(row['XF'] ?? '');
       out['XGXKLBDM_DISPLAY'] = '';
       out['SFJG'] = String(row['SFJG'] ?? '');
       out['KCLBDM_DISPLAY'] = String(row['KCLBMC'] ?? '');
       out['CXCKDM_DISPLAY'] = '';
-      out['DJCJLXDM_DISPLAY'] = '';
       out['JXBID'] = String(row['KCDM'] ?? '');
       wrapped.push(out);
     }
     const rowsObj: Record<string, Object> = {'rows': wrapped};
     const xscObj: Record<string, Object> = {'xscjcx': rowsObj};
     return JSON.stringify({'datas': xscObj});
+  }
+
+  // 等级文字 → 数值映射（用于 GPA 计算）
+  static mapCjxsToNumber(cjxs: string): string {
+    if (cjxs.includes('优秀') || cjxs.includes('优')) return '95';
+    if (cjxs.includes('良好') || cjxs.includes('良')) return '85';
+    if (cjxs.includes('中等') || cjxs.includes('中')) return '75';
+    if (cjxs.includes('及格') || cjxs.includes('通过')) return '65';
+    if (cjxs.includes('不及格') || cjxs.includes('不通过')) return '55';
+    return '0';
   }
 
   static parseScores(body: string): ScoreItemModel[] {

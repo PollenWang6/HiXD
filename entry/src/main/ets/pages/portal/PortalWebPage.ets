@@ -38,7 +38,7 @@ export struct PortalWebPage {
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
     console.info(TAG, 'aboutToAppear: url=' + this.url.substring(0, 80));
-    if (!this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('zfw')) {
+    if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
       const t0 = Date.now();
       const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
       console.info(TAG, 'checkAndAutoLogin: result=' + loginOk + ' cost=' + (Date.now() - t0) + 'ms');
@@ -59,7 +59,7 @@ export struct PortalWebPage {
           // WebView 区域（等 cookie 就绪 webUrl 非空后才创建，避免空 src 加载）
           Stack() {
             if (this.webUrl.length > 0) {
-            Web({ src: this.webUrl, controller: this.webController })
+            Web({ src: this.webUrl, controller: this.webController, incognitoMode: this.url.includes('zfw') })
               .onControllerAttached(() => {
                 console.info(TAG, 'onControllerAttached: webUrl loaded');
                 if (this.useWeChatUA) {

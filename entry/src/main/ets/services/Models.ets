@@ -69,6 +69,32 @@ export class ExamItemModel {
   zw: string = '';
 }
 
+// 未排课课程（本科生：已选课但尚未安排时间地点）
+export class UnscheduledCourse {
+  name: string = '';
+  code: string = '';
+  number: string = '';
+  teacher: string = '';
+}
+
+// 课程变更（调课/停课/补课）
+export class ClassChange {
+  type: string = '';   // "调课" | "停课" | "补课"
+  courseName: string = '';
+  courseCode: string = '';
+  classNumber: string = '';
+  originalWeeks: string = '';    // 原周次描述
+  originalDay: string = '';      // 原星期
+  originalSection: string = '';  // 原节次
+  originalRoom: string = '';     // 原教室
+  originalTeacher: string = '';  // 原教师
+  newWeeks: string = '';         // 新周次描述
+  newDay: string = '';           // 新星期
+  newSection: string = '';       // 新节次
+  newRoom: string = '';          // 新教室
+  newTeacher: string = '';       // 新教师
+}
+
 export class ScoreItemModel {
   xnxqdm: string = '';
   xskcm: string = '';

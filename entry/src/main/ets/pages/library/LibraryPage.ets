@@ -44,11 +44,21 @@ export struct LibraryPage {
   @State currentTab: number = 0;
   @State isSearching: boolean = false;
   @State selectedBook: BookItem | null = null;
+  @State bookMaskOpacity: number = 0;
+  @State bookSheetOffset: number = 100;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   private http = HttpUtil.getInstance();
 
   aboutToAppear(): void { this.loadBorrowList(); }
+
+  closeBookDetail(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
+      this.bookMaskOpacity = 0;
+      this.bookSheetOffset = 100;
+    });
+    setTimeout(() => { this.selectedBook = null; }, 200);
+  }
 
   private makeBookItem(raw: Record<string, Object>): BookItem {
     const locations: BookLocation[] = [];
@@ -155,7 +165,9 @@ export struct LibraryPage {
 
   build() {
     NavDestination() {
-      Row({ space: 8 }) {
+      Stack({ alignContent: Alignment.Bottom }) {
+        Column() {
+          Row({ space: 8 }) {
         TextInput({ placeholder: '搜索图书...', text: this.searchWord })
           .layoutWeight(1).height(40).borderRadius(20).backgroundColor(ThemeColors.bgInput).padding({ left: 16, right: 16 })
           .onChange((v: string) => { this.searchWord = v; })
@@ -204,7 +216,13 @@ export struct LibraryPage {
                   }.layoutWeight(1).alignItems(HorizontalAlign.Start)
                 }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
                 .borderRadius(8).backgroundColor(ThemeColors.bgCard)
-                .onClick(() => { this.selectedBook = book; })
+                .onClick(() => {
+                  this.selectedBook = book;
+                  animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
+                    this.bookMaskOpacity = 1;
+                    this.bookSheetOffset = 0;
+                  });
+                })
               }.padding({ left: 12, right: 12 })
             }, (book: BookItem, idx?: number) => `book_${idx}`)
           }.layoutWeight(1)
@@ -238,29 +256,63 @@ export struct LibraryPage {
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         }
       }
-    }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
-    .bindContentCover(this.selectedBook !== null, this.bookDetailBuilder(), {
-      modalTransition: ModalTransition.DEFAULT,
-      backgroundColor: Color.Transparent
-    })
+        }
+        .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+
+        if (this.selectedBook !== null) {
+          // 背景遮罩
+          Column()
+            .width('100%').height('100%')
+            .backgroundColor('#4D000000')
+            .opacity(this.bookMaskOpacity)
+            .onClick(() => { this.closeBookDetail(); })
+          // 详情卡片
+          Column() {
+            Column() {
+              this.bookDetailBuilder()
+            }
+            .width('100%').height('100%')
+          }
+          .width('100%').height('70%')
+          .position({ x: 0, y: '30%' })
+          .translate({ y: this.bookSheetOffset + '%' })
+        }
+      }
+    }
     .title('图书馆', { backgroundColor: this.accentColor })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
+    .onBackPressed(() => {
+      if (this.selectedBook !== null) {
+        this.closeBookDetail();
+        return true;
+      }
+      return false;
+    })
   }
   @Builder
   bookDetailBuilder() {
     Column() {
-      // 半透明背景点击关闭
-      Column().width('100%').layoutWeight(1).onClick(() => { this.selectedBook = null; })
-      // 详情卡片（限高75%，内容可滚动）
+      // 标题栏：书名 + 关闭按钮
+      Row() {
+        Text(this.selectedBook?.bookName ?? '')
+          .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        Row() {
+          Text('✕').fontSize(18).fontColor('#999999')
+        }
+        .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => { this.closeBookDetail(); })
+      }.width('100%').padding({ bottom: 8 })
+
+      // 作者
+      Text(this.selectedBook?.author ?? '').fontSize(13).fontColor(ThemeColors.textSecondary)
+      Divider().margin({ top: 10, bottom: 10 }).color('#F0F0F0')
+
+      // 可滚动内容区域
       Scroll() {
         Column() {
-          // 书名
-          Text(this.selectedBook?.bookName ?? '').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-          // 作者
-          Text(this.selectedBook?.author ?? '').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 6 })
-          Divider().margin({ top: 12, bottom: 8 }).color('#F0F0F0')
           // 信息网格
           Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
             this.infoTag('可借', `${this.selectedBook?.availableCount ?? 0}`, this.selectedBook !== null && this.selectedBook.availableCount > 0 ? '#4CAF50' : '#E53935')
@@ -287,15 +339,22 @@ export struct LibraryPage {
               }.width('100%').padding({ top: 8, bottom: 8 })
             }, (loc: BookLocation, idx?: number) => `loc_${idx}`)
           }
-        }.width('100%').padding(20)
-      }.width('100%').constraintSize({ maxHeight: '75%' }).backgroundColor(ThemeColors.bgInput).borderRadius({ topLeft: 16, topRight: 16 })
-    }.width('100%').height('100%')
+        }
+        .width('100%')
+      }
+      .width('100%').layoutWeight(1)
+    }
+    .width('100%').height('100%')
+    .padding({ left: 20, right: 20, top: 20, bottom: 20 })
+    .backgroundColor(ThemeColors.bgPage)
+    .borderRadius({ topLeft: 20, topRight: 20 })
   }
   @Builder
   infoTag(label: string, value: string, color: string) {
     Column() {
       Text(label).fontSize(11).fontColor(ThemeColors.textSecondary)
-      Text(value).fontSize(13).fontColor(color).margin({ top: 2 })
+      Text(value).fontSize(13).fontColor(
+        color).margin({ top: 2 })
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.width('47%').padding({ top: 6, bottom: 6 })
   }

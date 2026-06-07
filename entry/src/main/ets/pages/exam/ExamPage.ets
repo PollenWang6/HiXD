@@ -1,6 +1,6 @@
 ﻿// ExamPage.ets — 考试安排页面
 import { ThemeColors } from '../../utils/ThemeColors';
-import { EhallService, SemesterUtil, ExamItemModel } from '../../services/EhallService';
+import { SemesterUtil, ExamItemModel } from '../../services/EhallService';
 import { ExamService } from '../../services/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { router } from '@kit.ArkUI';
@@ -26,8 +26,6 @@ export struct ExamPage {
   @State notArranged: ExamItemModel[] = [];
   @State selectedSemester: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
-
-  private ehall = EhallService.getInstance();
 
   aboutToAppear(): void {
     this.selectedSemester = SemesterUtil.getCurrentSemesterCode();
