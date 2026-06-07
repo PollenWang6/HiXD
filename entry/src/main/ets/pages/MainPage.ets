@@ -253,6 +253,7 @@ struct MainPage {
   @State updateInfo: VersionInfo | null = null;
   @State hasUpdate: boolean = false;
   @State skipVersion: string = '';
+  @State updateToast: string = '';
   updateChecked: boolean = false;
   currentVersion: string = '';
 
@@ -348,6 +349,10 @@ struct MainPage {
         }
       } else {
         this.hasUpdate = false;
+        if (showNotNeeded) {
+          this.updateToast = '当前已是最新版本';
+          setTimeout(() => { this.updateToast = ''; }, 1500);
+        }
       }
     } catch (_) {}
   }
@@ -1999,6 +2004,16 @@ struct MainPage {
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor(ThemeColors.overlay)
     .onClick(() => { this.showUpdateDialog = false; })
+    }
+    // 底部提示 Toast
+    if (this.updateToast.length > 0) {
+      Text(this.updateToast)
+        .fontSize(14).fontColor('#FFFFFF')
+        .backgroundColor('rgba(0,0,0,0.75)')
+        .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+        .borderRadius(20)
+        .position({ x: '50%', y: '90%' }).markAnchor({ x: '50%' })
+        .zIndex(10)
     }
     } // closes Stack
     .width('100%').height('100%')

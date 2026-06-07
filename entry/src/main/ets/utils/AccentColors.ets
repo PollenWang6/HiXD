@@ -3,7 +3,7 @@ import { PreferenceUtil } from './PreferenceUtil';
 
 // 预设主题色：[浅色模式颜色, 深色模式颜色, 名称]
 export const ACCENT_PRESETS: string[][] = [
-  ['#000000', '#FFFFFF', '雪峰白'],
+  ['#FFFFFF', '#FFFFFF', '雪峰白'],
   ['#5588CC', '#6699DD', '西电蓝'],
   ['#3A6DAA', '#5599CC', '深海蓝'],
   ['#3A9CAA', '#55B8C4', '青碧'],
