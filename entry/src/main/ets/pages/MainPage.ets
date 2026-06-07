@@ -2332,6 +2332,19 @@ struct MainPage {
       Divider().color('#F0F0F0')
 
       List({ space: 8 }) {
+        // 提示卡片
+        ListItem() {
+          Row() {
+            Text('💡').fontSize(16)
+            Text('部分功能需从「订水系统」预热登录后使用')
+              .fontSize(12).fontColor(ThemeColors.textSecondary)
+              .margin({ left: 6 }).layoutWeight(1)
+              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .width('100%').padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .backgroundColor(ThemeColors.isDark ? '#1A2A3A' : '#FFF8E1')
+          .borderRadius(8)
+        }
         // 外部浏览器跳转
         ListItem() {
           this.MenuItemBuilder('💰', '水电缴费', '线上一键缴纳水电费用', '#E65100',
