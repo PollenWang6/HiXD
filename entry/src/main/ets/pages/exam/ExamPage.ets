@@ -40,6 +40,15 @@ export struct ExamPage {
     return examDate < today;
   }
 
+  // 从日期字符串获取周几
+  private getWeekdayFromKsrq(ksrq: string): string {
+    if (!ksrq || ksrq.length < 10) return '';
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const date = new Date(ksrq.substring(0, 10));
+    if (isNaN(date.getTime())) return '';
+    return weekdays[date.getDay()];
+  }
+
   // 格式化考试时间（去掉日期和星期）
   private formatExamTime(kssjms: string): string {
     const timeRaw: string = kssjms || '';
@@ -101,7 +110,7 @@ export struct ExamPage {
               ListItem() {
                 Row() {
                   Column() {
-                    Text(exam.ksrq ? exam.ksrq.substring(5, 10) : '待定').fontSize(14).fontWeight(FontWeight.Bold).fontColor('#FB8C00')
+                    Text(exam.ksrq ? exam.ksrq.substring(5, 10) + ' ' + this.getWeekdayFromKsrq(exam.ksrq) : '待定').fontSize(14).fontWeight(FontWeight.Bold).fontColor('#FB8C00')
                     Text(this.getKsmcLine1(exam.ksmc)).fontSize(10).fontColor(ThemeColors.textSecondary).margin({ top: 4 }).maxLines(1)
                     Text(this.getKsmcLine2(exam.ksmc)).fontSize(10).fontColor(ThemeColors.textSecondary).margin({ top: 2 }).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   }.width(120).alignItems(HorizontalAlign.Center)
@@ -128,7 +137,7 @@ export struct ExamPage {
             if (this.notArranged.length > 0) {
               ListItem() {
                 Column() {
-                  Text('待安排考试').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).margin({ bottom: 8 })
+                  Text('暂无安排考试科目').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).margin({ bottom: 8 })
                   ForEach(this.notArranged, (item: ExamItemModel, idx?: number) => {
                     Row() { Text(item.kcm).fontSize(13).fontColor(ThemeColors.textSecondary).layoutWeight(1); Text('待定').fontSize(12).fontColor('#BBBBBB'); }
                       .width('100%').padding({ top: 6, bottom: 6 })

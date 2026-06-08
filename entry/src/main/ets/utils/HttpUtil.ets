@@ -152,6 +152,12 @@ export class HttpUtil {
     return this.request(url, 'POST', bodyStr, allHeaders);
   }
 
+  // POST 无 body、无 Content-Type（用于 xgxt getAppConfig.do 等仅需 query params 的 API）
+  async postEmpty(url: string, headers?: Record<string, string>): Promise<HttpResponse> {
+    await this.loadCookies();
+    return this.request(url, 'POST', undefined, headers);
+  }
+
   getCookiesForDomain(domain: string): string {
     const domMap = this.cookieStore[domain];
     const parts: string[] = [];
@@ -513,48 +519,94 @@ export class HttpUtil {
         }
       });
 
-      req.request(
-        url,
-        {
-          method: httpMethod,
-          header: reqHeaders,
-          extraData: body ? body : '',
-          expectDataType: http.HttpDataType.STRING,
-          readTimeout: 20000,
-          connectTimeout: 15000,
-        },
-        async (err: BusinessError | undefined, data: http.HttpResponse) => {
-          if (err !== undefined && err.code !== 0) {
-            reject(new Error('HTTP ' + err.code + ': ' + err.message));
+      // body 为 undefined 时不传 extraData（真正的空 POST）；为 '' 时仍需传（form 空串）
+      const noBody: boolean = body === undefined;
+      if (noBody) {
+        req.request(
+          url,
+          {
+            method: httpMethod,
+            header: reqHeaders,
+            expectDataType: http.HttpDataType.STRING,
+            readTimeout: 20000,
+            connectTimeout: 15000,
+          },
+          async (err: BusinessError | undefined, data: http.HttpResponse) => {
+            if (err !== undefined && err.code !== 0) {
+              reject(new Error('HTTP ' + err.code + ': ' + err.message));
+              req.destroy();
+              return;
+            }
+            const resp = new HttpResponse();
+            resp.statusCode = data.responseCode;
+
+            const rawH = data.header as Record<string, string | number | string[]>;
+            const respHeaders: Record<string, string> = {};
+            for (const key of Object.keys(rawH)) {
+              const v = rawH[key];
+              respHeaders[key] = typeof v === 'string' ? v : String(v);
+            }
+            resp.headers = respHeaders;
+
+            const raw = data.result;
+            resp.body = typeof raw === 'string' ? raw : '';
+            resp.isRedirect = resp.statusCode >= 300 && resp.statusCode < 400;
+            resp.location = respHeaders['location'] || respHeaders['Location'];
+
+            const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
+            if (sc) {
+              this.saveResponseCookies(domain, sc);
+              this.saveCookies().catch(() => {});
+            }
+
             req.destroy();
-            return;
+            resolve(resp);
           }
-          const resp = new HttpResponse();
-          resp.statusCode = data.responseCode;
+        );
+      } else {
+        req.request(
+          url,
+          {
+            method: httpMethod,
+            header: reqHeaders,
+            extraData: body as string,
+            expectDataType: http.HttpDataType.STRING,
+            readTimeout: 20000,
+            connectTimeout: 15000,
+          },
+          async (err: BusinessError | undefined, data: http.HttpResponse) => {
+            if (err !== undefined && err.code !== 0) {
+              reject(new Error('HTTP ' + err.code + ': ' + err.message));
+              req.destroy();
+              return;
+            }
+            const resp = new HttpResponse();
+            resp.statusCode = data.responseCode;
 
-          const rawH = data.header as Record<string, string | number | string[]>;
-          const respHeaders: Record<string, string> = {};
-          for (const key of Object.keys(rawH)) {
-            const v = rawH[key];
-            respHeaders[key] = typeof v === 'string' ? v : String(v);
+            const rawH = data.header as Record<string, string | number | string[]>;
+            const respHeaders: Record<string, string> = {};
+            for (const key of Object.keys(rawH)) {
+              const v = rawH[key];
+              respHeaders[key] = typeof v === 'string' ? v : String(v);
+            }
+            resp.headers = respHeaders;
+
+            const raw = data.result;
+            resp.body = typeof raw === 'string' ? raw : '';
+            resp.isRedirect = resp.statusCode >= 300 && resp.statusCode < 400;
+            resp.location = respHeaders['location'] || respHeaders['Location'];
+
+            const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
+            if (sc) {
+              this.saveResponseCookies(domain, sc);
+              this.saveCookies().catch(() => {});
+            }
+
+            req.destroy();
+            resolve(resp);
           }
-          resp.headers = respHeaders;
-
-          const raw = data.result;
-          resp.body = typeof raw === 'string' ? raw : '';
-          resp.isRedirect = resp.statusCode >= 300 && resp.statusCode < 400;
-          resp.location = respHeaders['location'] || respHeaders['Location'];
-
-          const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
-          if (sc) {
-            this.saveResponseCookies(domain, sc);
-            this.saveCookies().catch(() => {});
-          }
-
-          req.destroy();
-          resolve(resp);
-        }
-      );
+        );
+      }
     });
   }
 }

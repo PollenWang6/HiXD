@@ -2,6 +2,7 @@
 import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { EhallService } from './EhallService';
+import { CasLoginService } from './CasLoginService';
 
 const TAG: string = 'UserInfoService';
 
@@ -54,26 +55,60 @@ export class UserInfoService {
     return info;
   }
 
-  // 从 ehall getuserinfo.json 获取用户信息（复用已有的 CAS → ehall cookie）
+  // xgxt 个人信息拉取（CAS SSO → xgxt → getAppConfig → getStuBaseInfo）
   async fetchFromEhall(xh: string): Promise<boolean> {
     console.info(TAG, 'fetchFromEhall: start, xh=' + xh);
     try {
-      // 先确保 ehall session 有效
-      const ehallOk: boolean = await EhallService.getInstance().checkEhallLogin();
-      console.info(TAG, 'fetchFromEhall: checkEhallLogin=' + String(ehallOk));
+      // ─── Step 0: 确保 CAS TGC 有效（checkEhallLogin 只看 MOD_AUTH_CAS，不验证 TGC） ───
+      const casRestored: boolean = await CasLoginService.getInstance().tryAutoRestoreLogin();
+      console.info(TAG, 'fetchFromEhall: tryAutoRestoreLogin=' + String(casRestored));
+      if (!casRestored) {
+        console.warn(TAG, 'fetchFromEhall: CAS session expired, cannot proceed');
+        return false;
+      }
 
-      // 尝试通过 ehall 代理调用 xgxt API
-      const proxyUrl: string = 'https://ehall.xidian.edu.cn/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do';
-      const formData: Record<string, string> = {
+      // ─── Step 1: 先 GET xgxt，让它自己触发 CAS 302（service 参数由 xgxt 生成，CAS 才认） ───
+      const xgxtIndex: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
+      let currentUrl: string = xgxtIndex;
+      let resp: HttpResponse = await this.http.getNoRedirect(xgxtIndex);
+      let loop: number = 0;
+      while (resp.isRedirect && resp.location && loop < 10) {
+        let location: string = resp.location;
+        const baseCk: RegExpMatchArray | null = currentUrl.match(/^(https?:\/\/[^\/]+)/);
+        if (baseCk) {
+          const base: string = baseCk[1];
+          if (!location.startsWith('http://') && !location.startsWith('https://')) {
+            location = base + (location.startsWith('/') ? location : '/' + location);
+          }
+        }
+        currentUrl = location;
+        resp = await this.http.getNoRedirect(location);
+        loop++;
+      }
+      console.info(TAG, 'fetchFromEhall: SSO done, final status=' + String(resp.statusCode) +
+        ' url=' + currentUrl.substring(0, 80));
+
+      // 不要 copy ids → xgxt：ids 的 route/JSESSIONID/happyVoyage 与 xgxt 不同，会覆盖 xgxt SSO 拿到的正确 session
+      const xgxtCookies: string = this.http.getCookiesForDomain('xgxt.xidian.edu.cn');
+      console.info(TAG, 'fetchFromEhall: xgxt cookies=' + xgxtCookies.substring(0, 200));
+
+      // ─── Step 2: getAppConfig 初始化模块（初始化 session，可能设置必要 cookie） ───
+      const xgxtHeaders: Record<string, string> = {
+        'Referer': 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do',
+        'Host': 'xgxt.xidian.edu.cn',
+      };
+      const configUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/swpubapp/indexmenu/getAppConfig.do?appId=4585275700341858&appName=jbxxapp';
+      resp = await this.http.postEmpty(configUrl, xgxtHeaders);
+      console.info(TAG, 'fetchFromEhall: getAppConfig status=' + String(resp.statusCode) +
+        ' body=' + resp.body.substring(0, 200));
+
+      // ─── Step 3: getStuBaseInfo 拉取信息 ───
+      const infoUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do';
+      const infoBody: Record<string, string> = {
         'requestParamStr': '{"XSBH":"' + xh + '"}'
       };
-      const headers: Record<string, string> = {
-        'Referer': 'https://ehall.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'Host': 'ehall.xidian.edu.cn',
-      };
-      const resp: HttpResponse = await this.http.postForm(proxyUrl, formData, headers);
-      console.info(TAG, 'fetchFromEhall: xgxt-proxy status=' + String(resp.statusCode) +
+      resp = await this.http.postForm(infoUrl, infoBody, xgxtHeaders);
+      console.info(TAG, 'fetchFromEhall: getStuBaseInfo status=' + String(resp.statusCode) +
         ' body=' + resp.body.substring(0, 300));
 
       if (!resp.isOk || !resp.body) {

@@ -266,6 +266,20 @@ export struct ClassTablePage {
     return true;
   }
 
+  private countClassGridCourses(): number {
+    let count: number = 0;
+    for (let d = 1; d < this.classGrid.length; d++) {
+      if (this.classGrid[d]) {
+        for (let s = 1; s < this.classGrid[d].length; s++) {
+          if (this.classGrid[d][s]) {
+            count += this.classGrid[d][s].length;
+          }
+        }
+      }
+    }
+    return count;
+  }
+
   private initGrid(): void {
     const grid: ClassCell[][][] = [];
     for (let d = 0; d <= DAY_COUNT; d++) {
@@ -393,20 +407,15 @@ export struct ClassTablePage {
       // 只有数据变化或首次加载才重新渲染
       // 防止缓存数据解析出空课表覆盖已有网格
       if (raw && (raw !== this.lastRenderedRaw || !this.hasCache)) {
-        const gridBefore: ClassCell[][][] = this.classGrid;
-        this.renderClassTable(raw);
-        // 如果新数据解析出 0 节课且原先已有课表，还原旧网格
-        if (this.isClassGridEmpty() && gridBefore.length > 0) {
-          const hadData: boolean = gridBefore.some((day: ClassCell[][]) =>
-            day.some((sec: ClassCell[]) => sec.length > 0));
-          if (hadData) {
-            console.warn('ClassTablePage', 'step2: new data produced empty grid, keeping old cache');
-            this.classGrid = gridBefore;
-          } else {
-            this.lastRenderedRaw = raw;
-            this.hasCache = true;
-          }
+        // 先尝试验证新数据有效性
+        const items: ClassItemModel[] = ClassService.parseClassTable(raw);
+        const oldCount: number = this.countClassGridCourses();
+        // 新数据 0 课程，或课程数不足旧数据的 30%（可能是网络波动返回不完整数据）
+        if (items.length === 0 || (this.hasCache && oldCount > 0 && items.length < oldCount * 0.3)) {
+          console.warn('ClassTablePage', 'step2: new data has ' + items.length +
+            ' courses (old=' + oldCount + '), keeping cache');
         } else {
+          this.renderClassTable(raw);
           this.lastRenderedRaw = raw;
           this.hasCache = true;
         }
@@ -483,13 +492,17 @@ export struct ClassTablePage {
   async loadTable(forceRefresh: boolean = false): Promise<void> {
     if (forceRefresh) {
       this.refreshing = true;
-      this.errorMsg = '';
-      this.syncProgress = '正在获取课表数据...';
+      // 不提前重置 errorMsg/syncProgress：连续状态变化会导致 Refresh 组件重新布局子控件、课表暂时空白
       const sid: string = PreferenceUtil.getString('ids_account');
       try {
         const raw: string = await this.classSvc.getClassTable(this.semesterCode, sid, true);
         if (raw !== this.lastRenderedRaw) {
-          this.renderClassTable(raw);
+          const items: ClassItemModel[] = ClassService.parseClassTable(raw);
+          if (items.length === 0 && this.hasCache) {
+            this.errorMsg = '刷新失败：服务器返回空数据，保留当前课表';
+          } else {
+            this.renderClassTable(raw);
+          }
           this.lastRenderedRaw = raw;
         }
         this.writeLocalClassTable(raw);
@@ -558,6 +571,11 @@ export struct ClassTablePage {
     this.classGrid = grid;
     this.diagTodayGrid(grid);
     this.computeCellStatuses();
+  }
+
+  // 获取真实日历周次（不受用户滑动切换影响）
+  private getRealCurrentWeek(): number {
+    return SemesterUtil.calcCurrentWeekFromNow();
   }
 
   // 预计算今天每节课的时间状态，供 @Builder 使用（@Builder 内不能调用含 new Date() 的方法）
@@ -1698,8 +1716,10 @@ export struct ClassTablePage {
                       .fontColor('#FFFFFFAA')
                       .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
                   }
-                  // 今天上课状态标记
-                  if (cell.day === this._todayDay && !cell.isExam) {
+                  // 今天上课状态标记（只在真实日历本周、且该周有排课时显示）
+                  if (cell.day === this._todayDay && !cell.isExam &&
+                      this.currentWeek === this.getRealCurrentWeek() &&
+                      cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1]) {
                     if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1) {
                       Text('进行中').fontSize(7).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
                         .backgroundColor('#4CAF50CC').borderRadius(3)
@@ -1715,7 +1735,10 @@ export struct ClassTablePage {
                   }
                 }.width('100%').height('100%').padding(4)
                 .backgroundColor(this.getCellColor(cell)).borderRadius(6)
-                .opacity(cell.day === this._todayDay && !cell.isExam && this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1 ? 0.55 : 1)
+                .opacity(cell.day === this._todayDay && !cell.isExam &&
+                  this.currentWeek === this.getRealCurrentWeek() &&
+                  cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
+                  this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1 ? 0.55 : 1)
                 .alignItems(HorizontalAlign.Center).justifyContent(FlexAlign.Center)
                 .position({
                   x: `${(day - 1) * (100 / 7)}%`,
@@ -1890,7 +1913,6 @@ export struct ClassTablePage {
         console.warn('ClassTablePage', 'setConfig failed: ' + String(cfgErr));
       }
 
-      // 5. 遍历课程，为每个上课日创建日历事件
       const startDate: Date = SemesterUtil.getSemesterStartDate(this.semesterCode);
       const swift: number = PreferenceUtil.getNumber('week_swift', 0);
       const dayOfWeek = startDate.getDay();
@@ -1898,26 +1920,43 @@ export struct ClassTablePage {
       const monday = new Date(startDate);
       monday.setDate(startDate.getDate() + mondayOffset + swift * 7);
 
-      let eventCount = 0;
+      // 5. 获取日历中已有事件 → 签名映射（标题|startTime）
+      const existingMap: Record<string, number> = {};
+      try {
+        const existingEvents: calendarManager.Event[] = await calendar.getEvents();
+        for (let ei = 0; ei < existingEvents.length; ei++) {
+          const evt: calendarManager.Event = existingEvents[ei];
+          if (evt.id !== undefined && evt.title && evt.startTime) {
+            const sig: string = evt.title + '|' + String(evt.startTime);
+            existingMap[sig] = evt.id;
+          }
+        }
+        console.info('ClassTablePage', 'getEvents: found ' + String(Object.keys(existingMap).length) +
+          ' existing events in HiXD calendar');
+      } catch (getErr) {
+        console.warn('ClassTablePage', 'getEvents failed, will do full import: ' + String(getErr));
+      }
+
+      // 6. 遍历课程，增量导入：跳过已有的，只添加新的
+      const neededSigs: Record<string, boolean> = {};
+      let newCount: number = 0;
+      let skipCount: number = 0;
 
       for (let d = 1; d <= DAY_COUNT; d++) {
         for (let s = 1; s <= SECTION_COUNT; s++) {
           const cells = this.classGrid[d][s];
           for (let ci = 0; ci < cells.length; ci++) {
             const cell = cells[ci];
-            if (cell.isExam) continue; // 跳过考试
-            if (cell.startSection !== s) continue; // 只在起始节次处理
+            if (cell.isExam) continue;
+            if (cell.startSection !== s) continue;
 
-            // 遍历该课程的所有有课周次
             for (let w = 0; w < cell.weekList.length; w++) {
               if (!cell.weekList[w]) continue;
-              const weekNum = w + 1; // 1-based
+              const weekNum = w + 1;
 
-              // 计算该课的具体日期
               const eventDate = new Date(monday);
               eventDate.setDate(monday.getDate() + (weekNum - 1) * 7 + (d - 1));
 
-              // 获取开始/结束时间
               const startParts = SECTION_TIMES[cell.startSection].split('-');
               const endParts = SECTION_TIMES[cell.endSection].split('-');
               if (startParts.length < 2 || endParts.length < 2) continue;
@@ -1932,13 +1971,21 @@ export struct ClassTablePage {
               const endTime = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate(),
                 endHour, endMin, 0);
 
-              // 创建日历事件
               const title = (cell.isExperiment ? '🧪 ' : '') + cell.name;
               const desc = (cell.classroom ? '教室: ' + cell.classroom : '') +
                 (cell.teacher ? (cell.classroom ? ' | ' : '') + '教师: ' + cell.teacher : '');
+
+              // 签名 = 标题|开始毫秒数，唯一标识一条日程
+              const sig: string = title + '|' + String(startTime.getTime());
+              neededSigs[sig] = true;
+
+              if (existingMap[sig] !== undefined) {
+                skipCount++;
+                continue; // 已存在，跳过
+              }
+
               let event: calendarManager.Event;
               if (this.reminderMode === 2) {
-                // 不需要提醒
                 event = {
                   type: calendarManager.EventType.NORMAL,
                   title: title,
@@ -1959,7 +2006,7 @@ export struct ClassTablePage {
 
               try {
                 await calendar.addEvent(event);
-                eventCount++;
+                newCount++;
               } catch (addErr) {
                 console.warn('ClassTablePage', 'addEvent failed: ' + String(addErr));
               }
@@ -1968,7 +2015,27 @@ export struct ClassTablePage {
         }
       }
 
-      this.calendarImportMsg = '已导入 ' + eventCount + ' 条课程到系统日历';
+      // 7. 删除日历中不再需要的课程事件（课程被删除或时间变更）
+      let delCount: number = 0;
+      const existingSigs: string[] = Object.keys(existingMap);
+      for (let si = 0; si < existingSigs.length; si++) {
+        const sig: string = existingSigs[si];
+        if (!neededSigs[sig]) {
+          try {
+            await calendar.deleteEvent(existingMap[sig]);
+            delCount++;
+          } catch (delErr) {
+            console.warn('ClassTablePage', 'deleteEvent failed: sig=' + sig + ' err=' + String(delErr));
+          }
+        }
+      }
+
+      let msg: string = '';
+      if (newCount > 0) msg += '新增 ' + newCount + ' 条';
+      if (delCount > 0) msg += (msg.length > 0 ? '，删除 ' : '删除 ') + delCount + ' 条';
+      if (skipCount > 0) msg += (msg.length > 0 ? '，跳过 ' : '跳过 ') + skipCount + ' 条';
+      if (msg.length === 0) msg = '课程无变化';
+      this.calendarImportMsg = msg;
     } catch (e) {
       this.calendarImportMsg = '导入失败: ' + String(e);
     }

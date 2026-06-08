@@ -188,9 +188,10 @@ struct MainPage {
   @State userCollege: string = '';      // 学院
   @State userGrade: string = '';        // 年级
   @State userGender: string = '';       // 性别
-  @State xgxtWebSrc: string = '';       // 隐藏 WebView 加载 xgxt 的 URL
-  xgxtController: web_webview.WebviewController = new web_webview.WebviewController();
-  private xgxtPageCount: number = 0;
+  @State userRefreshing: boolean = false; // 用户信息刷新中
+  @State userDormitory: string = '';   // 宿舍
+  @State userStudentType: string = ''; // 学生类别
+  @State userClassName: string = '';   // 班级
   @State previewCells: PreviewCell[] = [];
   @State previewLoaded: boolean = false;
   @State isTablet: boolean = deviceInfo.deviceType === 'tablet';
@@ -247,6 +248,12 @@ struct MainPage {
   @State currentThemeLabel: string = '当前：浅色模式';
   @State warmupActive: boolean = false;
   private warmupUrl: string = 'https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1';
+
+  // ==================== xgxt 隐藏 WebView（个人信息抓取） ====================
+  @State xgxtActive: boolean = false;
+  private xgxtUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
+  private xgxtController: web_webview.WebviewController = new web_webview.WebviewController();
+  private xgxtTimeoutId: number = -1;
 
   // ==================== 版本更新弹窗 ====================
   @State showUpdateDialog: boolean = false;
@@ -671,9 +678,20 @@ struct MainPage {
       if (info.gender) {
         this.userGender = info.gender;
       }
+      if (info.dormitory) {
+        this.userDormitory = info.dormitory;
+      }
+      if (info.studentType) {
+        this.userStudentType = info.studentType;
+      }
+      if (info.className) {
+        this.userClassName = info.className;
+      }
       console.info(TAG, 'loadUserInfo: OK name=' + this.userDisplayName +
         ' college=' + this.userCollege + ' major=' + this.userMajor +
-        ' grade=' + this.userGrade + ' gender=' + this.userGender);
+        ' grade=' + this.userGrade + ' gender=' + this.userGender +
+        ' dormitory=' + this.userDormitory + ' studentType=' + this.userStudentType +
+        ' className=' + this.userClassName);
     }).catch((e: Error) => {
       console.warn(TAG, 'loadUserInfo failed: ' + String(e));
       // 用缓存兜底
@@ -684,68 +702,102 @@ struct MainPage {
     });
   }
 
-  // 从隐藏 WebView 提取 xgxt cookie → 调 API 获取用户信息
-  private async xgxtExtractAndFetch(): Promise<void> {
+  // 手动刷新用户信息 — 隐藏 WebView 加载 xgxt jbxxapp SPA → JS fetch API 提取
+  private refreshUserInfo(): void {
+    if (this.userRefreshing) {
+      console.info(TAG, 'refreshUserInfo: already refreshing, skip');
+      return;
+    }
+    this.userRefreshing = true;
+    console.info(TAG, 'refreshUserInfo: START (WebView → xgxt)');
+
+    // 清除旧 WebView 状态
+    clearTimeout(this.xgxtTimeoutId);
+    this.xgxtActive = false;
+
+    // 下一帧激活 WebView，触发 CAS SSO → jbxxapp SPA 加载
+    setTimeout(() => { this.xgxtActive = true; }, 100);
+
+    // 超时保护
+    this.xgxtTimeoutId = setTimeout(() => {
+      console.warn(TAG, 'xgxt fetch TIMEOUT');
+      this.xgxtCleanup();
+    }, 25000);
+  }
+
+  // xgxt SPA 加载完成后注入 JS 抓取 getStuBaseInfo
+  private xgxtInjectFetch(): void {
+    const xh: string = this.username || PreferenceUtil.getString('ids_account');
+    // 等待 SPA 初始化后再调用 API
+    const js: string =
+      'setTimeout(function(){' +
+      '  var body="requestParamStr="+encodeURIComponent(\'{"XSBH":"' + xh + '"}\');' +
+      '  fetch("/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do",{' +
+      '    method:"POST",' +
+      '    headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"},' +
+      '    body:body' +
+      '  }).then(function(r){return r.text();})' +
+      '    .then(function(d){console.log("XGXT_INFO:"+d);})' +
+      '    .catch(function(e){console.log("XGXT_ERR:"+e.message);});' +
+      '},4000);';
+    this.xgxtController.runJavaScript(js);
+    console.info(TAG, 'xgxtInjectFetch: JS injected, waiting for SPA init...');
+  }
+
+  // 处理 JS fetch 返回的 getStuBaseInfo JSON
+  private xgxtProcessResult(raw: string): void {
     try {
-      const cookieStr: string = web_webview.WebCookieManager.fetchCookieSync(
-        'https://xgxt.xidian.edu.cn/'
-      );
-      console.info(TAG, 'xgxtExtractAndFetch: cookie=' + cookieStr.substring(0, 120));
-
-      if (cookieStr.length === 0) {
-        console.warn(TAG, 'xgxtExtractAndFetch: no cookie from xgxt');
-        this.xgxtWebSrc = '';
+      console.info(TAG, 'xgxtProcessResult: raw[0:500]=' + raw.substring(0, 500));
+      const obj: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      const returnCode: string = String(obj['returnCode'] ?? '');
+      if (returnCode !== '#E000000000000') {
+        const desc: string = String(obj['description'] ?? JSON.stringify(raw).substring(0, 120));
+        console.warn(TAG, 'xgxt API failed: ' + desc);
+        this.xgxtCleanup();
         return;
       }
-
-      // 注入 xgxt cookie 到 HttpUtil
-      const http = HttpUtil.getInstance();
-      http.replaceCookiesForDomain('xgxt.xidian.edu.cn', cookieStr);
-
-      // 调用 xgxt API
-      const xh: string = this.username || PreferenceUtil.getString('ids_account');
-      const apiUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do';
-      const headers: Record<string, string> = {
-        'Referer': 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      };
-      const formData: Record<string, string> = {
-        'requestParamStr': '{"XSBH":"' + xh + '"}'
-      };
-      const resp = await http.postForm(apiUrl, formData, headers);
-      console.info(TAG, 'xgxtExtractAndFetch: API status=' + String(resp.statusCode) +
-        ' body=' + resp.body.substring(0, 200));
-
-      if (resp.statusCode !== 200 || !resp.body) {
-        console.warn(TAG, 'xgxtExtractAndFetch: API failed');
-        this.xgxtWebSrc = '';
-        return;
-      }
-
-      const obj: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
       const data: Record<string, Object> = obj['data'] as Record<string, Object>;
-      if (!data) { return; }
-
+      if (!data) {
+        console.warn(TAG, 'xgxt result: no data field');
+        this.xgxtCleanup();
+        return;
+      }
+      // 提取字段（与实际 API 返回一致）
       const name: string = String(data['XM'] ?? '');
+      const gender: string = String(data['XBDM_DISPLAY'] ?? '');
       const college: string = String(data['DWDM_DISPLAY'] ?? '');
       const major: string = String(data['ZYDM_DISPLAY'] ?? '');
       const grade: string = String(data['XZNJ'] ?? '');
-      const gender: string = String(data['XBDM_DISPLAY'] ?? '');
+      const cls: string = String(data['BJDM_DISPLAY'] ?? '');
+      const dorm: string = String(data['ZSDZ'] ?? '');
+      const stype: string = String(data['XSLBDM_DISPLAY'] ?? '');
 
+      // 持久化
       if (name) PreferenceUtil.putString('user_name', name);
       if (college) PreferenceUtil.putString('user_college', college);
       if (major) PreferenceUtil.putString('user_major', major);
       if (grade) PreferenceUtil.putString('user_grade', grade);
       if (gender) PreferenceUtil.putString('user_gender', gender);
+      if (cls) PreferenceUtil.putString('user_class', cls);
+      if (dorm) PreferenceUtil.putString('user_dormitory', dorm);
+      if (stype) PreferenceUtil.putString('user_student_type', stype);
 
-      console.info(TAG, 'xgxtExtractAndFetch: OK name=' + name + ' college=' + college + ' major=' + major);
+      console.info(TAG, 'xgxt result: OK name=' + name + ' college=' + college +
+        ' major=' + major + ' grade=' + grade + ' gender=' + gender +
+        ' dorm=' + dorm + ' stype=' + stype + ' cls=' + cls);
       this.loadUserInfo();
     } catch (e) {
-      console.error(TAG, 'xgxtExtractAndFetch error: ' + String(e));
-    } finally {
-      this.xgxtWebSrc = '';
+      console.error(TAG, 'xgxt parse error: ' + JSON.stringify(e));
     }
+    this.xgxtCleanup();
+  }
+
+  // 清理 xgxt WebView 状态
+  private xgxtCleanup(): void {
+    clearTimeout(this.xgxtTimeoutId);
+    this.xgxtActive = false;
+    this.userRefreshing = false;
+    console.info(TAG, 'xgxtCleanup: done');
   }
 
   // 同步 Cookie 后跳转 Portal WebView
@@ -1486,6 +1538,47 @@ struct MainPage {
           setTimeout(() => { this.warmupActive = false; }, 5000);
         })
         .domStorageAccess(true)
+    }
+    // 隐藏 xgxt WebView：加载 jbxxapp SPA 后用 JS 抓取个人信息
+    if (this.xgxtActive) {
+      Web({ src: this.xgxtUrl, controller: this.xgxtController })
+        .width('300px')
+        .height('300px')
+        .position({ x: -400, y: 0 })
+        .onPageEnd((event) => {
+          if (event && event.url) {
+            console.info(TAG, 'xgxt pageEnd: url=' + event.url.substring(0, 120));
+            if (event.url.indexOf('xgxt.xidian.edu.cn') >= 0) {
+              console.info(TAG, 'xgxt pageEnd: xgxt page loaded, injecting JS...');
+              this.xgxtInjectFetch();
+            }
+          } else {
+            console.info(TAG, 'xgxt pageEnd: no url in event');
+          }
+        })
+        .onConsole((event): boolean => {
+          if (event && event.message) {
+            const msg: string = event.message.getMessage();
+            if (msg.indexOf('XGXT_INFO:') === 0) {
+              const raw: string = msg.substring(10);
+              console.info(TAG, 'xgxt console: XGXT_INFO len=' + String(raw.length));
+              this.xgxtProcessResult(raw);
+              return true;
+            }
+            if (msg.indexOf('XGXT_ERR:') === 0) {
+              console.warn(TAG, 'xgxt console: XGXT_ERR ' + msg.substring(10));
+              this.xgxtCleanup();
+              return true;
+            }
+          }
+          return false;
+        })
+        .onErrorReceive(() => {
+          console.error(TAG, 'xgxt WebView error');
+          this.xgxtCleanup();
+        })
+        .domStorageAccess(true)
+        .javaScriptAccess(true)
     }
     Navigation(this.pageInfo) {
       if (deviceInfo.distributionOSApiVersion >= 60100) {
@@ -2426,21 +2519,79 @@ struct MainPage {
             // 头像
             Stack() {
               Circle().width(56).height(56).fill(this.accentColor + '18')
-              Text('🎓').fontSize(28)
+              if (this.userAvatarUrl) {
+                Image(this.userAvatarUrl).width(56).height(56).borderRadius(28).objectFit(ImageFit.Cover)
+              } else {
+                Text('🎓').fontSize(28)
+              }
             }.width(56).height(56)
             .border({ width: 2.5, color: this.accentColor + '40', radius: 28 })
 
             Column() {
-              Text(this.username || '已登录')
-                .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              // 姓名行
+              Row() {
+                Text(this.userDisplayName || this.username || '已登录')
+                  .fontSize(20).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                // 性别符号
+                if (this.userGender && this.userGender !== '') {
+                  Text(this.userGender === '男' ? '♂' : '♀')
+                    .fontSize(20).fontWeight(FontWeight.Bold)
+                    .fontColor(this.userGender === '男' ? '#5D9CEC' : '#EC5D8A')
+                    .margin({ left: 8 })
+                }
+              }.width('100%')
+
+              // 学院 · 专业
+              if (this.userCollege || this.userMajor) {
+                Row() {
+                  if (this.userCollege) {
+                    Text(this.userCollege).fontSize(12).fontColor(ThemeColors.textSecondary).maxLines(1)
+                  }
+                  if (this.userCollege && this.userMajor) {
+                    Text(' · ').fontSize(12).fontColor(ThemeColors.textHint)
+                  }
+                  if (this.userMajor) {
+                    Text(this.userMajor).fontSize(12).fontColor(ThemeColors.textSecondary)
+                      .layoutWeight(1).textOverflow({ overflow: TextOverflow.Ellipsis }).maxLines(1)
+                  }
+                }.margin({ top: 6 })
+              }
+
+              // 标签行
               Row() {
                 Text(PreferenceUtil.getBool('role') ? '研究生' : '本科生')
                   .fontSize(11).fontColor(this.accentColor)
                   .padding({ left: 8, right: 8, top: 2, bottom: 2 })
                   .backgroundColor(this.accentColor + '14')
                   .borderRadius(4)
-              }.margin({ top: 6 })
+                if (this.userGrade) {
+                  Text(this.userGrade + '级').fontSize(11).fontColor(ThemeColors.textSecondary)
+                    .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                    .backgroundColor(this.accentColor + '0A')
+                    .borderRadius(4).margin({ left: 6 })
+                }
+                if (this.userClassName) {
+                  Text(this.userClassName + '班').fontSize(11).fontColor(ThemeColors.textSecondary)
+                    .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                    .backgroundColor(this.accentColor + '0A')
+                    .borderRadius(4).margin({ left: 6 })
+                }
+              }.margin({ top: 8 })
             }.margin({ left: 16 }).layoutWeight(1).alignItems(HorizontalAlign.Start)
+
+            // 刷新按钮
+            Row() {
+              if (this.userRefreshing) {
+                LoadingProgress().width(22).height(22).color(this.accentColor)
+              } else {
+                Text('🔄').fontSize(20)
+              }
+            }.width(40).height(40)
+             .justifyContent(FlexAlign.Center)
+             .borderRadius(20)
+             .backgroundColor(this.accentColor + '10')
+             .onClick(() => { this.refreshUserInfo(); })
           }.width('100%')
         }
         .width('100%').padding({ left: 18, right: 18, top: 20, bottom: 20 })
@@ -2454,35 +2605,6 @@ struct MainPage {
           .backgroundColor('#2979FF').borderRadius(22)
           .margin({ top: 24 })
           .onClick(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); })
-      }
-
-      // 隐藏 WebView：静默加载 xgxt 获取 session cookie
-      if (this.xgxtWebSrc.length > 0) {
-        Web({ src: this.xgxtWebSrc, controller: this.xgxtController })
-          .width(1).height(1)
-          .opacity(0)
-          .javaScriptAccess(true)
-          .domStorageAccess(true)
-          .onPageEnd(() => {
-            this.xgxtPageCount++;
-            console.info(TAG, 'xgxt WebView pageEnd #' + String(this.xgxtPageCount));
-            if (this.xgxtPageCount >= 2) {
-              const testCookie: string = web_webview.WebCookieManager.fetchCookieSync(
-                'https://xgxt.xidian.edu.cn/'
-              );
-              console.info(TAG, 'xgxt cookie at pageEnd:#2: ' + testCookie.substring(0, 120));
-              // 直接同步调用
-              try {
-                this.xgxtExtractAndFetch();
-              } catch (err) {
-                console.error(TAG, 'xgxt call error: ' + String(err));
-              }
-            }
-          })
-          .onErrorReceive(() => {
-            console.error(TAG, 'xgxt WebView load error');
-            this.xgxtWebSrc = '';
-          })
       }
 
       // 菜单（始终显示）
