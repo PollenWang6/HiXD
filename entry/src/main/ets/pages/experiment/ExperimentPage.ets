@@ -39,6 +39,7 @@ export struct ExperimentPage {
   @State pageState: PageState = PageState.IDLE;
   @State statusText: string = '';
   @State errorMsg: string = '';
+  @State showCacheBanner: boolean = false;
   @State cards: ExpCard[] = [];
   @State fetchProgress: string = '';
   @State private isRefreshing: boolean = false;
@@ -57,6 +58,7 @@ export struct ExperimentPage {
           if (raw instanceof Array && raw.length > 0) {
             this.buildCards(raw as SysjScheduleItem[]);
             hasOther = true;
+            this.showCacheBanner = true;  // 显示缓存标记
           }
         }
       } catch (e) { PreferenceUtil.putString(CACHE_KEY, ''); }
@@ -104,6 +106,7 @@ export struct ExperimentPage {
           PreferenceUtil.putString(CACHE_KEY, JSON.stringify(co));
         }
         this.buildCards(allItems);
+        this.showCacheBanner = false;
         if (allItems.length > 0) { this.pageState = PageState.SUCCESS; return; }
         else { this.onError('暂无实验信息'); return; }
       }
@@ -420,6 +423,17 @@ export struct ExperimentPage {
             Button('\u8fdb\u5165\u5b9e\u9a8c\u7cfb\u7edf').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(40).margin({top:20}).onClick(()=>{this.doHttpSSOAndFetch();})
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
         } else if (this.pageState===PageState.SUCCESS) {
+          if (this.showCacheBanner) {
+            Row() {
+              Text('📦 当前显示缓存数据').fontSize(12).fontColor('#E65100')
+              Text('  刷新').fontSize(12).fontColor(this.accentColor)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .border({ width: 1, color: this.accentColor, radius: 4 })
+                .margin({ left: 10 })
+                .onClick(() => { this.doHttpSSOAndFetch(); })
+            }.width('100%').height(32).justifyContent(FlexAlign.Center)
+            .backgroundColor(this.themeIsDark ? '#3E2723' : '#FFF3E0')
+          }
           if(this.cards.length===0) {
             Column() {
               Text('\ud83e\uddea').fontSize(48)

@@ -55,13 +55,13 @@ export class SchoolCardService {
 
     // 用普通 GET 让 NETSTACK 自动跟随 IDS OAuth2 重定向链
     const startUrl = BASE_URL + '/home/openXDOAuth2Page';
-    console.error(TAG, 'ensureOpenId: start GET ' + startUrl);
+    console.info(TAG, 'ensureOpenId: start GET ' + startUrl);
 
     const resp = await this.http.get(startUrl);
     const html = resp.body || '';
-    console.error(TAG, 'ensureOpenId: status=' + resp.statusCode + ' page len=' + html.length);
+    console.info(TAG, 'ensureOpenId: status=' + resp.statusCode + ' page len=' + html.length);
     // 调试：打印HTML前1000字符
-    console.error(TAG, 'ensureOpenId: HTML preview: ' + html.substring(0, 1000));
+    console.info(TAG, 'ensureOpenId: HTML preview: ' + html.substring(0, 1000));
 
     // 解析 <input id="openid" type="hidden" value="xxx">
     const match = html.match(/id="openid"[^>]*type="hidden"[^>]*value="([^"]*)"/) ||
@@ -70,7 +70,7 @@ export class SchoolCardService {
     if (match && match[1].length > 0) {
       this.openid = match[1];
       this.openidFetchedAt = Date.now();
-      console.error(TAG, 'ensureOpenId: got openid, len=' + this.openid.length);
+      console.info(TAG, 'ensureOpenId: got openid, len=' + this.openid.length);
       return this.openid;
     }
 
@@ -85,7 +85,7 @@ export class SchoolCardService {
     try {
       return await action(oid);
     } catch (e) {
-      console.error(TAG, 'withOpenIdRetry: first attempt failed, refreshing openid');
+      console.info(TAG, 'withOpenIdRetry: first attempt failed, refreshing openid');
       const oid2 = await this.ensureOpenId(true);
       return await action(oid2);
     }
@@ -100,7 +100,7 @@ export class SchoolCardService {
   async getBalance(): Promise<string> {
     return this.withOpenIdRetry(async (openid: string) => {
       const url = BASE_URL + '/myaccount/openMyAccount?openid=' + openid;
-      console.error(TAG, 'getBalance: GET ' + url.substring(0, 80));
+      console.info(TAG, 'getBalance: GET ' + url.substring(0, 80));
 
       const resp = await this.http.get(url);
       if (!resp.isOk) {
@@ -113,7 +113,7 @@ export class SchoolCardService {
       if (balance.length === 0) {
         throw new Error('余额解析失败');
       }
-      console.error(TAG, 'getBalance: ' + balance);
+      console.info(TAG, 'getBalance: ' + balance);
       return balance;
     });
   }
@@ -148,7 +148,7 @@ export class SchoolCardService {
   async getPaidRecords(beginDate: string, endDate: string): Promise<PaidRecord[]> {
     return this.withOpenIdRetry(async (openid: string) => {
       const url = BASE_URL + '/selftrade/queryCardSelfTradeList?openid=' + openid;
-      console.error(TAG, 'getPaidRecords: POST ' + url.substring(0, 80));
+      console.info(TAG, 'getPaidRecords: POST ' + url.substring(0, 80));
 
       const body = JSON.stringify({
         beginDate: beginDate,
@@ -178,7 +178,7 @@ export class SchoolCardService {
           money: item['txamt'] || '',
         });
       }
-      console.error(TAG, 'getPaidRecords: got ' + records.length + ' records');
+      console.info(TAG, 'getPaidRecords: got ' + records.length + ' records');
       return records;
     });
   }
@@ -194,7 +194,7 @@ export class SchoolCardService {
     for (let i = 0; i < maxSteps; i++) {
       const resp = await this.http.getNoRedirect(currentUrl);
       if (!resp.isRedirect || !resp.location) {
-        console.error(TAG, 'followRedirects: [' + i + '] final status=' + resp.statusCode);
+        console.info(TAG, 'followRedirects: [' + i + '] final status=' + resp.statusCode);
         return resp;
       }
       // 处理相对 URL
@@ -204,7 +204,7 @@ export class SchoolCardService {
         const base = idx > 0 ? currentUrl.substring(0, idx) : currentUrl;
         location = base + location;
       }
-      console.error(TAG, 'followRedirects: [' + i + '] 302 → ' + location.substring(0, 80));
+      console.info(TAG, 'followRedirects: [' + i + '] 302 → ' + location.substring(0, 80));
       currentUrl = location;
     }
     throw new Error('校园卡重定向链过长(>' + maxSteps + '步)');

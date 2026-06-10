@@ -238,7 +238,7 @@ export struct ElectricityPage {
         'OrgId': '',
         'RequestID': ''
       };
-      console.error(TAG, 'Step1 OK, timestamp=' + timestamp);
+      console.info(TAG, 'Step1 OK, timestamp=' + timestamp);
 
       // ── Step 2: OauthGetUserInfo ──
       const step2Req: CodeReq = { CODE: code };
@@ -246,7 +246,7 @@ export struct ElectricityPage {
       const uInfoUrl: string = 'https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/OauthGetUserInfo?content=' + encodeURIComponent(enc2);
       const uInfoResp = await this.http.get(uInfoUrl, apiHeaders);
       if (!uInfoResp.isOk) throw new Error('OauthGetUserInfo failed: ' + uInfoResp.statusCode);
-      console.error(TAG, 'Step2 OK');
+      console.info(TAG, 'Step2 OK');
 
       // ── Step 3: H5UserIDLogIn ──
       const userId: string = PreferenceUtil.getString('ids_account') || PreferenceUtil.getString('login_username') || '';
@@ -259,7 +259,7 @@ export struct ElectricityPage {
       const loginJson: object = JSON.parse(loginResp.body) as object;
       const resData: object[] = (loginJson as Record<string, object[]>)['ResData'] as object[];
       const nodeID: string = String((resData[0] as Record<string, object>)['NodeID']);
-      console.error(TAG, 'Step3 OK, NodeID=' + nodeID);
+      console.info(TAG, 'Step3 OK, NodeID=' + nodeID);
 
       // ── Step 4: H5QueryMeterList ──
       const step4Req: NodeReq = { NodeID: nodeID };
@@ -270,20 +270,6 @@ export struct ElectricityPage {
       const meterJson: object = JSON.parse(meterResp.body) as object;
       const md: object = (meterJson as Record<string, object>)['ResData'] as object;
       const rows: object[] = (md as Record<string, object[]>)['rows'] as object[];
-      // ━━━ DEBUG: 打印 Step4 全量原始数据 ━━━
-      console.error('========== STEP4 RAW RESPONSE ==========');
-      console.error(meterResp.body);
-      console.error('========== STEP4 ROWS FIELDS ==========');
-      for (let di: number = 0; di < rows.length; di++) {
-        const dr: Record<string, object> = rows[di] as Record<string, object>;
-        const keys: string[] = Object.keys(dr);
-        let dump: string = '--- Row[' + di + '] all fields ---';
-        for (let ki: number = 0; ki < keys.length; ki++) {
-          const k: string = String(keys[ki]);
-          dump += '\n  ' + k + ' = ' + JSON.stringify(dr[k]);
-        }
-        console.error(dump);
-      }
       // Find electric meter (MediumCode=2) and water meter (other)
       let elecRow: Record<string, object> = rows[0] as Record<string, object>;
       let hasWater: boolean = false;
@@ -304,7 +290,7 @@ export struct ElectricityPage {
       const remain: string = String(elecRow['LastNum']);
       const metID: string = String(elecRow['MetID']);
       const readDate: string = String(elecRow['LastReadDate']);
-      console.error(TAG, 'Step4 OK, remain=' + remain + ', metID=' + metID + ', hasWater=' + String(hasWater));
+      console.info(TAG, 'Step4 OK, remain=' + remain + ', metID=' + metID + ', hasWater=' + String(hasWater));
 
       // ── Step 5: GetMetRead (30天) ──
       const daily: DailyItem[] = [];
@@ -315,23 +301,9 @@ export struct ElectricityPage {
         const readUrl: string = 'https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/GetMetRead?content=' + encodeURIComponent(enc5);
         const readResp = await this.http.get(readUrl, apiHeaders);
         if (readResp.isOk) {
-          // ━━━ DEBUG: 打印 Step5 电费全量原始数据 ━━━
-          console.error('========== STEP5 (ELEC) RAW RESPONSE ==========');
-          console.error(readResp.body);
           const readJson: object = JSON.parse(readResp.body) as object;
           const rd: object = (readJson as Record<string, object>)['ResData'] as object;
           const rdRows: object[] = (rd as Record<string, object[]>)['rows'] as object[] || [] as object[];
-          // 打印第一条记录的所有字段
-          if (rdRows.length > 0) {
-            const firstRow: Record<string, object> = rdRows[0] as Record<string, object>;
-            const keys: string[] = Object.keys(firstRow);
-            let dump: string = '--- Elec Row[0] all fields ---';
-            for (let ki: number = 0; ki < keys.length; ki++) {
-              const k: string = String(keys[ki]);
-              dump += '\n  ' + k + ' = ' + JSON.stringify(firstRow[k]);
-            }
-            console.error(dump);
-          }
           for (let i: number = 0; i < rdRows.length; i++) {
             const r: Record<string, object> = rdRows[i] as Record<string, object>;
             const date: string = String(r['ReadTime']).substring(0, 10);
@@ -344,7 +316,7 @@ export struct ElectricityPage {
               daily.push({ date: date, prevDate: prevDate, use: use, startNum: startNum, endNum: endNum });
             }
           }
-          console.error(TAG, 'Step5 OK, daily records=' + daily.length);
+          console.info(TAG, 'Step5 OK, daily records=' + daily.length);
         }
         // Water meter readings
         if (hasWater) {
@@ -353,23 +325,9 @@ export struct ElectricityPage {
           const wUrl: string = 'https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/GetMetRead?content=' + encodeURIComponent(wEnc);
           const wResp = await this.http.get(wUrl, apiHeaders);
           if (wResp.isOk) {
-            // ━━━ DEBUG: 打印 Step5 水费全量原始数据 ━━━
-            console.error('========== STEP5 (WATER) RAW RESPONSE ==========');
-            console.error(wResp.body);
             const wJson: object = JSON.parse(wResp.body) as object;
             const wrd: object = (wJson as Record<string, object>)['ResData'] as object;
             const wRows: object[] = (wrd as Record<string, object[]>)['rows'] as object[] || [] as object[];
-            // 打印第一条记录的所有字段
-            if (wRows.length > 0) {
-              const firstRow: Record<string, object> = wRows[0] as Record<string, object>;
-              const keys: string[] = Object.keys(firstRow);
-              let dump: string = '--- Water Row[0] all fields ---';
-              for (let ki: number = 0; ki < keys.length; ki++) {
-                const k: string = String(keys[ki]);
-                dump += '\n  ' + k + ' = ' + JSON.stringify(firstRow[k]);
-              }
-              console.error(dump);
-            }
             for (let i: number = 0; i < wRows.length; i++) {
               const r: Record<string, object> = wRows[i] as Record<string, object>;
               const date: string = String(r['ReadTime']).substring(0, 10);
@@ -378,7 +336,7 @@ export struct ElectricityPage {
               const use: string = Number(r['ReadNum']).toFixed(2);
               waterDaily.push({ date: date, prevDate: '', use: use, startNum: startNum, endNum: endNum });
             }
-            console.error(TAG, 'Step5 water OK, daily records=' + waterDaily.length);
+            console.info(TAG, 'Step5 water OK, daily records=' + waterDaily.length);
           }
         }
       } catch (e5) {
@@ -497,7 +455,7 @@ export struct ElectricityPage {
               const code: string = this.extractCode(event.url);
               if (code.length > 0) {
                 this.ssoDone = true;
-                console.error(TAG, 'SSO code obtained: ' + code.substring(0, 10) + '...');
+                console.info(TAG, 'SSO code obtained: ' + code.substring(0, 10) + '...');
                 this.fetchData(code);
               }
             }

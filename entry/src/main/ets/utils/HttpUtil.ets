@@ -1,5 +1,5 @@
 // HttpUtil.ets — 带 Cookie 持久化的 HTTP 客户端
-import http from '@ohos.net.http';
+import { http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { PreferenceUtil } from './PreferenceUtil';
 
@@ -316,7 +316,7 @@ export class HttpUtil {
           const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
           if (sc) {
             self.saveResponseCookies(domain, typeof sc === 'string' ? sc : String(sc));
-            self.saveCookies().catch(() => {});
+            self.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
           }
           // 中止请求，阻止自动重定向
           resolved = true;
@@ -362,7 +362,7 @@ export class HttpUtil {
           const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
           if (sc) {
             this.saveResponseCookies(domain, sc);
-            this.saveCookies().catch(() => {});
+            this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
           }
 
           req.destroy();
@@ -422,7 +422,7 @@ export class HttpUtil {
           const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
           if (sc) {
             self.saveResponseCookies(domain, typeof sc === 'string' ? sc : String(sc));
-            self.saveCookies().catch(() => {});
+            self.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
           }
           resolved = true;
           req.destroy();
@@ -467,7 +467,7 @@ export class HttpUtil {
           const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
           if (sc) {
             this.saveResponseCookies(domain, sc);
-            this.saveCookies().catch(() => {});
+            this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
           }
 
           req.destroy();
@@ -515,7 +515,7 @@ export class HttpUtil {
           const locStr: string = typeof loc === 'string' ? loc : String(loc);
           const redirectDomain: string = locStr.length > 0 ? this.getDomain(locStr) : this.getDomain(url);
           this.saveResponseCookies(redirectDomain, typeof sc === 'string' ? sc : String(sc));
-          this.saveCookies().catch(() => {});
+          this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
         }
       });
 
@@ -556,7 +556,7 @@ export class HttpUtil {
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
             if (sc) {
               this.saveResponseCookies(domain, sc);
-              this.saveCookies().catch(() => {});
+              this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
             }
 
             req.destroy();
@@ -599,7 +599,7 @@ export class HttpUtil {
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
             if (sc) {
               this.saveResponseCookies(domain, sc);
-              this.saveCookies().catch(() => {});
+              this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
             }
 
             req.destroy();

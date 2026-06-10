@@ -44,7 +44,7 @@ export class VersionService {
           };
         }
       }
-    } catch (_) {}
+    } catch (_) { console.warn("VersionService", "ignored error"); }
     return null;
   }
 
@@ -71,7 +71,7 @@ export class VersionService {
           return remote;
         }
       }
-    } catch (_) {}
+    } catch (_) { console.warn("VersionService", "ignored error"); }
     return null;
   }
 }

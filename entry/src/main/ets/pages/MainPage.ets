@@ -155,7 +155,7 @@ struct MainPage {
       if (this.bgShow && this.bgOriPath.length > 0) {
         // 新选择了图片：复制到应用沙箱
         const destPath: string = this.context.filesDir + '/class_bg_image';
-        try { await fileIo.copyFile(this.bgOriPath, destPath); } catch (_) {}
+        try { await fileIo.copyFile(this.bgOriPath, destPath); } catch (_) { console.warn("MainPage", "copy bg file failed"); }
         await PreferenceUtil.putString('class_bg_path', destPath);
       } else if (!this.bgShow) {
         // 关闭自定义背景
@@ -164,7 +164,7 @@ struct MainPage {
       // 如果 bgShow 为 true 但未新选图片，保留已有路径不变
       await PreferenceUtil.putBool('class_bg_show', this.bgShow);
       await PreferenceUtil.putNumber('class_bg_opacity', this.bgOpacityVal);
-    } catch (_) {}
+    } catch (_) { console.warn("MainPage", "ignored error"); }
     this.closeBgDialog();
   }
   // 恢复默认
@@ -361,7 +361,7 @@ struct MainPage {
           setTimeout(() => { this.updateToast = ''; }, 1500);
         }
       }
-    } catch (_) {}
+    } catch (_) { console.warn("MainPage", "ignored error"); }
   }
 
   aboutToDisappear() { this.stopRetryTimer(); }
@@ -831,7 +831,7 @@ struct MainPage {
   // 同步计算缓存大小（绕过 getCurrentBundleStats 缓存）
   // 注意：不用 async/await，否则 @State 赋值可能不触发 UI 刷新
   computeCacheSizeDirect(): void {
-    console.error('MainPage', 'computeCacheSizeDirect START');
+    console.info('MainPage', 'computeCacheSizeDirect START');
     let total: number = 0;
     // 应用级（WebView 缓存）+ HAP 级
     const dirs: string[] = [];
@@ -851,15 +851,15 @@ struct MainPage {
               total += st.size;
             }
           } catch(e) {
-            console.error('MainPage', 'computeCacheSizeDirect stat fail: ' + dp + ' err=' + String(e));
+            console.info('MainPage', 'computeCacheSizeDirect stat fail: ' + dp + ' err=' + String(e));
             // skip
           }
         }
       } catch(e) {
-        console.error('MainPage', 'computeCacheSizeDirect listFileSync dir fail: ' + dirs[i] + ' err=' + String(e));
+        console.info('MainPage', 'computeCacheSizeDirect listFileSync dir fail: ' + dirs[i] + ' err=' + String(e));
       }
     }
-    console.error('MainPage', 'computeCacheSizeDirect DONE total=' + total);
+    console.info('MainPage', 'computeCacheSizeDirect DONE total=' + total);
     this.cacheSize = this.formatBytes(total);
   }
 
@@ -878,12 +878,12 @@ struct MainPage {
             size += st.size;
           }
         } catch (e) {
-          console.error('MainPage', 'computeCacheSizeDirect dirSize stat fail: ' + cp + ' err=' + String(e));
+          console.info('MainPage', 'computeCacheSizeDirect dirSize stat fail: ' + cp + ' err=' + String(e));
           // skip
         }
       }
     } catch (e) {
-      console.error('MainPage', 'computeCacheSizeDirect dirSize listFile fail: ' + dirPath + ' err=' + String(e));
+      console.info('MainPage', 'computeCacheSizeDirect dirSize listFile fail: ' + dirPath + ' err=' + String(e));
       // skip
     }
     return size;
@@ -2077,7 +2077,7 @@ struct MainPage {
               this.showUpdateDialog = false;
               if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
               if (this.updateInfo) {
-                try { this.context.openLink(this.updateInfo.url); } catch (_) {}
+                try { this.context.openLink(this.updateInfo.url); } catch (_) { console.warn("MainPage", "openLink failed"); }
               }
             })
         }.width('100%')

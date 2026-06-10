@@ -62,8 +62,8 @@ export class PreferenceUtil {
     const prefs = PreferenceUtil.getPrefs();
     if (prefs) {
       try {
-        (prefs.put(key, value as ValueType) as Promise<void>).then(() => prefs.flush()).catch(() => {});
-      } catch (_) {}
+        (prefs.put(key, value as ValueType) as Promise<void>).then(() => prefs.flush()).catch(() => { console.warn("PreferenceUtil", "flush failed"); });
+      } catch (_) { console.warn("PreferenceUtil", "ignored error"); }
     }
   }
 
@@ -81,7 +81,7 @@ export class PreferenceUtil {
           inMemoryCache.set(key, val as string | boolean | number);
         }
         return val as T;
-      } catch (_) {}
+      } catch (_) { console.warn("PreferenceUtil", "ignored error"); }
     }
     return defaultValue;
   }

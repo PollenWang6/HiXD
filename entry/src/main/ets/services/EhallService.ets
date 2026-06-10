@@ -947,7 +947,7 @@ export class EhallService {
       if (!PreferenceUtil.getBool('role')) {
         ClassService.getInstance().getSemesterStartDateFromApi(semCode).then((date: string | null) => {
           if (date) { PreferenceUtil.putString('semester_start_date', date); }
-        }).catch((_e: Error) => {});
+        }).catch((_e: Error) => { console.warn("EhallService", "ignored error: " + String(_e.message)); });
       }
 
       // 顺序预加载：课表 → 考试 → 实验，进度逐步推进

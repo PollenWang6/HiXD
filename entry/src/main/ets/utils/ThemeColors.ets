@@ -24,7 +24,7 @@ export class ThemeColors {
     } else {
       _isDark = (mode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     }
-    try { AppStorage.setOrCreate('theme_is_dark', _isDark); } catch (_e) {}
+    try { AppStorage.setOrCreate('theme_is_dark', _isDark); } catch (_e) { console.warn("ThemeColors", "AppStorage set failed"); }
   }
 
   /** 切换为手动模式（浅色/深色） */
@@ -33,7 +33,7 @@ export class ThemeColors {
     const appCtx: ESObject = (ctx as ESObject)['getApplicationContext']() as ESObject;
     appCtx['setColorMode'](mode);
     _isDark = (mode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
-    try { AppStorage.setOrCreate('theme_is_dark', _isDark); } catch (_e) {}
+    try { AppStorage.setOrCreate('theme_is_dark', _isDark); } catch (_e) { console.warn("ThemeColors", "AppStorage set failed"); }
   }
 
   /** 切换为跟随系统 */
@@ -46,7 +46,7 @@ export class ThemeColors {
   /** onConfigurationUpdate 回调：已知系统实际模式 */
   static onSystemConfig(dark: boolean): void {
     _isDark = dark;
-    try { AppStorage.setOrCreate('theme_is_dark', dark); } catch (_e) {}
+    try { AppStorage.setOrCreate('theme_is_dark', dark); } catch (_e) { console.warn("ThemeColors", "AppStorage set failed"); }
   }
 
   static get bgPage(): string         { return _isDark ? '#0F0F11' : '#F5F5F5'; }

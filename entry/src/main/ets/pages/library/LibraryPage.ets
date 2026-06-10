@@ -2,6 +2,7 @@
 import { ThemeColors } from '../../utils/ThemeColors';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
+import { CasLoginService, LibraryAuthResult } from '../../services/CasLoginService';
 
 interface BookLocation {
   locationName: string;
@@ -41,6 +42,7 @@ export struct LibraryPage {
   @State searchWord: string = '';
   @State books: BookItem[] = [];
   @State borrowList: BorrowItem[] = [];
+  @State errorMsg: string = '';
   @State currentTab: number = 0;
   @State isSearching: boolean = false;
   @State selectedBook: BookItem | null = null;
@@ -110,9 +112,17 @@ export struct LibraryPage {
   }
 
   async loadBorrowList(): Promise<void> {
-    const userId: string = PreferenceUtil.getString('library_user_id');
-    const token: string = PreferenceUtil.getString('library_token');
-    if (!userId || !token) return;
+    // 先获取图书馆 token（通过 CAS 重定向到 hyytsgxzs 获取）
+    let userId: string = PreferenceUtil.getString('library_user_id');
+    let token: string = PreferenceUtil.getString('library_token');
+    if (!userId || !token) {
+      try {
+        const auth: LibraryAuthResult | null =
+          await CasLoginService.getInstance().getLibraryAuth();
+        if (auth) { userId = auth.userId; token = auth.token; }
+      } catch (_authErr) {}
+    }
+    if (!userId || !token) { this.errorMsg = '图书馆认证失败，请重试'; return; }
     try {
       await this.http.loadCookies();
       const body = this.buildFormBody(
@@ -252,7 +262,14 @@ export struct LibraryPage {
           Column() {
             Text('📖').fontSize(48)
             Text('暂无借阅记录').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-            Text('首次使用需通过官网登录图书馆').fontSize(12).fontColor('#BBBBBB').margin({ top: 4 })
+            if (this.errorMsg.length > 0) {
+              Text(this.errorMsg).fontSize(12).fontColor('#FF7043').margin({ top: 4 })
+              Text('  重试').fontSize(12).fontColor(this.accentColor)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .border({ width: 1, color: this.accentColor, radius: 4 })
+                .margin({ top: 8 })
+                .onClick(() => { this.errorMsg = ''; this.loadBorrowList(); })
+            }
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         }
       }

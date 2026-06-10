@@ -22,6 +22,7 @@ export struct ExamPage {
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State errorMsg: string = '';
+  @State showCacheBanner: boolean = false;
   @State arranged: ExamItemModel[] = [];
   @State notArranged: ExamItemModel[] = [];
   @State selectedSemester: string = '';
@@ -77,15 +78,28 @@ export struct ExamPage {
       const items: ExamItemModel[] = ExamService.parseExamSchedule(raw);
       // 日志：打印完整考试数据，方便排查 ksmc 显示问题
       for (const it of items) {
-        console.error('ExamPage', 'exam item: kcm=' + it.kcm + ' | ksmc=' + it.ksmc + ' | ksrq=' + it.ksrq + ' | jasmc=' + it.jasmc + ' | zw=' + it.zw);
+        console.info('ExamPage', 'exam item: kcm=' + it.kcm + ' | ksmc=' + it.ksmc + ' | ksrq=' + it.ksrq + ' | jasmc=' + it.jasmc + ' | zw=' + it.zw);
       }
       this.arranged = items.filter(i => i.ksrq && i.ksrq.length > 0);
       this.notArranged = items.filter(i => !i.ksrq || i.ksrq.length === 0);
-      // 缓存原始数据供课表页使用
+      this.showCacheBanner = false;
       PreferenceUtil.putString('exam_schedule_cache', raw);
-      console.error('ExamPage', 'Cached exam data, raw.length=' + raw.length);
+      console.info('ExamPage', 'Cached exam data, raw.length=' + raw.length);
     } catch (e) {
       this.errorMsg = (e as Error).message?.includes('未登录') ? '登录已过期' : '加载失败';
+      // 尝试从缓存加载
+      const cached: string = PreferenceUtil.getString('exam_schedule_cache', '');
+      if (cached.length > 0) {
+        try {
+          const cachedItems: ExamItemModel[] = ExamService.parseExamSchedule(cached);
+          if (cachedItems.length > 0) {
+            this.arranged = cachedItems.filter(i => i.ksrq && i.ksrq.length > 0);
+            this.notArranged = cachedItems.filter(i => !i.ksrq || i.ksrq.length === 0);
+            this.showCacheBanner = true;
+            console.info('ExamPage', 'Showing cached exam data, items=' + cachedItems.length);
+          }
+        } catch (_parseErr) { console.warn('ExamPage', 'cache parse failed'); }
+      }
     } finally { this.loading = false; }
   }
 
@@ -97,6 +111,18 @@ export struct ExamPage {
         Text(SemesterUtil.formatSemester(this.selectedSemester)).fontSize(12).fontColor(ThemeColors.textSecondary)
         }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 8 }).backgroundColor(ThemeColors.bgCard)
         Divider().color(ThemeColors.border)
+
+        if (this.showCacheBanner) {
+          Row() {
+            Text('📦 当前显示缓存数据').fontSize(12).fontColor('#E65100')
+            Text('  刷新').fontSize(12).fontColor(this.accentColor)
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .border({ width: 1, color: this.accentColor, radius: 4 })
+              .margin({ left: 10 })
+              .onClick(() => { this.loadExams(); })
+          }.width('100%').height(32).justifyContent(FlexAlign.Center)
+          .backgroundColor(this.themeIsDark ? '#3E2723' : '#FFF3E0')
+        }
 
         if (this.loading) {
           Column() { LoadingProgress().width(40).height(40).color(this.accentColor); Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); }

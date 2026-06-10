@@ -4,17 +4,12 @@ import { CacheService } from './CacheService';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { EmptyClassroomItem, BuildingInfo, BuildingRow, EmptyClassroomRow,
          EHALL_APP_EMPTY_CLASSROOM } from './Models';
+import { EHALL_HEADERS, findAppIdByPath, extractRaw } from './EhallConstants';
 import { SemesterUtil } from './EhallService';
 
 const TAG = 'EmptyClassroomService';
 
 interface ZcXqjData { ZC: object; XQJ: object; }
-
-const EHALL_HEADERS: Record<string, string> = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Referer': 'https://ehall.xidian.edu.cn/',
-  'X-Requested-With': 'XMLHttpRequest'
-};
 
 export class EmptyClassroomService {
   private static inst: EmptyClassroomService;
@@ -31,10 +26,7 @@ export class EmptyClassroomService {
 
   private async init(): Promise<void> { await this.cache.init(); }
 
-  private findAppIdByPath(path: string): string {
-    if (path.includes('kxjas')) return '4768402106681759';
-    return '';
-  }
+  static extractRaw(body: string): object[] { return extractRaw(body, TAG); }
 
   private async activateAppSession(appId: string): Promise<void> {
     if (this.appSessionUrl[appId]) {
@@ -110,7 +102,7 @@ export class EmptyClassroomService {
     if (resp.isRedirect && resp.location && resp.location.includes('login')) {
       console.warn(TAG, 'appPost: session expired, redirecting to login');
       this.appSessionUrl = {};
-      const appId = this.findAppIdByPath(path);
+      const appId = findAppIdByPath(path);
       if (appId) {
         console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
         await this.activateAppSession(appId);
@@ -122,7 +114,7 @@ export class EmptyClassroomService {
     if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
       console.warn(TAG, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
       this.appSessionUrl = {};
-      const appId = this.findAppIdByPath(path);
+      const appId = findAppIdByPath(path);
       if (appId) {
         console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
         await this.activateAppSession(appId);
@@ -266,60 +258,6 @@ export class EmptyClassroomService {
     const m = String(target.getMonth() + 1).padStart(2, '0');
     const d = String(target.getDate()).padStart(2, '0');
     return y + '-' + m + '-' + d;
-  }
-
-  static extractRaw(body: string): object[] {
-    try {
-      console.info(TAG, 'extractRaw: parsing body length=' + body.length);
-      const obj = JSON.parse(body) as Record<string, object>;
-
-      const datas = obj['datas'];
-      if (datas !== null && typeof datas === 'object') {
-        const datasMap = datas as Record<string, object>;
-        for (const key of Object.keys(datasMap)) {
-          const sub = datasMap[key];
-          if (sub !== null && typeof sub === 'object') {
-            const subMap = sub as Record<string, object>;
-            const rows = subMap['rows'];
-            if (Array.isArray(rows)) {
-              console.info(TAG, 'extractRaw: found rows via datas.' + key + '.rows, count=' + rows.length);
-              return rows as object[];
-            }
-            const extParams = subMap['extParams'];
-            if (extParams !== null && typeof extParams === 'object') {
-              const extMap = extParams as Record<string, object>;
-              const extRows = extMap['rows'];
-              if (Array.isArray(extRows)) {
-                console.info(TAG, 'extractRaw: found rows via datas.' + key + '.extParams.rows, count=' + extRows.length);
-                return extRows as object[];
-              }
-            }
-          }
-        }
-      }
-
-      for (const second of Object.values(obj)) {
-        if (second !== null && typeof second === 'object') {
-          const smap: Record<string, object> = second as Record<string, object>;
-          for (const third of Object.values(smap)) {
-            if (third !== null && typeof third === 'object') {
-              const tmap: Record<string, object> = third as Record<string, object>;
-              const rows = tmap['rows'];
-              if (Array.isArray(rows)) {
-                console.info(TAG, 'extractRaw: found rows via recursive, count=' + rows.length);
-                return rows as object[];
-              }
-            }
-          }
-        }
-      }
-
-      console.warn(TAG, 'extractRaw: no rows found in response');
-      return [];
-    } catch (e) {
-      console.error(TAG, 'extractRaw parse error: ' + JSON.stringify(e) + ' body[0:200]=' + body.substring(0, 200));
-      return [];
-    }
   }
 
   static extractEmptyClassrooms(body: string): EmptyClassroomItem[] {

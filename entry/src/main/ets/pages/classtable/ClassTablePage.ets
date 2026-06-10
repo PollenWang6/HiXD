@@ -197,6 +197,7 @@ export struct ClassTablePage {
   }
 
   aboutToAppear(): void {
+    this.loading = true;  // 先标记加载中，避免 initGrid() 空网格闪屏
     this.semesterCode = SemesterUtil.getCurrentSemesterCode();
     this.currentWeek = SemesterUtil.calcCurrentWeekFromNow();
     this._preloadWasRunning = (this.preloadStatus === 'loading');
@@ -242,11 +243,11 @@ export struct ClassTablePage {
           await PreferenceUtil.putString('ids_account', sid);
         }
       }
-    } catch (_) {}
+    } catch (_) { console.warn("ClassTablePage", "waitAndLoad: sid fetch failed"); }
 
     // 首次登录后 cookie/session 可能还未就绪，课表为空时自动重试
     if (this.isClassGridEmpty() && PreferenceUtil.getBool('is_logged_in')) {
-      console.error('ClassTablePage', 'First load empty, auto-retrying in 2s...');
+      console.info('ClassTablePage', 'First load empty, auto-retrying in 2s...');
       setTimeout(() => {
         this.loadTable(true);
       }, 2000);
@@ -356,13 +357,19 @@ export struct ClassTablePage {
         cached = await this.classSvc.getCachedClassTableStale(this.semesterCode, sid);
       }
       if (cached && cached.length >= 100) {
-        this.renderClassTable(cached);
-        this.lastRenderedRaw = cached;
-        this.hasCache = true;
-        this.loading = false;  // 有缓存立即显示课表
-        this.mergeExperimentDataIntoGrid();
-        if (this._preloadWasRunning) {
-          this.syncProgress = '正在同步最新数据...';
+        // 预检查：缓存数据是否包含有效课程
+        const cachedItems: ClassItemModel[] = ClassService.parseClassTable(cached);
+        if (cachedItems.length === 0 && this.hasCache) {
+          console.warn('ClassTablePage', 'fetchAndSave step1: cached data has 0 courses, keeping old grid');
+        } else {
+          this.renderClassTable(cached);
+          this.lastRenderedRaw = cached;
+          this.hasCache = true;
+          this.loading = false;  // 有缓存立即显示课表
+          this.mergeExperimentDataIntoGrid();
+          if (this._preloadWasRunning) {
+            this.syncProgress = '正在同步最新数据...';
+          }
         }
       } else if (cached && cached.length > 0) {
         // 缓存文件存在但数据太短（可能损坏），尝试用它，至少不白屏
@@ -414,7 +421,9 @@ export struct ClassTablePage {
         if (items.length === 0 || (this.hasCache && oldCount > 0 && items.length < oldCount * 0.3)) {
           console.warn('ClassTablePage', 'step2: new data has ' + items.length +
             ' courses (old=' + oldCount + '), keeping cache');
+          this.showCacheBanner = true;
         } else {
+          this.showCacheBanner = false;
           this.renderClassTable(raw);
           this.lastRenderedRaw = raw;
           this.hasCache = true;
@@ -457,8 +466,8 @@ export struct ClassTablePage {
       console.error('ClassTablePage', 'fetchAndSave step2 FAIL: ' + String(e) + ' hasCache=' + this.hasCache);
       if (this.hasCache && this.lastRenderedRaw && this.lastRenderedRaw.length > 0) {
         // 有缓存，网络失败可以接受
-        this.loadProgress = '⚠️ 刷新失败，显示缓存数据';
-        setTimeout(() => { this.loadProgress = ''; }, 3000);
+        this.showCacheBanner = true;
+        this.loadProgress = '';
       } else {
         this.errorMsg = '加载课程表失败，请检查网络';
       }
@@ -479,7 +488,7 @@ export struct ClassTablePage {
       if (this.preloadStatus === 'done') {
         console.info('ClassTablePage', 'schedulePreloadRetry: preload done, re-merging');
         if (!PreferenceUtil.getBool('role')) { this.mergeExperimentDataIntoGrid(); }
-        try { this.mergePhysicsExperiments(); } catch (_e) {}
+        try { this.mergePhysicsExperiments(); } catch (_e) { console.warn("ClassTablePage", "mergePhysics failed"); }
         this.loadExamDataInPlace();
         this._preloadDone = true;
       } else if (PreferenceUtil.getBool('is_logged_in')) {
@@ -500,7 +509,9 @@ export struct ClassTablePage {
           const items: ClassItemModel[] = ClassService.parseClassTable(raw);
           if (items.length === 0 && this.hasCache) {
             this.errorMsg = '刷新失败：服务器返回空数据，保留当前课表';
+            this.showCacheBanner = true;
           } else {
+            this.showCacheBanner = false;
             this.renderClassTable(raw);
           }
           this.lastRenderedRaw = raw;
@@ -509,11 +520,12 @@ export struct ClassTablePage {
         // 刷新后重新合并实验和考试
         this.syncProgress = '正在同步实验数据...';
         this.mergeExperimentDataIntoGrid();
-        try { await this.mergePhysicsExperiments(); } catch (_e) {}
+        try { await this.mergePhysicsExperiments(); } catch (_e) { console.warn("ClassTablePage", "mergePhysics failed"); }
         this.syncProgress = '正在同步考试数据...';
         await this.loadExamDataInPlace();
       } catch (e) {
         this.errorMsg = '刷新失败，请检查网络';
+        if (this.hasCache) { this.showCacheBanner = true; }
       } finally {
         this.syncProgress = '';
         this.refreshing = false;
@@ -606,14 +618,14 @@ export struct ClassTablePage {
         if (c.weekList.length > cw && c.weekList[cw]) {
           const prefix: string = c.isExperiment ? '🧪' : (c.isCustom ? '✏️' : '📘');
           const tag: string = c.isExperiment ? 'EXP' : (c.isCustom ? 'CUSTOM' : 'API');
-          console.error('ClassTablePage', 'TODAY_GRID[' + count + ']: ' + prefix + ' ' + c.name +
+          console.info('ClassTablePage', 'TODAY_GRID[' + count + ']: ' + prefix + ' ' + c.name +
             ' sec=' + c.startSection + '-' + c.endSection +
             ' room=' + c.classroom + ' type=' + tag);
           count++;
         }
       }
     }
-    console.error('ClassTablePage', 'TODAY_GRID total=' + count + ' weekday=' + today + ' week=' + cw);
+    console.info('ClassTablePage', 'TODAY_GRID total=' + count + ' weekday=' + today + ' week=' + cw);
   }
 
   // 在当前 classGrid 上合并实验数据
@@ -683,7 +695,7 @@ export struct ClassTablePage {
         cell.name = item['experimentName'] || '实验';
         cell.teacher = item['teacher'] || '';
         cell.classroom = item['lab'] || '';
-        console.error('ClassTablePage', 'mergeExp: name=' + cell.name + ' lab=[' + item['lab'] + '] classroom=[' + cell.classroom + ']');
+        console.info('ClassTablePage', 'mergeExp: name=' + cell.name + ' lab=[' + item['lab'] + '] classroom=[' + cell.classroom + ']');
         cell.day = weekday;
         cell.startSection = startSec;
         cell.endSection = endSec;
@@ -770,7 +782,7 @@ export struct ClassTablePage {
   }
 
   private applyExamItems(items: ExamItemModel[]): void {
-    console.error('ClassTablePage', 'applyExamItems: count=' + items.length + ' semesterCode=' + this.semesterCode);
+    console.info('ClassTablePage', 'applyExamItems: count=' + items.length + ' semesterCode=' + this.semesterCode);
     const startDate: Date = SemesterUtil.getSemesterStartDate(this.semesterCode);
     let examColorIdx: number = 0;
     // 先清除旧考试数据
@@ -796,17 +808,17 @@ export struct ClassTablePage {
       const weekNum: number = Math.floor(diffDays / 7) + 1 - swift;
       const weekday: number = examDate.getDay() || 7;
       if (weekNum < 1 || weekNum > 25 || weekday < 1 || weekday > 7) continue;
-      console.error('ClassTablePage', 'applyExam: ksrq=' + ksrq + ' weekNum=' + weekNum + ' weekday=' + weekday + ' currentWeek=' + this.currentWeek);
+      console.info('ClassTablePage', 'applyExam: ksrq=' + ksrq + ' weekNum=' + weekNum + ' weekday=' + weekday + ' currentWeek=' + this.currentWeek);
       // kssjms format: "2026-04-22 13:00-15:00(星期三)" — extract time portion only
       const spaceIdx: number = kssjms.indexOf(' ');
       const timeWithDay: string = spaceIdx >= 0 ? kssjms.substring(spaceIdx + 1) : kssjms;
       const parenIdx: number = timeWithDay.indexOf('(');
       const timeOnly: string = parenIdx >= 0 ? timeWithDay.substring(0, parenIdx) : timeWithDay;
       const timeParts: string[] = timeOnly.split('-');
-      console.error('ClassTablePage', 'applyExam: kssjms=' + kssjms + ' timeOnly=' + timeOnly + ' startPart=' + timeParts[0] + ' endPart=' + timeParts[1]);
+      console.info('ClassTablePage', 'applyExam: kssjms=' + kssjms + ' timeOnly=' + timeOnly + ' startPart=' + timeParts[0] + ' endPart=' + timeParts[1]);
       const startY: number = this.timeToY(timeParts[0]);
       const endY: number = this.timeToY(timeParts[1]);
-      console.error('ClassTablePage', 'applyExam: startY=' + startY + ' endY=' + endY + ' pixelH=' + (endY - startY));
+      console.info('ClassTablePage', 'applyExam: startY=' + startY + ' endY=' + endY + ' pixelH=' + (endY - startY));
       const cell = new ClassCell();
       cell.name = item.kcm || item.ksmc || '考试';
       cell.classroom = item.jasmc;
@@ -871,8 +883,16 @@ export struct ClassTablePage {
           this.buildHeader()
           if (this.showCacheBanner) {
             Row() {
-              Text('当前显示的是缓存数据').fontSize(12).fontColor(ThemeColors.warning)
-            }.width('100%').height(28).justifyContent(FlexAlign.Center)
+              Text('📦 当前显示缓存数据').fontSize(12).fontColor(ThemeColors.warning)
+              Text('  刷新').fontSize(12).fontColor(this.accentColor)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .border({ width: 1, color: this.accentColor, radius: 4 })
+                .margin({ left: 10 })
+                .onClick(() => {
+                  this.showCacheBanner = false;
+                  this.loadTable(true);
+                })
+            }.width('100%').height(32).justifyContent(FlexAlign.Center)
             .backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
           }
           Divider().color('#F0F0F0')
@@ -1585,13 +1605,14 @@ export struct ClassTablePage {
     if (targetWeek < 1 || targetWeek > this.maxWeek || targetWeek === this.currentWeek || this.isAnimating) return;
     this.isAnimating = true;
     const dir: number = targetWeek > this.currentWeek ? 1 : -1;
+    // 从当前偏移继续动画到滑出位置
     animateTo({ duration: 120, curve: Curve.EaseIn }, () => {
-      this.slideOffsetX = (0 - dir) * 120;
+      this.slideOffsetX = (0 - dir) * this.getScreenWidth();
       this.slideOpacity = 0;
     });
     setTimeout(() => {
       this.currentWeek = targetWeek;
-      this.slideOffsetX = dir * 120;
+      this.slideOffsetX = dir * this.getScreenWidth();
       animateTo({ duration: 150, curve: Curve.EaseOut, onFinish: () => {
         this.isAnimating = false;
       }}, () => {
@@ -1599,6 +1620,10 @@ export struct ClassTablePage {
         this.slideOpacity = 1;
       });
     }, 125);
+  }
+
+  private getScreenWidth(): number {
+    return 360; // 标准手机宽度参考
   }
 
   @Builder buildClassGrid() {
@@ -1761,16 +1786,31 @@ export struct ClassTablePage {
       .opacity(this.slideOpacity)
     }.scrollable(ScrollDirection.Vertical).scrollBar(BarState.Auto).layoutWeight(1)
     .gesture(
-      PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 30 })
+      PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 5 })
         .onActionStart((event: GestureEvent) => {
           this.swipeStartX = event.fingerList[0].globalX;
         })
+        .onActionUpdate((event: GestureEvent) => {
+          if (this.isAnimating) return;
+          const delta: number = event.fingerList[0].globalX - this.swipeStartX;
+          if ((this.currentWeek <= 1 && delta > 0) || (this.currentWeek >= this.maxWeek && delta < 0)) {
+            this.slideOffsetX = delta * 0.3;
+          } else {
+            this.slideOffsetX = delta;
+          }
+        })
         .onActionEnd((event: GestureEvent) => {
-          const deltaX = event.fingerList[0].globalX - this.swipeStartX;
-          if (deltaX < -30) {
-            this.changeWeek(this.currentWeek + 1);
-          } else if (deltaX > 30) {
-            this.changeWeek(this.currentWeek - 1);
+          const deltaX: number = event.fingerList[0].globalX - this.swipeStartX;
+          if (Math.abs(deltaX) > 80) {
+            if (deltaX < 0) {
+              this.changeWeek(this.currentWeek + 1);
+            } else {
+              this.changeWeek(this.currentWeek - 1);
+            }
+          } else {
+            animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+              this.slideOffsetX = 0;
+            });
           }
         })
     )

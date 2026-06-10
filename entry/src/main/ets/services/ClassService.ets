@@ -4,25 +4,9 @@ import { CacheService } from './CacheService';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { CasLoginService } from './CasLoginService';
 import { ClassItemModel, ClassTableRow, UnscheduledCourse, ClassChange, EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE, EHALL_APP_EMPTY_CLASSROOM } from './Models';
+import { EHALL_HEADERS, APP_PATH_MAP, findAppIdByPath, extractRaw } from './EhallConstants';
 
 const TAG = 'ClassService';
-
-const EHALL_HEADERS: Record<string, string> = {
-  'Referer': 'http://ehall.xidian.edu.cn/new/index_xd.html',
-  'Host': 'ehall.xidian.edu.cn',
-  'Accept': 'application/json, text/javascript, */*; q=0.01',
-  'Accept-Language': 'zh-CN,zh;q=0.9',
-  'Accept-Encoding': 'gzip, deflate, br',
-  'Connection': 'keep-alive',
-  'X-Requested-With': 'XMLHttpRequest',
-};
-
-const APP_PATH_MAP: Map<string, string> = new Map([
-  [EHALL_APP_CLASS_TABLE, '/jwapp/sys/wdkb'],
-  [EHALL_APP_EXAM, '/jwapp/sys/studentWdksapApp'],
-  [EHALL_APP_SCORE, '/jwapp/sys/cjcx'],
-  [EHALL_APP_EMPTY_CLASSROOM, '/jwapp/sys/kxjas'],
-]);
 
 export class ClassService {
   private static inst: ClassService;
@@ -119,7 +103,7 @@ export class ClassService {
     if (resp.isRedirect && resp.location && resp.location.includes('login')) {
       console.warn(TAG, 'appPost: session expired, redirecting to login');
       this.appSessionUrl = {};
-      const appId = this.findAppIdByPath(path);
+      const appId = findAppIdByPath(path);
       if (appId) {
         console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
         await this.activateAppSession(appId, true);
@@ -131,7 +115,7 @@ export class ClassService {
     if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
       console.warn(TAG, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
       this.appSessionUrl = {};
-      const appId = this.findAppIdByPath(path);
+      const appId = findAppIdByPath(path);
       if (appId) {
         console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
         await this.activateAppSession(appId, true);
@@ -143,73 +127,7 @@ export class ClassService {
     return resp;
   }
 
-  /**
-   * 根据 API 路径反查 appId
-   */
-  private findAppIdByPath(path: string): string {
-    if (path.includes('wdkb')) return EHALL_APP_CLASS_TABLE;
-    if (path.includes('studentWdksapApp') || path.includes('wdksap')) return EHALL_APP_EXAM;
-    if (path.includes('cjcx')) return EHALL_APP_SCORE;
-    if (path.includes('kxjas')) return EHALL_APP_EMPTY_CLASSROOM;
-    return '';
-  }
-
-  /**
-   * 提取 API rows 数组
-   */
-  static extractRaw(body: string): object[] {
-    try {
-      console.info(TAG, 'extractRaw: parsing body length=' + body.length);
-      const obj = JSON.parse(body) as Record<string, object>;
-
-      const datas = obj['datas'];
-      if (datas !== null && typeof datas === 'object') {
-        const datasMap = datas as Record<string, object>;
-        for (const key of Object.keys(datasMap)) {
-          const sub = datasMap[key];
-          if (sub !== null && typeof sub === 'object') {
-            const subMap = sub as Record<string, object>;
-            const rows = subMap['rows'];
-            if (Array.isArray(rows)) {
-              console.info(TAG, 'extractRaw: found rows via datas.' + key + '.rows, count=' + rows.length);
-              return rows as object[];
-            }
-            const extParams = subMap['extParams'];
-            if (extParams !== null && typeof extParams === 'object') {
-              const extMap = extParams as Record<string, object>;
-              const extRows = extMap['rows'];
-              if (Array.isArray(extRows)) {
-                console.info(TAG, 'extractRaw: found rows via datas.' + key + '.extParams.rows, count=' + extRows.length);
-                return extRows as object[];
-              }
-            }
-          }
-        }
-      }
-
-      for (const second of Object.values(obj)) {
-        if (second !== null && typeof second === 'object') {
-          const smap: Record<string, object> = second as Record<string, object>;
-          for (const third of Object.values(smap)) {
-            if (third !== null && typeof third === 'object') {
-              const tmap: Record<string, object> = third as Record<string, object>;
-              const rows = tmap['rows'];
-              if (Array.isArray(rows)) {
-                console.info(TAG, 'extractRaw: found rows via recursive, count=' + rows.length);
-                return rows as object[];
-              }
-            }
-          }
-        }
-      }
-
-      console.warn(TAG, 'extractRaw: no rows found in response');
-      return [];
-    } catch (e) {
-      console.error(TAG, 'extractRaw parse error: ' + JSON.stringify(e) + ' body[0:200]=' + body.substring(0, 200));
-      return [];
-    }
-  }
+  static extractRaw(body: string): object[] { return extractRaw(body, TAG); }
 
   /**
    * 获取课程表数据
@@ -255,7 +173,7 @@ export class ClassService {
     return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
       try {
         await this.activateAppSession(EHALL_APP_CLASS_TABLE);
-      } catch (_) {}
+      } catch (_) { console.warn("ClassService", "ignored error"); }
       const resp = await this.appPost(
         '/jwapp/sys/wdkb/modules/xskcb/cxxsllsywpk.do',
         { 'XNXQDM': semCode, 'XH': sid }
@@ -282,7 +200,7 @@ export class ClassService {
           teacher: String(row['SKJS'] ?? '')
         });
       }
-    } catch (_) {}
+    } catch (_) { console.warn("ClassService", "ignored error"); }
     return out;
   }
 
@@ -305,7 +223,7 @@ export class ClassService {
     return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
       try {
         await this.activateAppSession(EHALL_APP_CLASS_TABLE);
-      } catch (_) {}
+      } catch (_) { console.warn("ClassService", "ignored error"); }
       const resp = await this.appPost(
         '/jwapp/sys/wdkb/modules/xskcb/xsdkkc.do',
         { 'XNXQDM': semCode, '*order': '-SQSJ' }
@@ -353,7 +271,7 @@ export class ClassService {
           newTeacher: String(row['XJSXM'] ?? '')
         });
       }
-    } catch (_) {}
+    } catch (_) { console.warn("ClassService", "ignored error"); }
     return out;
   }
 

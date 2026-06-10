@@ -8,15 +8,12 @@ import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import web_webview from '@ohos.web.webview';
 
+export interface CasFormFields { lt: string; execution: string; pwdEncryptSalt: string; }
+export interface LibraryAuthResult { userId: string; token: string; }
+
 const TAG = 'CasLoginService';
 
 // ===== 接口定义 =====
-export interface CasFormFields {
-  lt: string;
-  execution: string;
-  pwdEncryptSalt: string;
-}
-
 export interface SliderPuzzle {
   bigImage: string;
   smallImage: string;
@@ -49,7 +46,7 @@ export class CasLoginService {
   private readonly AES_CHARS: string = 'ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678';
 
   // URL 常量
-  private readonly SERVICE_URL: string = 'https://ehall.xidian.edu.cn/new/index.html';
+  private readonly SERVICE_URL: string = 'https://ehall.xidian.edu.cn/login?service=https://ehall.xidian.edu.cn/new/index.html';
   private readonly LOGIN_PAGE: string = 'https://ids.xidian.edu.cn/authserver/login';
   private readonly CAPTCHA_URL: string = 'https://ids.xidian.edu.cn/authserver/common/openSliderCaptcha.htl';
   private readonly VERIFY_URL: string = 'https://ids.xidian.edu.cn/authserver/common/verifySliderCaptcha.htl';
@@ -274,10 +271,10 @@ export class CasLoginService {
     if (ehallCookiePost.indexOf('MOD_AUTH_CAS') < 0) {
       console.error(`${TAG} postLogin: POST 完成后未获取到 MOD_AUTH_CAS，status=${postResult.statusCode}`);
       // 如果上面没检测到具体错误，返回登录页面的前500字帮助调试
-      console.error(`${TAG} postLogin response body: ${postResult.body.substring(0, 500)}`);
+      console.info(`${TAG} postLogin response body: ${postResult.body.substring(0, 500)}`);
       throw new Error('登录失败，请检查账号密码');
     }
-    console.error(`${TAG} postLogin: MOD_AUTH_CAS found after POST`);
+    console.info(`${TAG} postLogin: MOD_AUTH_CAS found after POST`);
 
     if (onProgress) {
       onProgress({ step: 'redirect', message: '登录处理完成', percent: 80 });
@@ -435,6 +432,66 @@ export class CasLoginService {
     return false;
   }
 
+  // 获取图书馆 userId 和 token（参考 Flutter: 先走 CAS 再跟重定向链）
+  async getLibraryAuth(): Promise<LibraryAuthResult | null> {
+    const libTarget: string = 'https://hyytsgxzs.xidian.edu.cn/api/index/casLoginDo.html?libraryId=5&openId=o2b1a5Fg6r8hKcL0FXopEkfmiQGc&source=xdbb';
+    // 先请求 CAS，带上已有 CAS Cookie，已登录则返回 302
+    const casUrl: string = 'https://ids.xidian.edu.cn/authserver/login?service=' + encodeURIComponent(libTarget);
+    console.info(TAG, 'getLibraryAuth: start via CAS, url=' + casUrl.substring(0, 120));
+
+    let resp: HttpResponse = await this.http.get(casUrl);
+    let loopGuard: number = 0;
+
+    // 跟随 CAS → library 重定向链（全部用 GET）
+    while (resp.isRedirect && resp.location && loopGuard < 10) {
+      let nextUrl: string = resp.location;
+      console.info(TAG, 'getLibraryAuth: redirect #' + loopGuard + ' → ' + nextUrl.substring(0, 80));
+      resp = await this.http.get(nextUrl);
+      loopGuard++;
+    }
+
+    // 从最终响应中解析 wx.miniProgram.postMessage
+    const body: string = resp.body || '';
+    // Flutter 用 matchJson.firstMatch 提取，我们匹配整个 postMessage({...}) 块
+    const prefix: string = 'wx.miniProgram.postMessage({';
+    const idxStart: number = body.indexOf(prefix);
+    if (idxStart < 0) {
+      console.warn(TAG, 'getLibraryAuth: no postMessage found, bodyLen=' + body.length + ' body[0:200]=' + body.substring(0, 200));
+      return null;
+    }
+    const jsonStart: number = idxStart + prefix.length - 1;
+    // Flutter: replaceFirst(");", ")") — 去掉末尾分号
+    const jsonEnd: number = body.indexOf('})', jsonStart);
+    if (jsonEnd < 0) {
+      console.warn(TAG, 'getLibraryAuth: postMessage end not found');
+      return null;
+    }
+    let jsonStr: string = body.substring(jsonStart, jsonEnd + 1);
+    // Flutter 的处理: replaceFirst("data", "\"data\"") — 给 data 加引号
+    jsonStr = jsonStr.replace('data:', '"data":');
+
+    try {
+      const obj: Record<string, Object> = JSON.parse(jsonStr) as Record<string, Object>;
+      const data: Record<string, Object> = obj['data'] as Record<string, Object>;
+      if (!data) {
+        console.warn(TAG, 'getLibraryAuth: no data field in postMessage, json=' + jsonStr.substring(0, 200));
+        return null;
+      }
+      const userId: string = String(data['id'] ?? '');
+      const token: string = String(data['token'] ?? '');
+      if (userId && token) {
+        console.info(TAG, 'getLibraryAuth: success, userId=' + userId + ' token=' + token.substring(0, 8) + '...');
+        const result: LibraryAuthResult = { userId: userId, token: token };
+        await PreferenceUtil.putString('library_user_id', userId);
+        await PreferenceUtil.putString('library_token', token);
+        return result;
+      }
+    } catch (parseErr) {
+      console.warn(TAG, 'getLibraryAuth: parse error: ' + String(parseErr) + ' json=' + jsonStr.substring(0, 200));
+    }
+    return null;
+  }
+
   // Sync cookies to WebView CookieJar，覆盖所有 *.xidian.edu.cn 子域名
   async syncCookiesToWebView(): Promise<void> {
     const WCM = web_webview.WebCookieManager;
@@ -470,7 +527,7 @@ export class CasLoginService {
       for (const kv of allCookies) {
         try {
           WCM.setCookie('https://' + domain, kv + '; Domain=.xidian.edu.cn; Path=/');
-        } catch (e) {}
+        } catch (e) { console.warn("CasLoginService", "WebView cookie set failed: " + String(e)); }
       }
     }
     console.info(TAG, 'Cookies synced to WebView CookieJar for ' + domains.length + ' domains');
@@ -665,13 +722,13 @@ export class CasLoginService {
         if (setCookie) {
           const sc: string = typeof setCookie === 'string' ? setCookie : String(setCookie);
           allSetCookies += (allSetCookies.length > 0 ? ',' : '') + sc;
-          console.error(`${TAG} httpPostOneShot: accumulated cookies, total len=${allSetCookies.length}`);
+          console.info(`${TAG} httpPostOneShot: accumulated cookies, total len=${allSetCookies.length}`);
         }
         // 记录最后一个 Location（即最终目标 URL）
         const rawLoc: Object = hdr['location'] || hdr['Location'];
         if (rawLoc) {
           lastRedirectLoc = typeof rawLoc === 'string' ? rawLoc : String(rawLoc);
-          console.error(`${TAG} httpPostOneShot: redirect hop to ${lastRedirectLoc.substring(0, 80)}`);
+          console.info(`${TAG} httpPostOneShot: redirect hop to ${lastRedirectLoc.substring(0, 80)}`);
         }
       });
 
@@ -687,7 +744,7 @@ export class CasLoginService {
         },
         async (err: BusinessError | undefined, data: http.HttpResponse) => {
           if (err !== undefined && err.code !== 0) {
-            console.error(`${TAG} httpPostOneShot: err code=${err.code} msg=${err.message}`);
+            console.info(`${TAG} httpPostOneShot: err code=${err.code} msg=${err.message}`);
             req.destroy();
             reject(new Error('HTTP ' + err.code + ': ' + err.message));
             return;
@@ -700,7 +757,7 @@ export class CasLoginService {
             self.http.saveResponseCookies('ehall.xidian.edu.cn', allSetCookies);
             self.http.saveCookies().catch(() => {
             });
-            console.error(`${TAG} httpPostOneShot: saved ${allSetCookies.length} chars of cookies`);
+            console.info(`${TAG} httpPostOneShot: saved ${allSetCookies.length} chars of cookies`);
           }
 
           // 也存最终响应的 cookie（405 等无 body 响应 header 可能为空）
@@ -712,7 +769,7 @@ export class CasLoginService {
               self.http.saveResponseCookies('ehall.xidian.edu.cn', finalSC);
               self.http.saveCookies().catch(() => {
               });
-              console.error(`${TAG} httpPostOneShot: saved final response cookies`);
+              console.info(`${TAG} httpPostOneShot: saved final response cookies`);
             }
           } catch (e) {
             // safe: ignore header parse errors
@@ -723,7 +780,7 @@ export class CasLoginService {
           resp.isRedirect = false;
           resp.body = typeof data.result === 'string' ? data.result : '';
           resp.location = lastRedirectLoc.length > 0 ? lastRedirectLoc : '';
-          console.error(`${TAG} httpPostOneShot: final status=${data.responseCode}, bodyLen=${resp.body.length}, cookies=${allSetCookies.length}`);
+          console.info(`${TAG} httpPostOneShot: final status=${data.responseCode}, bodyLen=${resp.body.length}, cookies=${allSetCookies.length}`);
           resolve(resp);
         }
       );
