@@ -22,6 +22,7 @@ import { SchoolNetPage } from './schoolnet/SchoolNetPage';
 import { ElectricityPage } from './electricity/ElectricityPage';
 import { FaqPage } from './faq/FaqPage';
 import { AttendancePage } from './attendance/AttendancePage';
+import { DormWaterPage } from './dormwater/DormWaterPage';
 import { UserInfoService } from '../services/UserInfoService';
 import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
@@ -1451,6 +1452,8 @@ struct MainPage {
       PortalWebPage({ pageInfo: this.pageInfo, title: '物理计算', url: 'https://experiment-helper.wizzstudio.com/#/', isTablet: this.isTablet })
     } else if (name === 'AttendancePage') {
       AttendancePage({ pageInfo: this.pageInfo })
+    } else if (name === 'DormWaterPage') {
+      DormWaterPage({ pageInfo: this.pageInfo })
     }
   }
 
@@ -2405,6 +2408,11 @@ struct MainPage {
             this.MenuItemBuilder('📋', '考勤查询', '查看课程签到和到课率', '#E91E63',
               () => { this.pageInfo.clear();
                 this.pageInfo.pushPath({ name: 'AttendancePage' }); })
+          }
+          ListItem() {
+            this.MenuItemBuilder('🚰', '宿舍水机', '远程控制宿舍饮水机', '#00ACC1',
+              () => { this.pageInfo.clear();
+                this.pageInfo.pushPath({ name: 'DormWaterPage' }); })
           }
           if (!PreferenceUtil.getBool('role')) {
           ListItem() {
