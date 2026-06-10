@@ -556,20 +556,15 @@ export struct ClassTablePage {
     const nameColorMap = new Map<string, number>();
     let colorIdx = 0;
     const grid: ClassCell[][][] = [];
-    let preservedExams: number = 0;
     for (let d = 0; d <= DAY_COUNT; d++) {
       grid[d] = [];
       for (let s = 0; s <= SECTION_COUNT; s++) {
         grid[d][s] = [];
       }
-      // 保留已有考试，避免重建 grid 时考试消失闪烁
       if (this.classGrid[d] && this.classGrid[d][0]) {
-        const kept: ClassCell[] = this.classGrid[d][0].filter((c: ClassCell) => c.isExam);
-        grid[d][0] = kept;
-        preservedExams += kept.length;
+        grid[d][0] = this.classGrid[d][0].filter((c: ClassCell) => c.isExam);
       }
     }
-    console.info('ClassTablePage', 'renderClassTable: preservedExams=' + preservedExams);
 
     for (const item of items) {
       const weekList = this.parseWeekList(item.skzc);
@@ -1628,14 +1623,11 @@ export struct ClassTablePage {
 
   // 构建三周课表缓存（currentWeek 变化时调用一次，拖拽时只读缓存不重算）
   private buildCellCache(): void {
-    let examCount: number = 0;
     for (let d = 1; d <= DAY_COUNT; d++) {
       this._cellCachePrev[d] = this.getCellsForDay(d, this.currentWeek - 1);
       this._cellCache[d] = this.getCellsForDay(d);
       this._cellCacheNext[d] = this.getCellsForDay(d, this.currentWeek + 1);
-      examCount += this._cellCache[d].filter((c: ClassCell) => c.isExam).length;
     }
-    console.info('ClassTablePage', 'buildCellCache: week=' + this.currentWeek + ' examCells=' + examCount);
   }
 
   private getScreenWidth(): number {
