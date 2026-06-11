@@ -173,8 +173,8 @@ export struct ClassTablePage {
   private readonly EXP_CACHE_KEY: string = 'sysj_exp_cache';
   private lastRenderedRaw: string = '';
   private ROW_HEIGHT: number = 56;
-  private swipeStartX: number = 0;
-  @State slideOffsetX: number = 0;
+  private swiperController: SwiperController = new SwiperController(); // GPU 级滑动
+  @State _weekList: number[] = [1]; // Swiper 数据源，maxWeek 变化时更新
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @StorageLink('preload_status') preloadStatus: string = '';
   @StorageLink('login_state') @Watch('onLoginDetected') loginState: string = '';
@@ -593,6 +593,7 @@ export struct ClassTablePage {
     // 合并自定义课程
     this.loadCustomCourses(grid);
     this.classGrid = grid;
+    this.updateWeekList();
     this.buildCellCache();
     this.diagTodayGrid(grid);
     this.computeCellStatuses();
@@ -966,9 +967,11 @@ export struct ClassTablePage {
             }
 
             // 标题
-            Text('第' + this.currentWeek + '周 ' + DAY_NAMES[this.selectedDay - 1] + ' 第' + this.selectedSection + '节')
+            Text(this.currentConflictCells.length > 0 ?
+              (this.currentConflictCells[0].isExam ? '📝 ' : '') + this.currentConflictCells[0].name : '')
               .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-              .margin({ top: 16, bottom: 12 }).width('100%')
+              .margin({ top: 16, bottom: 12 }).width('100%').maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
 
             Divider().color('#F0F0F0')
 
@@ -983,16 +986,6 @@ export struct ClassTablePage {
                 ForEach(this.currentConflictCells, (cell: ClassCell, idx: number) => {
                   ListItem() {
                     Column() {
-                      // 课程名（带颜色圆点）
-                      Row() {
-                        Row().width(8).height(8).borderRadius(4)
-                          .backgroundColor(this.getCellColor(cell))
-                          .margin({ right: 8 })
-                        Text(cell.isExam ? '📝 ' + cell.name : (cell.isExperiment ? '🧪 ' + cell.name : cell.name))
-                          .fontSize(16).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-                          .layoutWeight(1)
-                      }.width('100%')
-
                       // 详情行
                       Column({ space: 8 }) {
                         if (!cell.isExam) {
@@ -1616,12 +1609,16 @@ export struct ClassTablePage {
 
   private changeWeek(targetWeek: number): void {
     if (targetWeek < 1 || targetWeek > this.maxWeek || targetWeek === this.currentWeek) return;
-    this.currentWeek = targetWeek;
-    this.slideOffsetX = 0;
-    this.buildCellCache();
+    this.swiperController.changeIndex(targetWeek - 1, false);
   }
 
-  // 构建三周课表缓存（currentWeek 变化时调用一次，拖拽时只读缓存不重算）
+  // Swiper 数据源更新
+  private updateWeekList(): void {
+    const arr: number[] = [];
+    for (let w = 1; w <= this.maxWeek; w++) arr.push(w);
+    this._weekList = arr;
+  }
+
   private buildCellCache(): void {
     for (let d = 1; d <= DAY_COUNT; d++) {
       this._cellCachePrev[d] = this.getCellsForDay(d, this.currentWeek - 1);
@@ -1630,31 +1627,11 @@ export struct ClassTablePage {
     }
   }
 
-  private getScreenWidth(): number {
-    return 360; // 标准手机宽度参考
-  }
-
   @Builder buildClassGrid() {
     Scroll() {
       Column() {
         Row() {
-          Text('').width(40).height(44)
-          ForEach(DAY_NAMES, (name: string, idx: number) => {
-            Column() {
-              Text(name).fontSize(13)
-                .fontColor(idx === new Date().getDay() - 1 ? '#FFFFFF' : ThemeColors.textPrimary)
-                .fontWeight(idx === new Date().getDay() - 1 ? FontWeight.Bold : FontWeight.Medium)
-              Text(this.getDateStr(this.currentWeek, idx + 1)).fontSize(10)
-                .fontColor(idx === new Date().getDay() - 1 ? '#FFFFFF99' : ThemeColors.textSecondary)
-            }.layoutWeight(1).height(44)
-            .backgroundColor(idx === new Date().getDay() - 1 ? (ThemeColors.isDark ? '#1A3A6C' : (AppStorage.get('accent_color') as string ?? '#2979FF')) : ThemeColors.bgCard)
-            .borderRadius(8)
-            .justifyContent(FlexAlign.Center)
-          }, (name: string, idx: number) => `day_${idx}`)
-        }.width('100%').padding({ left: 4, right: 4, top: 4, bottom: 2 })
-        Divider().color('#EEEEEE').margin({ left: 44 })
-
-        Row() {
+          // Left: time labels (fixed)
           Column() {
             ForEach([1, 2, 3, 4], (section: number) => {
               Column() {
@@ -1683,202 +1660,155 @@ export struct ClassTablePage {
             }, (section: number) => `sec_${section}`)
           }.width(40)
 
-          Stack() {
-            // 自定义课表背景（纯图片，无蒙版/无模糊，参考 Flutter 方案）
-            if (this.classBgShow && this.classBgPath.length > 0) {
-              Image(this.classBgPath)
-                .width('100%').height('100%')
-                .objectFit(ImageFit.Cover)
-                .opacity(ThemeColors.isDark ? this.classBgOpacity * 0.5 : this.classBgOpacity)
-                .interpolation(ImageInterpolation.Medium)
-            }
-            Column() {
-              ForEach([1, 2, 3, 4], (section: number) => {
+          // Right: Swiper (GPU-native horizontal scroll, one page per week)
+          Swiper(this.swiperController) {
+            ForEach(this._weekList, (week: number, idx: number) => {
+              Column() {
+                // Day headers for this week
                 Row() {
+                  ForEach(DAY_NAMES, (name: string, di: number) => {
+                    Column() {
+                      Text(name).fontSize(13)
+                        .fontColor(di === new Date().getDay() - 1 ? '#FFFFFF' : ThemeColors.textPrimary)
+                        .fontWeight(di === new Date().getDay() - 1 ? FontWeight.Bold : FontWeight.Medium)
+                      Text(this.getDateStr(week, di + 1)).fontSize(10)
+                        .fontColor(di === new Date().getDay() - 1 ? '#FFFFFF99' : ThemeColors.textSecondary)
+                    }.layoutWeight(1).height(44)
+                    .backgroundColor(di === new Date().getDay() - 1 ?
+                      (ThemeColors.isDark ? '#1A3A6C' : (AppStorage.get('accent_color') as string ?? '#2979FF')) : ThemeColors.bgCard)
+                    .borderRadius(8).justifyContent(FlexAlign.Center)
+                  }, (name: string, di: number) => `day_${di}`)
+                }.width('100%').padding({ left: 4, right: 4, top: 4, bottom: 2 })
+                Divider().color('#EEEEEE').margin({ left: 4 })
+
+                // Grid content for this week
+                Stack() {
+                  if (this.classBgShow && this.classBgPath.length > 0) {
+                    Image(this.classBgPath).width('100%').height('100%')
+                      .objectFit(ImageFit.Cover)
+                      .opacity(ThemeColors.isDark ? this.classBgOpacity * 0.5 : this.classBgOpacity)
+                      .interpolation(ImageInterpolation.Medium)
+                  }
+                  Column() {
+                    ForEach([1, 2, 3, 4], (section: number) => {
+                      Row() {
+                        ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
+                          Column().layoutWeight(1).height(this.ROW_HEIGHT)
+                            .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
+                            .onClick(() => { this.showCellDetail(day, section); })
+                        }, (day: number) => `grid_${day}`)
+                      }.width('100%')
+                    }, (section: number) => `sec_${section}`)
+                    Row() {
+                      ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
+                        Column().layoutWeight(1).height(BREAK_HEIGHT)
+                          .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
+                      }, (day: number) => `brk1_${day}`)
+                    }.width('100%')
+                    ForEach([5, 6, 7, 8], (section: number) => {
+                      Row() {
+                        ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
+                          Column().layoutWeight(1).height(this.ROW_HEIGHT)
+                            .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
+                            .onClick(() => { this.showCellDetail(day, section); })
+                        }, (day: number) => `grid_${day}`)
+                      }.width('100%')
+                    }, (section: number) => `sec_${section}`)
+                    Row() {
+                      ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
+                        Column().layoutWeight(1).height(BREAK_HEIGHT)
+                          .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
+                      }, (day: number) => `brk2_${day}`)
+                    }.width('100%')
+                    ForEach([9, 10, 11], (section: number) => {
+                      Row() {
+                        ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
+                          Column().layoutWeight(1).height(this.ROW_HEIGHT)
+                            .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
+                            .onClick(() => { this.showCellDetail(day, section); })
+                        }, (day: number) => `grid_${day}`)
+                      }.width('100%')
+                    }, (section: number) => `sec_${section}`)
+                  }.width('100%')
+
+                  // Cells for this week
                   ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-                    Column().layoutWeight(1).height(this.ROW_HEIGHT)
-                      .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
-                      .onClick(() => { this.showCellDetail(day, section); })
-                  }, (day: number) => `grid_${day}`)
-                }.width('100%')
-              }, (section: number) => `sec_${section}`)
-              Row() {
-                ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-                  Column().layoutWeight(1).height(BREAK_HEIGHT)
-                    .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
-                }, (day: number) => `brk1_${day}`)
+                    ForEach(this.getCellsForDay(day, week), (cell: ClassCell) => {
+                      Column() {
+                        Text(cell.name).fontSize(10)
+                          .fontColor('#FFFFFF')
+                          .fontWeight(FontWeight.Medium).maxLines(3)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        Text(cell.classroom).fontSize(9)
+                          .fontColor('#FFFFFFCC')
+                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
+                        if (cell.teacher) {
+                          Text(cell.teacher).fontSize(8)
+                            .fontColor('#FFFFFFAA')
+                            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
+                        }
+                        if (cell.day === this._todayDay && !cell.isExam &&
+                            this.currentWeek === this.getRealCurrentWeek() &&
+                            cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1]) {
+                          if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1) {
+                            Text('进行中').fontSize(7).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+                              .backgroundColor('#4CAF50CC').borderRadius(3)
+                              .padding({ left: 4, right: 4, top: 1, bottom: 1 }).margin({ top: 2 })
+                          } else if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === -1) {
+                            Text('已结束').fontSize(7).fontColor('#FFFFFF88').margin({ top: 2 })
+                          }
+                        }
+                        if (!cell.isExam && this.getCurrentWeekConflictCells(day, cell.startSection).length > 1) {
+                          Text('⚠️').fontSize(8).fontColor('#FFFFFF').position({ top: 2, right: 2 })
+                        }
+                      }.width('100%').height('100%').padding(4)
+                      .backgroundColor(this.getCellColor(cell)).borderRadius(6)
+                      .opacity(cell.day === this._todayDay && !cell.isExam &&
+                        this.currentWeek === this.getRealCurrentWeek() &&
+                        cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
+                        this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1 ? 0.55 : 1)
+                      .alignItems(HorizontalAlign.Center).justifyContent(FlexAlign.Center)
+                      .position({
+                        x: cell.isExam && cell.examColumnSpan > 1 ?
+                          `${(day - 1) * (100 / 7) + cell.examColumnIndex * (100 / 7 / cell.examColumnSpan)}%` :
+                          `${(day - 1) * (100 / 7)}%`,
+                        y: cell.isExam ? cell.examPixelY : this.getSectionY(cell.startSection)
+                      })
+                      .size({
+                        width: cell.isExam && cell.examColumnSpan > 1 ?
+                          `${100 / 7 / cell.examColumnSpan}%` :
+                          `${100 / 7}%`,
+                        height: cell.isExam ? cell.examPixelH : this.getSectionSpanHeight(cell.startSection, cell.endSection)
+                      })
+                      .onClick(() => {
+                        if (cell.isExam) {
+                          this.currentConflictCells = [cell];
+                          this.showDetailDialog = true;
+                          this.cardScale = 0.85; this.cardOpacity = 0; this.maskOpacity = 0;
+                          animateTo({ duration: 220, curve: Curve.FastOutSlowIn }, () => {
+                            this.cardScale = 1; this.cardOpacity = 1; this.maskOpacity = 0.7;
+                          });
+                        } else {
+                          this.showCellDetail(day, cell.startSection);
+                        }
+                      })
+                    }, (cell: ClassCell) => `cell_${day}_${cell.startSection}_${cell.name}_${cell.kch}`)
+                  }, (day: number) => `day_${day}`)
+                }.layoutWeight(1)
               }.width('100%')
-              ForEach([5, 6, 7, 8], (section: number) => {
-                Row() {
-                  ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-                    Column().layoutWeight(1).height(this.ROW_HEIGHT)
-                      .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
-                      .onClick(() => { this.showCellDetail(day, section); })
-                  }, (day: number) => `grid_${day}`)
-                }.width('100%')
-              }, (section: number) => `sec_${section}`)
-              Row() {
-                ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-                  Column().layoutWeight(1).height(BREAK_HEIGHT)
-                    .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
-                }, (day: number) => `brk2_${day}`)
-              }.width('100%')
-              ForEach([9, 10, 11], (section: number) => {
-                Row() {
-                  ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-                    Column().layoutWeight(1).height(this.ROW_HEIGHT)
-                      .border({ width: { right: 0.5, bottom: 0.5 }, color: '#F0F0F0' })
-                      .onClick(() => { this.showCellDetail(day, section); })
-                  }, (day: number) => `grid_${day}`)
-                }.width('100%')
-              }, (section: number) => `sec_${section}`)
-            }.width('100%')
-
-            // 渲染三周课表（使用缓存数组，拖拽时不重算）
-            // 上一周
-            ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-              ForEach(this._cellCachePrev[day] ?? [], (cell: ClassCell) => {
-                Column() {
-                  Text(cell.name).fontSize(10).fontColor('#FFFFFF').fontWeight(FontWeight.Medium).maxLines(2)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                }.width('100%').height('100%').padding(2)
-                .backgroundColor(this.getCellColor(cell)).borderRadius(4).opacity(0.8)
-                .position({
-                  x: `${(day - 1) * (100 / 7) - 100}%`,
-                  y: cell.isExam ? cell.examPixelY : this.getSectionY(cell.startSection)
-                })
-                .size({
-                  width: `${100 / 7}%`,
-                  height: cell.isExam ? cell.examPixelH : this.getSectionSpanHeight(cell.startSection, cell.endSection)
-                })
-              }, (cell: ClassCell) => `prev_${day}_${cell.startSection}_${cell.name}`)
-            }, (day: number) => `prev_day_${day}`)
-
-            // 本周
-            ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-              ForEach(this._cellCache[day] ?? [], (cell: ClassCell) => {
-                Column() {
-                  Text(cell.name).fontSize(10)
-                    .fontColor('#FFFFFF')
-                    .fontWeight(FontWeight.Medium).maxLines(3)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(cell.classroom).fontSize(9)
-                    .fontColor('#FFFFFFCC')
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
-                  if (cell.teacher) {
-                    Text(cell.teacher).fontSize(8)
-                      .fontColor('#FFFFFFAA')
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
-                  }
-                  // 今天上课状态标记（只在真实日历本周、且该周有排课时显示）
-                  if (cell.day === this._todayDay && !cell.isExam &&
-                      this.currentWeek === this.getRealCurrentWeek() &&
-                      cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1]) {
-                    if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1) {
-                      Text('进行中').fontSize(7).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
-                        .backgroundColor('#4CAF50CC').borderRadius(3)
-                        .padding({ left: 4, right: 4, top: 1, bottom: 1 }).margin({ top: 2 })
-                    } else if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === -1) {
-                      Text('已结束').fontSize(7).fontColor('#FFFFFF88')
-                        .margin({ top: 2 })
-                    }
-                  }
-                  // 冲突提示标记（仅非考试课程显示）
-                  if (!cell.isExam && this.getCurrentWeekConflictCells(day, cell.startSection).length > 1) {
-                    Text('⚠️').fontSize(8).fontColor('#FFFFFF').position({ top: 2, right: 2 })
-                  }
-                }.width('100%').height('100%').padding(4)
-                .backgroundColor(this.getCellColor(cell)).borderRadius(6)
-                .opacity(cell.day === this._todayDay && !cell.isExam &&
-                  this.currentWeek === this.getRealCurrentWeek() &&
-                  cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
-                  this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1 ? 0.55 : 1)
-                .alignItems(HorizontalAlign.Center).justifyContent(FlexAlign.Center)
-                .position({
-                  x: cell.isExam && cell.examColumnSpan > 1 ?
-                    `${(day - 1) * (100 / 7) + cell.examColumnIndex * (100 / 7 / cell.examColumnSpan)}%` :
-                    `${(day - 1) * (100 / 7)}%`,
-                  y: cell.isExam ? cell.examPixelY : this.getSectionY(cell.startSection)
-                })
-                .size({
-                  width: cell.isExam && cell.examColumnSpan > 1 ?
-                    `${100 / 7 / cell.examColumnSpan}%` :
-                    `${100 / 7}%`,
-                  height: cell.isExam ? cell.examPixelH : this.getSectionSpanHeight(cell.startSection, cell.endSection)
-                })
-                // 点击事件
-                .onClick(() => {
-                  if (cell.isExam) {
-                    this.currentConflictCells = [cell];
-                    this.showDetailDialog = true;
-                    this.cardScale = 0.85; this.cardOpacity = 0; this.maskOpacity = 0;
-                    animateTo({ duration: 220, curve: Curve.FastOutSlowIn }, () => {
-                      this.cardScale = 1; this.cardOpacity = 1; this.maskOpacity = 0.7;
-                    });
-                  } else {
-                    this.showCellDetail(day, cell.startSection);
-                  }
-                })
-              }, (cell: ClassCell) => `cell_${day}_${cell.startSection}_${cell.name}_${cell.kch}`)
-            }, (day: number) => `day_${day}`)
-
-            // 下一周（屏幕右侧，拖拽左滑时可见）
-            ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
-              ForEach(this._cellCacheNext[day] ?? [], (cell: ClassCell) => {
-                Column() {
-                  Text(cell.name).fontSize(10).fontColor('#FFFFFF').fontWeight(FontWeight.Medium).maxLines(2)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                }.width('100%').height('100%').padding(2)
-                .backgroundColor(this.getCellColor(cell)).borderRadius(4).opacity(0.8)
-                .position({
-                  x: `${(day - 1) * (100 / 7) + 100}%`,
-                  y: cell.isExam ? cell.examPixelY : this.getSectionY(cell.startSection)
-                })
-                .size({
-                  width: `${100 / 7}%`,
-                  height: cell.isExam ? cell.examPixelH : this.getSectionSpanHeight(cell.startSection, cell.endSection)
-                })
-              }, (cell: ClassCell) => `next_${day}_${cell.startSection}_${cell.name}`)
-            }, (day: number) => `next_day_${day}`)
-          }.layoutWeight(1)
+            }, (week: number) => `week_${week}`)
+          }
+          .index(this.currentWeek - 1)
+          .cachedCount(1)
+          .indicator(false)
+          .loop(false)
+          .onChange((index: number) => {
+            this.currentWeek = index + 1;
+            this.buildCellCache();
+          })
+          .layoutWeight(1)
         }.width('100%')
       }.width('100%')
-      .translate({ x: this.slideOffsetX })
-      .gesture(
-        PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 20 })
-          .onActionStart((event: GestureEvent) => {
-            this.swipeStartX = event.fingerList[0].globalX;
-          })
-          .onActionUpdate((event: GestureEvent) => {
-            const delta: number = event.fingerList[0].globalX - this.swipeStartX;
-            if ((this.currentWeek <= 1 && delta > 0) || (this.currentWeek >= this.maxWeek && delta < 0)) {
-              this.slideOffsetX = delta * 0.3;
-            } else {
-              this.slideOffsetX = delta;
-            }
-          })
-          .onActionEnd((event: GestureEvent) => {
-            const deltaX: number = event.fingerList[0].globalX - this.swipeStartX;
-            const sw: number = 360;
-            if (Math.abs(deltaX) > 100) {
-              const dir: number = deltaX < 0 ? 1 : -1;
-              const targetWeek: number = this.currentWeek + dir;
-              if (targetWeek >= 1 && targetWeek <= this.maxWeek) {
-                animateTo({ duration: 250, curve: Curve.EaseInOut, onFinish: () => {
-                  this.currentWeek = targetWeek;
-                  this.buildCellCache();
-                  this.slideOffsetX = 0;
-                }}, () => {
-                  this.slideOffsetX = -dir * sw;
-                });
-                return;
-              }
-            }
-            animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
-              this.slideOffsetX = 0;
-            });
-          })
-      )
     }.scrollable(ScrollDirection.Vertical).scrollBar(BarState.Auto).layoutWeight(1)
   }
 
