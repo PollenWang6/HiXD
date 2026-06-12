@@ -83,8 +83,12 @@ export struct ExamPage {
       this.arranged = items.filter(i => i.ksrq && i.ksrq.length > 0);
       this.notArranged = items.filter(i => !i.ksrq || i.ksrq.length === 0);
       this.showCacheBanner = false;
-      PreferenceUtil.putString('exam_schedule_cache', raw);
-      console.info('ExamPage', 'Cached exam data, raw.length=' + raw.length);
+      if (items.length > 0) {
+        PreferenceUtil.putString('exam_schedule_cache', raw);
+        console.info('ExamPage', 'Cached exam data, raw.length=' + raw.length);
+      } else {
+        console.warn('ExamPage', 'Server returned 0 exams, keeping old cache if any');
+      }
     } catch (e) {
       this.errorMsg = (e as Error).message?.includes('未登录') ? '登录已过期' : '加载失败';
       // 尝试从缓存加载

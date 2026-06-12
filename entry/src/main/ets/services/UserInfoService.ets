@@ -42,7 +42,12 @@ export class UserInfoService {
     const info: UserInfo = new UserInfo();
     info.name = PreferenceUtil.getString('user_name');
     info.uid = PreferenceUtil.getString('cx_uid');
-    info.avatar = PreferenceUtil.getString('user_avatar');
+    // 动态构造头像URL：从chaoxing UID拼接，80px缩略图可直接访问无需Referer
+    if (info.uid.length > 0) {
+      info.avatar = 'https://photo.chaoxing.com/p/' + info.uid + '_80';
+    } else {
+      info.avatar = PreferenceUtil.getString('user_avatar');
+    }
     info.major = PreferenceUtil.getString('user_major');
     info.college = PreferenceUtil.getString('user_college');
     info.grade = PreferenceUtil.getString('user_grade');
@@ -157,10 +162,26 @@ export class UserInfoService {
 
       console.info(TAG, 'fetchFromEhall: OK name=' + name + ' college=' + college +
         ' major=' + major + ' grade=' + grade + ' gender=' + gender);
+
+      // 顺带拉取超星 UID（异步，不阻塞返回）
+      this.fetchChaoxingUid();
+
       return name.length > 0;
     } catch (e) {
       console.warn(TAG, 'fetchFromEhall: exception: ' + String(e));
       return false;
     }
+  }
+
+  // 超星平台 UID 缓存读取（纯 HTTP 提取不可行：fanya 不在 CAS 白名单，
+  // i.chaoxing.com 是 SPA，实际提取由 MainPage 隐藏 WebView 完成）
+  async fetchChaoxingUid(): Promise<string> {
+    const cached: string = PreferenceUtil.getString('cx_uid');
+    if (cached.length > 0) {
+      console.info(TAG, 'fetchChaoxingUid: from cache, uid=' + cached);
+      return cached;
+    }
+    console.info(TAG, 'fetchChaoxingUid: no cache');
+    return '';
   }
 }

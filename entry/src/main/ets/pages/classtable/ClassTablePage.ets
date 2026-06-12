@@ -435,9 +435,9 @@ export struct ClassTablePage {
           this.renderClassTable(raw);
           this.lastRenderedRaw = raw;
           this.hasCache = true;
+          this.writeLocalClassTable(raw);
         }
       }
-      if (raw) { this.writeLocalClassTable(raw); }
       console.info('ClassTablePage', 'fetchAndSave: step3 exp+exam');
 
       // Step 3: 同步实验和考试（仅在首登/无缓存时后台同步）
@@ -508,6 +508,7 @@ export struct ClassTablePage {
 
   async loadTable(forceRefresh: boolean = false): Promise<void> {
     if (forceRefresh) {
+      if (this.refreshing) { return; }
       this.refreshing = true;
       // 不提前重置 errorMsg/syncProgress：连续状态变化会导致 Refresh 组件重新布局子控件、课表暂时空白
       const sid: string = PreferenceUtil.getString('ids_account');
@@ -521,10 +522,10 @@ export struct ClassTablePage {
           } else {
             this.showCacheBanner = false;
             this.renderClassTable(raw);
+            this.writeLocalClassTable(raw);
           }
           this.lastRenderedRaw = raw;
         }
-        this.writeLocalClassTable(raw);
         // 刷新后重新合并实验和考试
         this.syncProgress = '正在同步实验数据...';
         this.mergeExperimentDataIntoGrid();
@@ -532,6 +533,8 @@ export struct ClassTablePage {
         try { await this.mergePhysicsExperiments(); } catch (_e) { console.warn("ClassTablePage", "mergePhysics failed"); }
         this.syncProgress = '正在同步考试数据...';
         await this.loadExamDataInPlace();
+        this.syncProgress = '';
+        AppStorage.setOrCreate('ct_updated', String(Date.now()));
       } catch (e) {
         this.errorMsg = '刷新失败，请检查网络';
         if (this.hasCache) { this.showCacheBanner = true; }
@@ -1231,6 +1234,7 @@ export struct ClassTablePage {
                       Column() {
                         Text(item.name).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                         Row() {
+                          if (item.number) { Text(item.number + '班').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ right: 12 }) }
                           if (item.teacher) { Text(item.teacher).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ right: 12 }) }
                           if (item.code) { Text(item.code).fontSize(11).fontColor(ThemeColors.textHint) }
                         }.margin({ top: 4 })
@@ -1413,7 +1417,10 @@ export struct ClassTablePage {
       .opacity(this.currentWeek <= 1 ? 0.3 : 1.0)
       .onClick(() => { this.changeWeek(this.currentWeek - 1); })
 
-      Text(this.getWeekRangeLabel()).fontSize(15).fontColor(ThemeColors.isDark ? '#64B5F6' : (AppStorage.get('accent_color') as string ?? '#2979FF')).fontWeight(FontWeight.Medium)
+      Text(this.getWeekRangeLabel()).fontSize(15)
+        .fontColor(ThemeColors.isDark ? '#64B5F6' :
+          ThemeColors.textForAccent(AppStorage.get('accent_color') as string ?? '#2979FF'))
+        .fontWeight(FontWeight.Medium)
         .margin({ left: 12, right: 12 })
 
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
@@ -1669,10 +1676,14 @@ export struct ClassTablePage {
                   ForEach(DAY_NAMES, (name: string, di: number) => {
                     Column() {
                       Text(name).fontSize(13)
-                        .fontColor(di === new Date().getDay() - 1 ? '#FFFFFF' : ThemeColors.textPrimary)
+                        .fontColor(di === new Date().getDay() - 1 ?
+                          ThemeColors.textOnColor(ThemeColors.isDark ? '#1A3A6C' :
+                            (AppStorage.get('accent_color') as string ?? '#2979FF')) : ThemeColors.textPrimary)
                         .fontWeight(di === new Date().getDay() - 1 ? FontWeight.Bold : FontWeight.Medium)
                       Text(this.getDateStr(week, di + 1)).fontSize(10)
-                        .fontColor(di === new Date().getDay() - 1 ? '#FFFFFF99' : ThemeColors.textSecondary)
+                        .fontColor(di === new Date().getDay() - 1 ?
+                          (ThemeColors.textOnColor(ThemeColors.isDark ? '#1A3A6C' :
+                            (AppStorage.get('accent_color') as string ?? '#2979FF')) + '99') : ThemeColors.textSecondary)
                     }.layoutWeight(1).height(44)
                     .backgroundColor(di === new Date().getDay() - 1 ?
                       (ThemeColors.isDark ? '#1A3A6C' : (AppStorage.get('accent_color') as string ?? '#2979FF')) : ThemeColors.bgCard)
@@ -2366,9 +2377,12 @@ export struct ClassTablePage {
         await http.postRaw('http://wlsy.xidian.edu.cn/PhyEws/default.aspx', bd, 'application/x-www-form-urlencoded');
         let r = await http.get('http://wlsy.xidian.edu.cn/PhyEws/student/select.aspx');
         if (r.isOk) {
-          items = this.parsePhysicsToItems(r.body);
-          let pc: ESObject = {'ts':Date.now(),'data':items} as ESObject;
-          PreferenceUtil.putString(PHYSICS_CACHE, JSON.stringify(pc));
+          let parsed = this.parsePhysicsToItems(r.body);
+          if (parsed.length > 0) {
+            let pc: ESObject = {'ts':Date.now(),'data':parsed} as ESObject;
+            PreferenceUtil.putString(PHYSICS_CACHE, JSON.stringify(pc));
+          }
+          items = parsed;
         }
       }
       if (items.length > 0) {

@@ -956,9 +956,13 @@ export class EhallService {
         AppStorage.setOrCreate('ct_updated', String(Date.now()));
         return ExamService.getInstance().getExamSchedule(semCode);
       }).then((raw: string) => {
-        PreferenceUtil.putString('exam_schedule_cache', raw);
+        if (raw && raw.length > 100) {
+          PreferenceUtil.putString('exam_schedule_cache', raw);
+          console.info(TAG, 'preload: exam saved, ' + raw.length + ' chars');
+        } else {
+          console.warn(TAG, 'preload: exam data too short (' + (raw ? raw.length : 0) + '), keeping old cache');
+        }
         AppStorage.setOrCreate('preload_progress', '实验');
-        console.info(TAG, 'preload: exam saved, ' + raw.length + ' chars');
         return this.preloadOtherExperimentsDirect();
       }).then(() => {
         AppStorage.setOrCreate('preload_status', 'done');

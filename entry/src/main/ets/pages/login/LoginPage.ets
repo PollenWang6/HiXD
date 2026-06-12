@@ -322,7 +322,7 @@ struct LoginPage {
                 if (this.captchaError.length > 0) {
                   Text(this.captchaError).fontSize(13).fontColor('#FF6B6B').margin({ top: 12 })
                 }
-                Text(this.statusText || '请按住滑块拖动到最右端').fontSize(12).fontColor('#999999').margin({ top: 16 })
+                Text(this.statusText || '请按住滑块拖动到合适位置').fontSize(12).fontColor('#999999').margin({ top: 16 })
               }
             }
             .width(320).padding(20)

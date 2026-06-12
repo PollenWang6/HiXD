@@ -350,7 +350,11 @@ export class CasLoginService {
     try {
       const restored: boolean = await this.tryAutoRestoreLogin();
       if (restored) {
-        console.info(TAG, 'checkAndAutoLogin: TGC restored');
+        console.info(TAG, 'checkAndAutoLogin: TGC restored OK');
+        // Log TGC health for diagnostics
+        const tgc = this.http.getAllCookies('ids.xidian.edu.cn');
+        const hasCASTGC = tgc.toUpperCase().includes('CASTGC') || tgc.toUpperCase().includes('TGC');
+        console.info(TAG, 'checkAndAutoLogin: TGC cookie present=' + hasCASTGC + ' len=' + tgc.length);
         return true;
       }
     } catch (e) {
@@ -372,7 +376,7 @@ export class CasLoginService {
         return [];
       });
       if (success) {
-        console.info(TAG, 'checkAndAutoLogin: password login success');
+        console.info(TAG, 'checkAndAutoLogin: password login OK (TGC restore failed)');
         return true;
       }
     } catch (e) {
@@ -522,31 +526,111 @@ export class CasLoginService {
       'order.xidian.edu.cn',   // 订水系统
       'ignypt.xidian.edu.cn',  // 水电缴费重定向
       'sysj.xidian.edu.cn',    // 实验系统
+      'libspace.xidian.edu.cn', // 空间预约
     ];
     for (const domain of domains) {
       for (const kv of allCookies) {
         try {
           WCM.setCookie('https://' + domain, kv + '; Domain=.xidian.edu.cn; Path=/');
+          if (domain.startsWith('libspace')) {
+            WCM.setCookie('http://' + domain, kv + '; Domain=.xidian.edu.cn; Path=/');
+          }
         } catch (e) { console.warn("CasLoginService", "WebView cookie set failed: " + String(e)); }
       }
     }
     console.info(TAG, 'Cookies synced to WebView CookieJar for ' + domains.length + ' domains');
   }
 
+  // Sync only CAS CASTGC cookie to WebView CookieJar — write to ONE domain only.
+  // Mimics CAS server behavior: when LoginPage WebView logs in, CASTGC is set
+  // on ids.xidian.edu.cn with Domain=.xidian.edu.cn. Chromium auto-sends it to
+  // all subdomains naturally. Writing to multiple domains with manual setCookie
+  // produces cookie header discrepancies that trigger WAF.
+  async syncCasCookieOnly(): Promise<void> {
+    const WCM = web_webview.WebCookieManager;
+    const idsCookies = this.http.getAllCookies("ids.xidian.edu.cn");
+    if (idsCookies.length === 0) {
+      console.warn(TAG, "syncCasCookieOnly: no ids cookies to sync");
+      return;
+    }
+    const cookies: string[] = [];
+    for (const kv of idsCookies.split("; ")) {
+      const t = kv.trim();
+      if (t.length > 0) cookies.push(t);
+    }
+    const hasCASTGC = cookies.filter(c => c.toUpperCase().includes("CASTGC")).length > 0;
+    console.info(TAG, "syncCasCookieOnly: " + cookies.length + " ids cookies, hasCASTGC=" + hasCASTGC);
+    // Write ONLY to ids.xidian.edu.cn — same domain CAS server writes to.
+    // Domain=.xidian.edu.cn ensures Chromium auto-forwards to all subdomains.
+    for (const kv of cookies) {
+      try {
+        WCM.setCookie("https://ids.xidian.edu.cn", kv + "; Domain=.xidian.edu.cn; Path=/");
+      } catch (e) { /* ignore */ }
+    }
+    console.info(TAG, "syncCasCookieOnly: done, synced to ids.xidian.edu.cn only");
+
+  }
+  // For ignypt/libspace: pre-walk the OAuth/redirect chain via HttpUtil
+  // to get target domain session cookies, then sync only those to WebView.
+  // These services DO NOT use CAS, they have their own session mechanism.
+  async preWalkAndSyncTarget(entryUrl: string, targetDomain: string): Promise<void> {
+    console.info(TAG, "preWalkAndSyncTarget: walking chain to " + targetDomain);
+    const startMs = Date.now();
+    try {
+      await this.http.get(entryUrl);
+      const elapsedMs = Date.now() - startMs;
+      console.info(TAG, "preWalkAndSyncTarget: chain completed in " + elapsedMs + "ms");
+      // Extract cookies from target domain only
+      const targetCookies = this.http.getAllCookies(targetDomain);
+      console.info(TAG, "preWalkAndSyncTarget: " + targetDomain + " cookies len=" + targetCookies.length);
+      // Sync to WebView CookieJar
+      const WCM = web_webview.WebCookieManager;
+      if (targetCookies.length > 0) {
+        for (const kv of targetCookies.split("; ")) {
+          const t = kv.trim();
+          if (t.length > 0) {
+            try {
+              WCM.setCookie("https://" + targetDomain, t + "; Path=/");
+            } catch (e) { /* ignore */ }
+          }
+        }
+        console.info(TAG, "preWalkAndSyncTarget: synced to WebView");
+      }
+    } catch (e) {
+      console.error(TAG, "preWalkAndSyncTarget failed: " + String(e));
+    }
+  }
+
   // HTTP 层预热：订水 OAuth 走一遍，xxcapp session 入 HTTP cookieStore，再同步到 WebView
   // 调用时机：登录成功后（HTTP 层已有 TGC），不需要 WebView
   async warmUpWebViewSession(): Promise<void> {
-    console.info(TAG, 'warmUpWebViewSession: start');
+    console.info(TAG, "warmUpWebViewSession: start");
     try {
-      // HTTP 走订水完整重定向链（TGC 有效 → CAS 自动过）
-      await this.http.get('https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1');
-      // 此时 xxcapp.xidian.edu.cn 的 session cookie 已在 HTTP cookieStore
+      // Step 1: warm order OAuth (dingshui)
+      const t1 = Date.now();
+      await this.http.get("https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1");
+      console.info(TAG, "warmUpWebViewSession: order warm done, cost=" + (Date.now() - t1) + "ms");
+      // Step 2: warm xxcapp OAuth (portal + dianfei)
+      const t2 = Date.now();
+      try {
+        await this.http.get("https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://xxcapp.xidian.edu.cn/site/xidianPage/home");
+        console.info(TAG, "warmUpWebViewSession: xxcapp warm done, cost=" + (Date.now() - t2) + "ms");
+      } catch (e2) {
+        console.warn(TAG, "warmUpWebViewSession: xxcapp warm failed: " + String(e2));
+      }
       await this.http.saveCookies();
-      // 全量同步到 WebView CookieJar
+      // Diagnostic: log cookie sizes per domain
+      const srcs = ["ids.xidian.edu.cn", "ehall.xidian.edu.cn", "xxcapp.xidian.edu.cn", "order.xidian.edu.cn", "ignypt.xidian.edu.cn"];
+      let diag = "";
+      for (const d of srcs) {
+        const ck = this.http.getAllCookies(d);
+        diag += d + ":" + ck.length + " ";
+      }
+      console.info(TAG, "warmUpWebViewSession: cookie lens -> " + diag);
       await this.syncCookiesToWebView();
-      console.info(TAG, 'warmUpWebViewSession: done');
+      console.info(TAG, "warmUpWebViewSession: done");
     } catch (e) {
-      console.warn(TAG, 'warmUpWebViewSession: ' + String(e));
+      console.warn(TAG, "warmUpWebViewSession: " + String(e));
     }
   }
 

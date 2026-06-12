@@ -232,6 +232,29 @@ export class ClassService {
     }, 30 * 60 * 1000);  // 30 分钟缓存
   }
 
+  // 格式化周次字符串 "000000001000" → "第16周" 或 "第14-18周"
+  static formatWeekRange(skzc: string): string {
+    if (!skzc || skzc.length === 0) return '';
+    const weeks: number[] = [];
+    for (let i = 0; i < skzc.length; i++) {
+      if (skzc[i] === '1') weeks.push(i + 1);
+    }
+    if (weeks.length === 0) return '';
+    if (weeks.length === 1) return '第' + weeks[0] + '周';
+    // 合并连续周次
+    const ranges: string[] = [];
+    let start: number = weeks[0];
+    let prev: number = weeks[0];
+    for (let i = 1; i < weeks.length; i++) {
+      if (weeks[i] === prev + 1) { prev = weeks[i]; continue; }
+      ranges.push(start === prev ? '第' + start + '周' : '第' + start + '-' + prev + '周');
+      start = weeks[i];
+      prev = weeks[i];
+    }
+    ranges.push(start === prev ? '第' + start + '周' : '第' + start + '-' + prev + '周');
+    return ranges.join(', ');
+  }
+
   // 解析课程变更列表
   static parseClassChanges(body: string): ClassChange[] {
     const out: ClassChange[] = [];
@@ -248,7 +271,7 @@ export class ClassService {
         if (tklxdm === '02') typeStr = '停课';
         else if (tklxdm === '03') typeStr = '补课';
         // 周次字符串转描述
-        const origDayNum: string = String(row['TKXQ'] ?? '');
+        const origDayNum: string = String(row['SKXQ'] ?? '');
         const newDayNum: string = String(row['XSKXQ'] ?? '');
         const dayMap: Record<string, string> = { '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六', '7': '日' };
         // 周次字符串转描述
@@ -259,16 +282,16 @@ export class ClassService {
           courseName: String(row['KCM'] ?? ''),
           courseCode: String(row['KCH'] ?? ''),
           classNumber: String(row['KXH'] ?? ''),
-          originalWeeks: origWeeks,
+          originalWeeks: ClassService.formatWeekRange(origWeeks),
           originalDay: '周' + (dayMap[origDayNum] || origDayNum),
-          originalSection: String(row['TKKSJC'] ?? '') + '-' + String(row['TKJSJC'] ?? ''),
+          originalSection: String(row['KSJC'] ?? '') + '-' + String(row['JSJC'] ?? ''),
           originalRoom: String(row['JASMC'] ?? ''),
-          originalTeacher: String(row['TKJS'] ?? ''),
-          newWeeks: newWeeks,
+          originalTeacher: String(row['YSKJS'] ?? ''),
+          newWeeks: ClassService.formatWeekRange(newWeeks),
           newDay: '周' + (dayMap[newDayNum] || newDayNum),
-          newSection: String(row['XSKKSJC'] ?? '') + '-' + String(row['XSKJSJC'] ?? ''),
+          newSection: String(row['XKSJC'] ?? '') + '-' + String(row['XJSJC'] ?? ''),
           newRoom: String(row['XJASMC'] ?? ''),
-          newTeacher: String(row['XJSXM'] ?? '')
+          newTeacher: String(row['XSKJS'] ?? '')
         });
       }
     } catch (_) { console.warn("ClassService", "ignored error"); }

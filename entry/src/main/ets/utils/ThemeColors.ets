@@ -66,4 +66,23 @@ export class ThemeColors {
   static get overlay(): string        { return _isDark ? '#80000000' : '#40000000'; }
   static get headerGradientStart(): string  { return (AppStorage.get('accent_color') as string) ?? '#1A237E'; }
   static get headerGradientEnd(): string    { return (AppStorage.get('accent_color') as string) ?? '#2979FF'; }
+
+  // 用于文字显示的 accent 色（浅色时自动加深）
+  static textForAccent(hex: string): string {
+    const r: number = parseInt(hex.substring(1, 3), 16);
+    const g: number = parseInt(hex.substring(3, 5), 16);
+    const b: number = parseInt(hex.substring(5, 7), 16);
+    const lum: number = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.7 ? '#2979FF' : hex;
+  }
+
+  // 根据背景色亮度返回合适的前景色（白 or 黑）
+  static textOnColor(hex: string): string {
+    if (hex.length < 7) return '#FFFFFF';
+    const r: number = parseInt(hex.substring(1, 3), 16);
+    const g: number = parseInt(hex.substring(3, 5), 16);
+    const b: number = parseInt(hex.substring(5, 7), 16);
+    const lum: number = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.6 ? '#1A1A1A' : '#FFFFFF';
+  }
 }

@@ -268,22 +268,23 @@ export struct DormWaterPage {
           // 顶栏
           Row() {
             Button({ type: ButtonType.Circle, stateEffect: true }) {
-              Text('←').fontSize(22).fontColor(ThemeColors.textPrimary)
+              Text('←').fontSize(22).fontColor(ThemeColors.textOnColor(this.accentColor))
             }.width(40).height(40).backgroundColor('#00000000')
             .onClick(() => { this.pageInfo.pop(); })
 
-            Text('宿舍水机').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+            Text('宿舍水机').fontSize(18).fontWeight(FontWeight.Bold)
+              .fontColor(ThemeColors.textOnColor(this.accentColor))
               .layoutWeight(1).textAlign(TextAlign.Center)
 
             if (this.loggedIn) {
-              Button('退出').fontSize(13).fontColor('#FF7043').backgroundColor('#00000000')
+              Button('退出').fontSize(13)
+                .fontColor(ThemeColors.textOnColor(this.accentColor)).backgroundColor('#00000000')
                 .onClick(() => { this.doLogout(); })
             } else {
               Blank().width(40)
             }
           }.width('100%').height(48).padding({ left: 8, right: 8 })
-
-          Divider().color(ThemeColors.border)
+          .backgroundColor(this.accentColor)
 
           if (this.loggedIn) {
             this.buildDeviceList();
@@ -389,7 +390,7 @@ export struct DormWaterPage {
           .padding({ left: 12, right: 12, top: 8, bottom: 8 })
           .border({ width: 1, color: '#4CAF50', radius: 8 })
       } else {
-        Text('开始接水').fontSize(13).fontColor('#FFFFFF')
+        Text('开始接水').fontSize(13).fontColor(ThemeColors.textOnColor(this.accentColor))
           .padding({ left: 16, right: 16, top: 8, bottom: 8 })
           .backgroundColor(this.accentColor).borderRadius(8)
           .onClick(() => { this.doStartWater(dev); })
@@ -422,7 +423,7 @@ export struct DormWaterPage {
             .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary).borderRadius(10)
             .onClick(() => { this.showManualAdd = false; this.manualDeviceId = ''; })
           Button('添加').layoutWeight(1).height(40)
-            .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
+            .backgroundColor(this.accentColor).fontColor(ThemeColors.textOnColor(this.accentColor)).borderRadius(10)
             .onClick(() => { this.doManualAdd(); })
         }.width('100%').margin({ top: 16 })
       }
@@ -484,7 +485,7 @@ export struct DormWaterPage {
           Button(this.smsCountdown > 0 ? this.smsCountdown + 's' : '获取验证码')
             .fontSize(12).height(32)
             .backgroundColor(this.smsCountdown > 0 ? ThemeColors.bgInput : this.accentColor)
-            .fontColor(this.smsCountdown > 0 ? ThemeColors.textSecondary : '#FFFFFF')
+            .fontColor(this.smsCountdown > 0 ? ThemeColors.textSecondary : ThemeColors.textOnColor(this.accentColor))
             .borderRadius(6).enabled(this.smsCountdown === 0)
             .onClick(() => { this.doSendSms(); })
         }
@@ -499,7 +500,7 @@ export struct DormWaterPage {
 
         Button(this.loginLoading ? '登录中...' : '登 录')
           .width('100%').height(46)
-          .fontSize(16).fontColor('#FFFFFF')
+          .fontSize(16).fontColor(ThemeColors.textOnColor(this.accentColor))
           .backgroundColor(this.accentColor).borderRadius(10)
           .margin({ left: 16, right: 16, top: 24 })
           .enabled(!this.loginLoading)

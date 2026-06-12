@@ -17,16 +17,18 @@ import { ScorePage } from './score/ScorePage';
 import { EmptyClassroomPage } from './emptyclassroom/EmptyClassroomPage';
 import { LibraryPage } from './library/LibraryPage';
 import { SchoolCardPage } from './schoolcard/SchoolCardPage';
-import { PortalWebPage } from './portal/PortalWebPage';
 import { SchoolNetPage } from './schoolnet/SchoolNetPage';
 import { ElectricityPage } from './electricity/ElectricityPage';
+import { PortalWebPage } from './portal/PortalWebPage';
 import { FaqPage } from './faq/FaqPage';
 import { AttendancePage } from './attendance/AttendancePage';
+import { AttendanceService } from '../services/AttendanceService';
 import { DormWaterPage } from './dormwater/DormWaterPage';
 import { UserInfoService } from '../services/UserInfoService';
 import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
+import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import web_webview from '@ohos.web.webview';
 import { image } from '@kit.ImageKit';
@@ -250,8 +252,9 @@ struct MainPage {
   @State warmupActive: boolean = false;
   private warmupUrl: string = 'https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1';
 
-  // ==================== xgxt 隐藏 WebView（个人信息抓取） ====================
+  // ==================== xgxt 隐藏 WebView（个人信息抓取 + 超星头像） ====================
   @State xgxtActive: boolean = false;
+  private xgxtPhase: number = 0;  // 0=idle, 1=xgxt学工, 2=超星头像
   private xgxtUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
   private xgxtController: web_webview.WebviewController = new web_webview.WebviewController();
   private xgxtTimeoutId: number = -1;
@@ -625,7 +628,7 @@ struct MainPage {
           if (this.captchaErr.length > 0) {
             Text(this.captchaErr).fontSize(13).fontColor('#FF6B6B').margin({ top: 12 })
           }
-          Text('请按住滑块拖动到最右端').fontSize(12).fontColor('#999999').margin({ top: 16 })
+          Text('请按住滑块拖动到合适位置').fontSize(12).fontColor('#999999').margin({ top: 16 })
         }
       }
       .width(320).padding(20)
@@ -665,7 +668,7 @@ struct MainPage {
         this.userDisplayName = info.name;
       }
       if (info.avatar) {
-        this.userAvatarUrl = info.avatar;
+        this.downloadAndSetAvatar(info.avatar);
       }
       if (info.major) {
         this.userMajor = info.major;
@@ -703,6 +706,37 @@ struct MainPage {
     });
   }
 
+  // 下载头像到本地缓存（避免 Image 组件跟随 CDN 重定向失败的问题）
+  private downloadAndSetAvatar(url: string): void {
+    const req: http.HttpRequest = http.createHttp();
+    req.request(url, {
+      method: http.RequestMethod.GET,
+      expectDataType: http.HttpDataType.ARRAY_BUFFER,
+      header: { 'Referer': 'https://i.chaoxing.com/' }
+    }).then((resp: http.HttpResponse): void => {
+      if (resp.responseCode === 200 && resp.result) {
+        const buf: ArrayBuffer = resp.result as ArrayBuffer;
+        const filePath: string = this.context.cacheDir + '/user_avatar.png';
+        try {
+          const dst: fileIo.File = fileIo.openSync(filePath,
+            fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+          fileIo.writeSync(dst.fd, buf);
+          fileIo.closeSync(dst);
+          this.userAvatarUrl = 'file://' + filePath;
+          console.info(TAG, 'downloadAndSetAvatar: OK path=' + filePath);
+        } catch (e2) {
+          console.warn(TAG, 'downloadAndSetAvatar: write failed: ' + String(e2));
+        }
+      } else {
+        console.warn(TAG, 'downloadAndSetAvatar: bad response code=' + resp.responseCode + ' url=' + url);
+      }
+    }).catch((e: Object): void => {
+      console.warn(TAG, 'downloadAndSetAvatar: download failed: ' + String(e) + ' url=' + url);
+    }).finally((): void => {
+      req.destroy();
+    });
+  }
+
   // 手动刷新用户信息 — 隐藏 WebView 加载 xgxt jbxxapp SPA → JS fetch API 提取
   private refreshUserInfo(): void {
     if (this.userRefreshing) {
@@ -717,6 +751,7 @@ struct MainPage {
     this.xgxtActive = false;
 
     // 下一帧激活 WebView，触发 CAS SSO → jbxxapp SPA 加载
+    this.xgxtPhase = 1;
     setTimeout(() => { this.xgxtActive = true; }, 100);
 
     // 超时保护
@@ -787,8 +822,69 @@ struct MainPage {
         ' major=' + major + ' grade=' + grade + ' gender=' + gender +
         ' dorm=' + dorm + ' stype=' + stype + ' cls=' + cls);
       this.loadUserInfo();
+
+      // 学工数据拿到后，进入阶段2：超星头像提取
+      // 读缓存：若已有有效 UID（纯数字）则跳过 WebView
+      const cachedUid: string = PreferenceUtil.getString('cx_uid');
+      if (cachedUid.length > 0 && /^\d+$/.test(cachedUid)) {
+        this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + cachedUid + '_80');
+        console.info(TAG, 'xgxt result: using cached uid=' + cachedUid);
+        this.xgxtCleanup();
+        return;
+      }
+
+      // 无缓存 → HTTP 走考勤 SSO 入口建超星 session → WebView 直连 i.chaoxing
+      // 关键：走 xdspoc.fanya.chaoxing.com（CAS 白名单内），不走 i.chaoxing.com（外域被拦截）
+      this.xgxtPhase = 2;
+      const attSvc: AttendanceService = AttendanceService.getInstance();
+      console.info(TAG, 'xgxt result: logging into chaoxing via xdspoc SSO...');
+      attSvc.loginToLearning().then(() => {
+        // 把 fanya/xdspoc 子域的 cookie 复制到超星主站域（i.chaoxing / passport2）
+        const http = HttpUtil.getInstance();
+        const srcDomains: string[] = ['fanya.chaoxing.com', 'xdspoc.fanya.chaoxing.com',
+          'fycourse.fanya.chaoxing.com', 'mobilelearn.chaoxing.com'];
+        const cxDomains: string[] = ['i.chaoxing.com', 'passport2.chaoxing.com', 'chaoxing.com'];
+        for (let si = 0; si < srcDomains.length; si++) {
+          for (let di = 0; di < cxDomains.length; di++) {
+            http.copyCookiesForDomain(srcDomains[si], cxDomains[di]);
+          }
+        }
+        // 同步所有 cookie 到 WebView（现在包含 i.chaoxing / passport2）
+        CasLoginService.getInstance().syncCookiesToWebView();
+        const cxUrl: string = 'https://i.chaoxing.com/base';
+        console.info(TAG, 'xgxt result: chaoxing session ready, nav=' + cxUrl);
+        this.xgxtController.loadUrl(cxUrl);
+      }).catch((err: Error) => {
+        console.error(TAG, 'xgxt result: loginToLearning failed: ' + err.message);
+        this.xgxtCleanup();
+      });
+      return;
     } catch (e) {
       console.error(TAG, 'xgxt parse error: ' + JSON.stringify(e));
+    }
+    this.xgxtCleanup();
+  }
+
+  // 阶段2: 注入 JS 提取超星 UID
+  private xgxtInjectChaoxing(): void {
+    const js: string =
+      '(function(){' +
+      '  var s=document.body.innerHTML;' +
+      '  var m=s.match(/photo\\.chaoxing\\.com\\/p\\/(\\d+)/);' +
+      '  if(m){console.log("CX_UID:"+m[1]);}else{console.log("CX_UID:none");}' +
+      '})();';
+    this.xgxtController.runJavaScript(js);
+    console.info(TAG, 'xgxtInjectChaoxing: JS injected');
+  }
+
+  // 处理提取到的超星 UID
+  private xgxtChaoxingResult(uid: string): void {
+    if (uid.length > 0 && uid !== 'none' && /^\d+$/.test(uid)) {
+      PreferenceUtil.putString('cx_uid', uid);
+      this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + uid + '_80');
+      console.info(TAG, 'xgxtChaoxingResult: saved uid=' + uid);
+    } else {
+      console.warn(TAG, 'xgxtChaoxingResult: no valid uid found, raw=' + uid);
     }
     this.xgxtCleanup();
   }
@@ -796,16 +892,10 @@ struct MainPage {
   // 清理 xgxt WebView 状态
   private xgxtCleanup(): void {
     clearTimeout(this.xgxtTimeoutId);
+    this.xgxtPhase = 0;
     this.xgxtActive = false;
     this.userRefreshing = false;
     console.info(TAG, 'xgxtCleanup: done');
-  }
-
-  // 同步 Cookie 后跳转 Portal WebView
-  private async navPortal(routeName: string): Promise<void> {
-    await CasLoginService.getInstance().syncCookiesToWebView();
-    await new Promise<void>((r) => setTimeout(r, 300));
-    this.pageInfo.pushPath({ name: routeName });
   }
 
   // ==================== 缓存管理 ====================
@@ -1447,7 +1537,7 @@ struct MainPage {
     } else if (name === 'FaqPage') {
       FaqPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Dianfei') {
-      PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , useWeChatUA: true , isTablet: this.isTablet })
+      PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Physics') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '物理计算', url: 'https://experiment-helper.wizzstudio.com/#/', isTablet: this.isTablet })
     } else if (name === 'AttendancePage') {
@@ -1551,9 +1641,12 @@ struct MainPage {
         .onPageEnd((event) => {
           if (event && event.url) {
             console.info(TAG, 'xgxt pageEnd: url=' + event.url.substring(0, 120));
-            if (event.url.indexOf('xgxt.xidian.edu.cn') >= 0) {
+            if (this.xgxtPhase === 1 && event.url.indexOf('xgxt.xidian.edu.cn') >= 0) {
               console.info(TAG, 'xgxt pageEnd: xgxt page loaded, injecting JS...');
               this.xgxtInjectFetch();
+            } else if (this.xgxtPhase === 2 && event.url.indexOf('i.chaoxing.com') >= 0) {
+              console.info(TAG, 'xgxt pageEnd: chaoxing page loaded, extracting uid...');
+              this.xgxtInjectChaoxing();
             }
           } else {
             console.info(TAG, 'xgxt pageEnd: no url in event');
@@ -1571,6 +1664,12 @@ struct MainPage {
             if (msg.indexOf('XGXT_ERR:') === 0) {
               console.warn(TAG, 'xgxt console: XGXT_ERR ' + msg.substring(10));
               this.xgxtCleanup();
+              return true;
+            }
+            if (msg.indexOf('CX_UID:') === 0) {
+              const uid: string = msg.substring(7).trim();
+              console.info(TAG, 'xgxt console: CX_UID=' + uid);
+              this.xgxtChaoxingResult(uid);
               return true;
             }
           }
@@ -1681,7 +1780,7 @@ struct MainPage {
             .backgroundColor(ThemeColors.bgInput)
             .onClick(() => { this.closePhyPwdDialog(); })
           Button('保存').layoutWeight(1).height(40).margin({ left: 12 })
-            .backgroundColor(this.accentColor).fontColor('#FFFFFF')
+            .backgroundColor(this.accentColor).fontColor(this.accentTextColor())
             .onClick(() => {
               if (this.phyPwdInput.length > 0) {
                 PreferenceUtil.putString('physics_pwd', this.phyPwdInput);
@@ -1791,7 +1890,7 @@ struct MainPage {
               }
             })
           Button('调色').height(34).fontSize(12)
-            .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(8).margin({ left: 6 })
+            .backgroundColor(this.accentColor).fontColor(this.accentTextColor()).borderRadius(8).margin({ left: 6 })
             .onClick(() => { this.showWheelPicker = true; animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.wheelOpacity = 1; this.wheelTranslate = 0; }); })
         }.width('100%').margin({ top: 8 })
         .padding({ top: 10 }).border({ width: { top: 1 }, color: '#E0E0E0', style: BorderStyle.Dashed })
@@ -1912,7 +2011,7 @@ struct MainPage {
                 setTimeout(() => { this.semesterToast = ''; }, 1200);
               })
             Button('保存').height(40).fontSize(14)
-              .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
+              .backgroundColor(this.accentColor).fontColor(this.accentTextColor()).borderRadius(10)
               .layoutWeight(1).margin({ left: 10 })
               .onClick(() => {
                 const code = this.pickSemYear + '-' + (this.pickSemYear + 1) + '-' + this.pickSemPart;
@@ -2041,7 +2140,7 @@ struct MainPage {
             .borderRadius(10)
             .onClick(() => { this.closeBgDialog(); })
           Button('保存').layoutWeight(1).height(40)
-            .backgroundColor(this.accentColor).fontColor('#FFFFFF')
+            .backgroundColor(this.accentColor).fontColor(this.accentTextColor())
             .borderRadius(10)
             .onClick(() => { this.saveBgSettings(); })
         }.width('100%')
@@ -2074,7 +2173,7 @@ struct MainPage {
               if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
             })
           Button('立即查看').layoutWeight(1).height(40)
-            .backgroundColor(this.accentColor).fontColor('#FFFFFF')
+            .backgroundColor(this.accentColor).fontColor(this.accentTextColor())
             .borderRadius(10)
             .onClick(() => {
               this.showUpdateDialog = false;
@@ -2123,6 +2222,15 @@ struct MainPage {
     const b = parseInt(hex.substring(4, 6), 16);
     const lum = (0.299 * r + 0.587 * g + 0.114 * b); // W3C 亮度公式
     return lum > 160 ? '#333333' : '#FFFFFF';
+  }
+
+  private accentBgIsLight(): boolean {
+    const hex = this.accentColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b);
+    return lum > 160;
   }
 
   // 根据当前选中的学年+学期+周次偏移计算开学日期预览
@@ -2206,8 +2314,8 @@ struct MainPage {
 
             // 日期标签
             Text(cell.day === this.getTodayDay() ? '今天' : '明天')
-              .fontSize(12).fontColor('#FFFFFF')
-              .backgroundColor(cell.day === this.getTodayDay() ? '#2979FF' : '#43A047')
+              .fontSize(12).fontColor(cell.day === this.getTodayDay() ? this.accentTextColor() : '#FFFFFF')
+              .backgroundColor(cell.day === this.getTodayDay() ? this.accentColor : '#43A047')
               .borderRadius(10)
               .padding({ left: 8, right: 8, top: 3, bottom: 3 })
           }
@@ -2329,24 +2437,29 @@ struct MainPage {
         Column() {
           Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
           if (this.loginStatus === 'ok') {
-            Text('已登录').fontSize(11).fontColor('#FF80CC80')
+            Text('已登录').fontSize(11).fontColor(this.accentBgIsLight() ? '#338A3E' : '#80CC80')
           } else if (this.loginStatus === 'expired') {
-            Text('登录已过期').fontSize(11).fontColor('#FFCC8080')
+            Text('登录已过期').fontSize(11).fontColor(this.accentBgIsLight() ? '#C62828' : '#CC8080')
           } else if (this.loginStatus === 'not_logged_in') {
-            Text('未登录').fontSize(11).fontColor('#FFFFFF88')
+            Text('未登录').fontSize(11).fontColor(this.accentTextColor() + 'CC')
           } else if (this.loginStatus === 'offline') {
-            Text('离线模式').fontSize(11).fontColor('#FFFFCC80')
+            Text('离线模式').fontSize(11).fontColor(this.accentBgIsLight() ? '#BF6A00' : '#FFCC80')
           } else if (this.loginStatus === 'checking') {
-            Text('正在验证...').fontSize(11).fontColor('#FFFFFF88')
+            Text('正在验证...').fontSize(11).fontColor(this.accentTextColor() + 'CC')
           }
         }
         Blank()
         if (this.loginStatus === 'ok') {
           Stack() {
             Circle().width(32).height(32).fill('#FFFFFF33')
-            Text('🎓').fontSize(18).fontColor('#FFFFFFCC')
+            if (this.userAvatarUrl) {
+              Image(this.userAvatarUrl).width(32).height(32).borderRadius(16).objectFit(ImageFit.Cover)
+            } else {
+              Text('🎓').fontSize(18).fontColor('#FFFFFFCC')
+            }
           }.width(32).height(32)
-          Text(this.username || '已登录').fontSize(13).fontColor('#FFFFFFCC').margin({ left: 8 })
+          Text(this.userDisplayName || this.username || '已登录').fontSize(13)
+            .fontColor(this.accentTextColor() + 'CC').margin({ left: 8 })
         } else {
           Button(this.loginStatus === 'expired' ? '重新登录' : '登录')
             .height(28).fontSize(12).fontColor('#FFFFFF')
@@ -2464,8 +2577,7 @@ struct MainPage {
         // 外部浏览器跳转
         ListItem() {
           this.MenuItemBuilder('💰', '水电缴费', '线上一键缴纳水电费用', '#E65100',
-            () => { this.pageInfo.clear();
-              this.pageInfo.pushPath({ name: 'PortalWeb_Dianfei' }); })
+            () => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'PortalWeb_Dianfei' }); })
         }
         ListItem() {
           this.MenuItemBuilder('💧', '订水系统', '再忙也不要忘记喝水呦！', '#0277BD',
