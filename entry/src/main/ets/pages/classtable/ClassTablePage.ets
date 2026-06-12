@@ -1006,10 +1006,20 @@ export struct ClassTablePage {
           // 自定义课程编辑/删除
           if (cell.isCustom) {
             Row({ space: 12 }) {
-              Button('编辑').layoutWeight(1).backgroundColor(ThemeColors.isDark ? '#1A3A5C' : '#E3F2FD').fontColor((AppStorage.get('accent_color') as string ?? '#2979FF'))
+              Button() {
+                Row({ space: 4 }) {
+                  Image($r('app.media.ic_public_edit')).width(16).height(16).fillColor((AppStorage.get('accent_color') as string ?? '#2979FF'))
+                  Text('编辑').fontSize(13).fontColor((AppStorage.get('accent_color') as string ?? '#2979FF'))
+                }
+              }.layoutWeight(1).height(40).backgroundColor(ThemeColors.isDark ? '#1A3A5C' : '#E3F2FD')
                 .borderRadius(8)
                 .onClick(() => { this.editCustomCourse(cell); })
-              Button('删除').layoutWeight(1).backgroundColor(ThemeColors.isDark ? '#3E1A1A' : '#FFEBEE').fontColor('#C62828')
+              Button() {
+                Row({ space: 4 }) {
+                  Image($r('app.media.ic_celiakeyboard_delete')).width(16).height(16).fillColor('#C62828')
+                  Text('删除').fontSize(13).fontColor('#C62828')
+                }
+              }.layoutWeight(1).height(40).backgroundColor(ThemeColors.isDark ? '#3E1A1A' : '#FFEBEE')
                 .borderRadius(8)
                 .onClick(() => { this.deleteCustomCourse(cell); })
             }
@@ -1038,7 +1048,7 @@ export struct ClassTablePage {
                 }, (cell: ClassCell, idx: number) => `conflict_${cell.name}_${idx}_${cell.startSection}`)
               }
               .width('100%')
-              .height(Math.min(400, this.currentConflictCells.length * 200))
+              .constraintSize({ maxHeight: 360 })
               .divider({ strokeWidth: 0.5, color: '#F0F0F0' })
             }
           }
@@ -1616,7 +1626,7 @@ export struct ClassTablePage {
 
   private changeWeek(targetWeek: number): void {
     if (targetWeek < 1 || targetWeek > this.maxWeek || targetWeek === this.currentWeek) return;
-    this.swiperController.changeIndex(targetWeek - 1, false);
+    this.swiperController.changeIndex(targetWeek - 1, true);
   }
 
   // Swiper 数据源更新

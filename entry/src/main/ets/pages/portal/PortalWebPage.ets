@@ -29,7 +29,7 @@ export struct PortalWebPage {
   @Prop isTablet: boolean = false;
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
-  private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+  private context!: common.UIAbilityContext;
 
   aboutToDisappear(): void {
     this.portalFullscreen = false;
@@ -37,6 +37,7 @@ export struct PortalWebPage {
 
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
+    this.context = getContext(this) as common.UIAbilityContext;
     console.info(TAG, 'aboutToAppear: url=' + this.url.substring(0, 80));
     if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
       const t0 = Date.now();

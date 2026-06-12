@@ -170,6 +170,23 @@ struct MainPage {
     } catch (_) { console.warn("MainPage", "ignored error"); }
     this.closeBgDialog();
   }
+
+  private checkPrivacyAgreement(): void {
+    if (PreferenceUtil.getBool('privacy_agreed')) return;
+    this.showPrivacyDialog = true;
+  }
+
+  private agreePrivacy(): void {
+    PreferenceUtil.putBool('privacy_agreed', true);
+    this.showPrivacyDialog = false;
+  }
+
+  private disagreePrivacy(): void {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      ctx.terminateSelf();
+    } catch (_) { /* 退出应用 */ }
+  }
   // 恢复默认
   resetBgSettings(): void {
     this.bgShow = false;
@@ -229,6 +246,10 @@ struct MainPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('accent_index') accentIdx: number = 0;
   private retryTimer: number = -1;
+  private lastForegroundCheck: number = 0;  // 前后台切换防抖
+
+  // ==================== 隐私协议弹窗（首次启动） ====================
+  @State showPrivacyDialog: boolean = false;
   @State showSemesterDialog: boolean = false;
   @State semOpacity: number = 0;
   @State semTranslate: number = 30;
@@ -286,14 +307,97 @@ struct MainPage {
   private readonly CAPTCHA_LIMIT: number = 240;
   private readonly CAPTCHA_THUMB: number = 42;
 
+  // ==================== 菜单排序 ====================
+  @State homeSortOn: boolean = false;
+  @State homeMenuOrder: string[] =
+    ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity'];
+  @State portalSortOn: boolean = false;
+  @State portalMenuOrder: string[] =
+    ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net'];
+
+  private homeMenuItemClick(name: string): void {
+    const names: Record<string, string> = {
+      'Score': 'ScorePage', 'Exam': 'ExamPage', 'Library': 'LibraryPage',
+      'SchoolNet': 'SchoolNetPage', 'EmptyClass': 'EmptyClassroomPage',
+      'SchoolCard': 'SchoolCardPage', 'Attendance': 'AttendancePage',
+      'Water': 'DormWaterPage', 'Experiment': 'ExperimentPage',
+      'Electricity': 'ElectricityPage'
+    };
+    const route = names[name];
+    if (route) { this.pageInfo.clear(); this.pageInfo.pushPath({ name: route }); }
+  }
+
+  private homeMenuMoveUp(idx: number): void {
+    if (idx <= 0) return;
+    const arr = [...this.homeMenuOrder];
+    const tmp = arr[idx - 1]; arr[idx - 1] = arr[idx]; arr[idx] = tmp;
+    this.homeMenuOrder = arr;
+    this.saveHomeMenuOrder();
+  }
+
+  private homeMenuMoveDown(idx: number): void {
+    if (idx >= this.homeMenuOrder.length - 1) return;
+    const arr = [...this.homeMenuOrder];
+    const tmp = arr[idx + 1]; arr[idx + 1] = arr[idx]; arr[idx] = tmp;
+    this.homeMenuOrder = arr;
+    this.saveHomeMenuOrder();
+  }
+
+  private saveHomeMenuOrder(): void {
+    PreferenceUtil.putString('home_menu_order', this.homeMenuOrder.join(','));
+  }
+
+  private loadHomeMenuOrder(): void {
+    const saved = PreferenceUtil.getString('home_menu_order');
+    if (saved.length > 0) {
+      const arr = saved.split(',');
+      if (arr.length === 10) { this.homeMenuOrder = arr; }
+    }
+  }
+
+  private portalMenuMoveUp(idx: number): void {
+    if (idx <= 0) return;
+    const arr = [...this.portalMenuOrder];
+    const tmp = arr[idx - 1]; arr[idx - 1] = arr[idx]; arr[idx] = tmp;
+    this.portalMenuOrder = arr;
+    this.savePortalMenuOrder();
+  }
+
+  private portalMenuMoveDown(idx: number): void {
+    if (idx >= this.portalMenuOrder.length - 1) return;
+    const arr = [...this.portalMenuOrder];
+    const tmp = arr[idx + 1]; arr[idx + 1] = arr[idx]; arr[idx] = tmp;
+    this.portalMenuOrder = arr;
+    this.savePortalMenuOrder();
+  }
+
+  private savePortalMenuOrder(): void {
+    PreferenceUtil.putString('portal_menu_order', this.portalMenuOrder.join(','));
+  }
+
+  private loadPortalMenuOrder(): void {
+    const saved = PreferenceUtil.getString('portal_menu_order');
+    if (saved.length > 0) {
+      const arr = saved.split(',');
+      if (arr.length === 9) { this.portalMenuOrder = arr; }
+    }
+  }
+
+
   private tabsController: HdsTabsController = new HdsTabsController();
   private warmupController: web_webview.WebviewController = new web_webview.WebviewController();
-  private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+  private context!: common.UIAbilityContext;
   // 应用级缓存目录（异步初始化，供 computeCacheSizeDirect 同步使用）
   private appCacheDir: string = '';
   private appCacheWebDir: string = '';
+  // 菜单排序
+  @State homeSortMode: boolean = false;
+  @State portalSortMode: boolean = false;
 
   aboutToAppear() {
+    this.context = getContext(this) as common.UIAbilityContext;
+    this.loadHomeMenuOrder();
+    this.loadPortalMenuOrder();
     // 卡片点击跳转
     try {
       this.getUIContext().getHostContext()?.eventHub.on('cardNavigate', (path: string) => {
@@ -331,6 +435,8 @@ struct MainPage {
     this.checkVersionUpdate();
     // 获取当前版本号用于 UI 显示
     VersionService.getCurrentVersion().then((v: string) => { this.currentVersion = v; });
+    // 首次启动隐私协议检查
+    this.checkPrivacyAgreement();
   }
 
   // 异步获取应用级缓存目录（WebView 缓存存在这里，不在 HAP 级目录）
@@ -369,6 +475,26 @@ struct MainPage {
   }
 
   aboutToDisappear() { this.stopRetryTimer(); }
+
+  // 从后台切回前台时刷新登录状态
+  onPageShow(): void {
+    const now = Date.now();
+    if (now - this.lastForegroundCheck < 30000) return; // 30s 防抖
+    this.lastForegroundCheck = now;
+    this.refreshSessionIfNeeded();
+  }
+
+  private async refreshSessionIfNeeded(): Promise<void> {
+    if (this.loginStatus !== 'ok') return;
+    try {
+      const cas = CasLoginService.getInstance();
+      const restored = await cas.tryAutoRestoreLogin();
+      if (!restored) {
+        console.info('MainPage', 'TGC expired after background, checking...');
+        this.checkLogin();
+      }
+    } catch (_) { /* TGC check failed, ignore */ }
+  }
 
   // 自动登录检测：TGC → 密码，简单直接
   // 网络失败不跳转不重试，过期不自动弹登录页，由用户手动触发
@@ -809,13 +935,16 @@ struct MainPage {
       const stype: string = String(data['XSLBDM_DISPLAY'] ?? '');
 
       // 持久化
-      if (name) PreferenceUtil.putString('user_name', name);
-      if (college) PreferenceUtil.putString('user_college', college);
-      if (major) PreferenceUtil.putString('user_major', major);
-      if (grade) PreferenceUtil.putString('user_grade', grade);
-      if (gender) PreferenceUtil.putString('user_gender', gender);
-      if (cls) PreferenceUtil.putString('user_class', cls);
-      if (dorm) PreferenceUtil.putString('user_dormitory', dorm);
+      Promise.all([
+        name ? PreferenceUtil.putString('user_name', name) : Promise.resolve(),
+        college ? PreferenceUtil.putString('user_college', college) : Promise.resolve(),
+        major ? PreferenceUtil.putString('user_major', major) : Promise.resolve(),
+        grade ? PreferenceUtil.putString('user_grade', grade) : Promise.resolve(),
+        gender ? PreferenceUtil.putString('user_gender', gender) : Promise.resolve(),
+        cls ? PreferenceUtil.putString('user_class', cls) : Promise.resolve(),
+        dorm ? PreferenceUtil.putString('user_dormitory', dorm) : Promise.resolve(),
+        stype ? PreferenceUtil.putString('user_student_type', stype) : Promise.resolve(),
+      ]).catch(() => {});
       if (stype) PreferenceUtil.putString('user_student_type', stype);
 
       console.info(TAG, 'xgxt result: OK name=' + name + ' college=' + college +
@@ -878,9 +1007,9 @@ struct MainPage {
   }
 
   // 处理提取到的超星 UID
-  private xgxtChaoxingResult(uid: string): void {
+  private async xgxtChaoxingResult(uid: string): Promise<void> {
     if (uid.length > 0 && uid !== 'none' && /^\d+$/.test(uid)) {
-      PreferenceUtil.putString('cx_uid', uid);
+      await PreferenceUtil.putString('cx_uid', uid);
       this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + uid + '_80');
       console.info(TAG, 'xgxtChaoxingResult: saved uid=' + uid);
     } else {
@@ -1783,7 +1912,7 @@ struct MainPage {
             .backgroundColor(this.accentColor).fontColor(this.accentTextColor())
             .onClick(() => {
               if (this.phyPwdInput.length > 0) {
-                PreferenceUtil.putString('physics_pwd', this.phyPwdInput);
+                PreferenceUtil.putString('physics_pwd', this.phyPwdInput).catch(() => {});
                 this.phyPwdStatus = '已设置';
                 this.closePhyPwdDialog();
               }
@@ -2210,6 +2339,35 @@ struct MainPage {
         .position({ x: '50%', y: '90%' }).markAnchor({ x: '50%' })
         .zIndex(10)
     }
+    // 隐私协议弹窗（首次启动）
+    if (this.showPrivacyDialog) {
+      Column() {
+        Column() {
+          Text('用户协议与隐私政策').fontSize(20).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary).margin({ bottom: 16 })
+          Text('欢迎使用 HiXD！在使用本应用前，请您仔细阅读并同意以下内容：')
+            .fontSize(14).fontColor(ThemeColors.textSecondary).lineHeight(22).margin({ bottom: 12 })
+          Text('1. 本应用需要您使用西安电子科技大学统一身份认证（学号+密码）登录，以获取您的课表、成绩、考试安排等教务信息。')
+            .fontSize(13).fontColor(ThemeColors.textSecondary).lineHeight(20).margin({ bottom: 6 })
+          Text('2. 您的学号和密码仅用于登录认证，不会上传至任何第三方服务器。')
+            .fontSize(13).fontColor(ThemeColors.textSecondary).lineHeight(20).margin({ bottom: 6 })
+          Text('3. 您可以随时在「我的」页面退出登录，清除所有本地数据。')
+            .fontSize(13).fontColor(ThemeColors.textSecondary).lineHeight(20).margin({ bottom: 16 })
+          Row({ space: 12 }) {
+            Button('不同意').layoutWeight(1).height(44).fontSize(15)
+              .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary).borderRadius(10)
+              .onClick(() => { this.disagreePrivacy(); })
+            Button('同意并继续').layoutWeight(2).height(44).fontSize(15)
+              .backgroundColor(this.accentColor).fontColor(this.accentTextColor()).borderRadius(10)
+              .onClick(() => { this.agreePrivacy(); })
+          }
+        }
+        .width('88%').padding(24).borderRadius(16).backgroundColor(ThemeColors.bgCard)
+        .shadow({ radius: 16, color: '#00000020' })
+      }
+      .width('100%').height('100%').justifyContent(FlexAlign.Center)
+      .backgroundColor('rgba(0,0,0,0.5)')
+      .zIndex(100)
+    }
     } // closes Stack
     .width('100%').height('100%')
   }
@@ -2485,59 +2643,27 @@ struct MainPage {
       // 功能菜单列表(始终显示)
       Column() {
         List({ space: 8 }) {
+          ForEach(this.homeMenuOrder, (name: string, idx: number) => {
+            ListItem() {
+              Row() {
+                if (this.homeSortOn) {
+                  Column({ space: 2 }) {
+                    Text('⬆').fontSize(14).onClick(() => { this.homeMenuMoveUp(idx); })
+                    Text('⬇').fontSize(14).onClick(() => { this.homeMenuMoveDown(idx); })
+                  }.width(28).alignItems(HorizontalAlign.Center).margin({ right: 4 })
+                }
+                this.HomeMenuItemByName(name)
+              }.width('100%')
+            }
+          }, (name: string) => name)
+
+          // 排序
           ListItem() {
-            this.MenuItemBuilder('📝', '成绩查询', '查看各科成绩和GPA', '#43A047',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'ScorePage' }); })
-          }
-          ListItem() {
-            this.MenuItemBuilder('📋', '考试安排', '查看考试时间地点', '#FB8C00',
-              () => {
-                this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'ExamPage' });
-              })
-          }
-          ListItem() {
-            this.MenuItemBuilder('📚', '图书馆', '搜索图书和借阅', '#8E24AA',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'LibraryPage' }); })
-          }
-          ListItem() {
-            this.MenuItemBuilder('🌐', '校园网', '查看校园网用量', '#00ACC1',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'SchoolNetPage' }); })
-          }
-          ListItem() {
-            this.MenuItemBuilder('🏫', '空闲教室', '查找空闲自习室', '#F4511E',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'EmptyClassroomPage' }); })
-          }
-          ListItem() {
-            this.MenuItemBuilder('💳', '校园卡', '查余额和消费记录', '#FF6D00',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'SchoolCardPage' }); })
-          }
-          ListItem() {
-            this.MenuItemBuilder('📋', '考勤查询', '查看课程签到和到课率', '#E91E63',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'AttendancePage' }); })
-          }
-          ListItem() {
-            this.MenuItemBuilder('🚰', '宿舍水机', '远程控制宿舍饮水机', '#00ACC1',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'DormWaterPage' }); })
-          }
-          if (!PreferenceUtil.getBool('role')) {
-          ListItem() {
-            this.MenuItemBuilder('🔬', '实验信息', '查看实验课程安排', '#5C6BC0',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'ExperimentPage' }); })
-          }
-          }
-          ListItem() {
-            this.MenuItemBuilder('\u26a1', '水电查询', '查看宿舍水费电费', '#FF6D00',
-              () => { this.pageInfo.clear();
-                this.pageInfo.pushPath({ name: 'ElectricityPage' }); })
+            Row() {
+              Blank()
+              Text(this.homeSortOn ? '完成' : '⇅ 排序').fontSize(13).fontColor(this.accentColor)
+            }.width('100%').padding({ right: 6, top: 4, bottom: 4 })
+            .onClick(() => { this.homeSortOn = !this.homeSortOn; })
           }
           ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 60 : 48)
         }
@@ -2574,42 +2700,28 @@ struct MainPage {
           .backgroundColor(ThemeColors.isDark ? '#1A2A3A' : '#FFF8E1')
           .borderRadius(8)
         }
-        // 外部浏览器跳转
+        // 功能列表
+        ForEach(this.portalMenuOrder, (name: string, idx: number) => {
+          ListItem() {
+            Row() {
+              if (this.portalSortOn) {
+                Column({ space: 2 }) {
+                  Text('⬆').fontSize(14).onClick(() => { this.portalMenuMoveUp(idx); })
+                  Text('⬇').fontSize(14).onClick(() => { this.portalMenuMoveDown(idx); })
+                }.width(28).alignItems(HorizontalAlign.Center).margin({ right: 4 })
+              }
+              this.PortalMenuItemByName(name)
+            }.width('100%')
+          }
+        }, (name: string) => name)
+
+        // 排序
         ListItem() {
-          this.MenuItemBuilder('💰', '水电缴费', '线上一键缴纳水电费用', '#E65100',
-            () => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'PortalWeb_Dianfei' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('💧', '订水系统', '再忙也不要忘记喝水呦！', '#0277BD',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Dingshui' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('🔧', '后勤报修', '足不出户提交报修', '#5D4037',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Baoxiu' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('🏢', '空间预约', '找一个可以集体讨论的地方', '#1565C0',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Space' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('📱', '移动门户', '校园服务一网打尽', '#00695C',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Portal' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('🧭', '睿思导航', '补充其他功能', '#4527A0',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Ruisi' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('🔬', '物理计算', '实验数据处理助手', '#00897B',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Physics' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('📧', '学生邮箱', '查看icoremail邮件', '#D32F2F',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Mail' }); })
-        }
-        ListItem() {
-          this.MenuItemBuilder('🌐', '校园网登录', '登录校园网自助服务平台', '#00ACC1',
-            () => { this.pageInfo.pushPath({ name: 'PortalWeb_Net' }); })
+          Row() {
+            Blank()
+            Text(this.portalSortOn ? '完成' : '⇅ 排序').fontSize(13).fontColor(this.accentColor)
+          }.width('100%').padding({ right: 6, top: 4, bottom: 4 })
+          .onClick(() => { this.portalSortOn = !this.portalSortOn; })
         }
         ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 60 : 48)
       }
@@ -2830,6 +2942,73 @@ struct MainPage {
   }
 
   // ==================== 通用菜单项 ====================
+  @Builder
+  HomeMenuItemByName(name: string) {
+    if (name === 'Score') {
+      this.MenuItemBuilder('📝', '成绩查询', '查看各科成绩和GPA', '#43A047',
+        () => { this.homeMenuItemClick('Score'); })
+    } else if (name === 'Exam') {
+      this.MenuItemBuilder('📋', '考试安排', '查看考试时间地点', '#FB8C00',
+        () => { this.homeMenuItemClick('Exam'); })
+    } else if (name === 'Library') {
+      this.MenuItemBuilder('📚', '图书馆', '搜索图书和借阅', '#8E24AA',
+        () => { this.homeMenuItemClick('Library'); })
+    } else if (name === 'SchoolNet') {
+      this.MenuItemBuilder('🌐', '校园网', '查看校园网用量', '#00ACC1',
+        () => { this.homeMenuItemClick('SchoolNet'); })
+    } else if (name === 'EmptyClass') {
+      this.MenuItemBuilder('🏫', '空闲教室', '查找空闲自习室', '#F4511E',
+        () => { this.homeMenuItemClick('EmptyClass'); })
+    } else if (name === 'SchoolCard') {
+      this.MenuItemBuilder('💳', '校园卡', '查余额和消费记录', '#FF6D00',
+        () => { this.homeMenuItemClick('SchoolCard'); })
+    } else if (name === 'Attendance') {
+      this.MenuItemBuilder('📋', '考勤查询', '查看课程签到和到课率', '#E91E63',
+        () => { this.homeMenuItemClick('Attendance'); })
+    } else if (name === 'Water') {
+      this.MenuItemBuilder('🚰', '宿舍水机', '远程控制宿舍饮水机', '#00ACC1',
+        () => { this.homeMenuItemClick('Water'); })
+    } else if (name === 'Experiment' && !PreferenceUtil.getBool('role')) {
+      this.MenuItemBuilder('🔬', '实验信息', '查看实验课程安排', '#5C6BC0',
+        () => { this.homeMenuItemClick('Experiment'); })
+    } else if (name === 'Electricity') {
+      this.MenuItemBuilder('\u26a1', '水电查询', '查看宿舍水费电费', '#FF6D00',
+        () => { this.homeMenuItemClick('Electricity'); })
+    }
+  }
+
+  @Builder
+  PortalMenuItemByName(name: string) {
+    if (name === 'Dianfei') {
+      this.MenuItemBuilder('💰', '水电缴费', '线上一键缴纳水电费用', '#E65100',
+        () => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'PortalWeb_Dianfei' }); })
+    } else if (name === 'Dingshui') {
+      this.MenuItemBuilder('💧', '订水系统', '再忙也不要忘记喝水呦！', '#0277BD',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Dingshui' }); })
+    } else if (name === 'Baoxiu') {
+      this.MenuItemBuilder('🔧', '后勤报修', '足不出户提交报修', '#5D4037',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Baoxiu' }); })
+    } else if (name === 'Space') {
+      this.MenuItemBuilder('🏢', '空间预约', '找一个可以集体讨论的地方', '#1565C0',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Space' }); })
+    } else if (name === 'Portal') {
+      this.MenuItemBuilder('📱', '移动门户', '校园服务一网打尽', '#00695C',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Portal' }); })
+    } else if (name === 'Ruisi') {
+      this.MenuItemBuilder('🧭', '睿思导航', '补充其他功能', '#4527A0',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Ruisi' }); })
+    } else if (name === 'Physics') {
+      this.MenuItemBuilder('🔬', '物理计算', '实验数据处理助手', '#00897B',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Physics' }); })
+    } else if (name === 'Mail') {
+      this.MenuItemBuilder('📧', '学生邮箱', '查看icoremail邮件', '#D32F2F',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Mail' }); })
+    } else if (name === 'Net') {
+      this.MenuItemBuilder('🌐', '校园网登录', '登录校园网自助服务平台', '#00ACC1',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_Net' }); })
+    }
+  }
+
   @Builder
   MenuItemBuilder(icon: string, title: string, desc: string, color: string, onClick: () => void) {
     Row() {

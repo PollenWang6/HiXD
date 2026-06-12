@@ -14,7 +14,9 @@ export class HttpResponse {
 
   get isOk(): boolean { return this.statusCode >= 200 && this.statusCode < 300; }
 
-  json<T>(): T { return JSON.parse(this.body) as T; }
+  json<T>(): T {
+    return JSON.parse(this.body) as T;
+  }
 }
 
 interface CookieEntry {

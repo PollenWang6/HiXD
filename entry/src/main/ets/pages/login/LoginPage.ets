@@ -62,8 +62,8 @@ struct LoginPage {
   async doLogin(): Promise<void> {
     if (this.username.length === 0) { this.statusText = '请输入学号'; return; }
     if (this.password.length === 0) { this.statusText = '请输入密码'; return; }
-    PreferenceUtil.putString('ids_account', this.username);
-    PreferenceUtil.putString('login_password', this.password);
+    await PreferenceUtil.putString('ids_account', this.username);
+    await PreferenceUtil.putString('login_password', this.password);
     this.statusText = '';
     this.captchaError = '';
     this.isSubmitting = true;
@@ -136,8 +136,8 @@ struct LoginPage {
       );
 
       if (success) {
-        PreferenceUtil.putString('ids_account', this.username);
-        PreferenceUtil.putString('login_password', this.password);
+        await PreferenceUtil.putString('ids_account', this.username);
+        await PreferenceUtil.putString('login_password', this.password);
         EhallService.getInstance().clearSessionCache();
         await PreferenceUtil.putBool('is_logged_in', true);
         await this.cas.syncCookiesToWebView();

@@ -72,11 +72,11 @@ export class CasLoginService {
     if (onProgress) {
       onProgress({ step: 'form', message: '获取登录页面...', percent: 5 });
     }
-    console.error(TAG, 'getLoginPageForm: requesting ' + this.LOGIN_PAGE);
+    console.info(TAG, 'getLoginPageForm: requesting ' + this.LOGIN_PAGE);
     const resp: HttpResponse = await this.http.getNoRedirect(
       this.LOGIN_PAGE + '?service=' + encodeURIComponent(this.SERVICE_URL)
     );
-    console.error(TAG, 'getLoginPageForm: status=' + resp.statusCode +
+    console.info(TAG, 'getLoginPageForm: status=' + resp.statusCode +
       ' isRedirect=' + resp.isRedirect + ' bodyLen=' + resp.body.length +
       ' location=' + (resp.location || 'none'));
 
@@ -85,7 +85,7 @@ export class CasLoginService {
     if (resp.isRedirect && resp.location) {
       // TGC 有效已跳转 → 跟进跳转拿到 MOD_AUTH_CAS
       const finalResp: HttpResponse = await this.http.getNoRedirect(resp.location);
-      console.error(TAG, 'getLoginPageForm: redirect follow status=' + finalResp.statusCode +
+      console.info(TAG, 'getLoginPageForm: redirect follow status=' + finalResp.statusCode +
         ' bodyLen=' + finalResp.body.length);
       body = finalResp.body;
     }
@@ -100,7 +100,7 @@ export class CasLoginService {
       // TGC 有效时 CAS 直接 302 到 service（如 ehall），不会返回登录页
       // ehall 首页 ~90KB，CAS 登录页 ~16KB
       if (body.length > 30000) {
-        console.error(TAG, 'getLoginPageForm: TGC auto-login detected (bodyLen=' +
+        console.info(TAG, 'getLoginPageForm: TGC auto-login detected (bodyLen=' +
           body.length + ')');
         // 跨域 Cookie 修复：getNoRedirect 按原始 URL（ids）域名存了 ehall 重定向响应的
         // MOD_AUTH_CAS，导致 checkEhallLogin() 找不到 → 反复跳转死循环。
@@ -150,7 +150,7 @@ export class CasLoginService {
         fields.lt = ltDirectMatch[1];
       }
     }
-    console.error(TAG, 'parseHiddenFields: lt=' + (fields.lt.length > 0 ? fields.lt.substring(0, 30) + '...' : '(empty/ok)') +
+    console.info(TAG, 'parseHiddenFields: lt=' + (fields.lt.length > 0 ? fields.lt.substring(0, 30) + '...' : '(empty/ok)') +
       ' execution=' + (fields.execution || 'MISSING') +
       ' salt=' + (fields.pwdEncryptSalt ? fields.pwdEncryptSalt.substring(0, 20) + '...' : 'MISSING') +
       ' bodyLen=' + html.length);
