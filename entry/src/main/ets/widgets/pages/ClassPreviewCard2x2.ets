@@ -246,7 +246,7 @@ struct ClassPreviewCard2x2 {
     }
     .width('100%').height('100%')
     .padding({ top: 6, left: 8, right: 8, bottom: 4 })
-    .backgroundColor($r('sys.color.ohos_id_color_background'))
+    .backgroundColor(Color.Transparent)
     .borderRadius(16)
     .onClick(() => {
       postCardAction(this, {

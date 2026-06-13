@@ -11,6 +11,8 @@ const EXTERNAL_SCHEMES: string[] = ['weixin://', 'alipays://', 'wechat://'];
 
 // 伪装微信浏览器 UA，绕过移动门户的微信限制
 const WE_CHAT_UA: string = 'Mozilla/5.0 (Linux; Android 12; HarmonyOS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36 MicroMessenger/8.0.50';
+// 通用 Android Chrome UA，绕过 OpenResty 对 ArkWeb 指纹的 404（libspace/ignypt）
+const MOBILE_CHROME_UA: string = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.196 Mobile Safari/537.36';
 
 @Component
 export struct PortalWebPage {
@@ -39,13 +41,21 @@ export struct PortalWebPage {
   async aboutToAppear(): Promise<void> {
     this.context = getContext(this) as common.UIAbilityContext;
     console.info(TAG, 'aboutToAppear: url=' + this.url.substring(0, 80));
-    if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
+    if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('ignypt') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
       const t0 = Date.now();
       const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
       console.info(TAG, 'checkAndAutoLogin: result=' + loginOk + ' cost=' + (Date.now() - t0) + 'ms');
-      // 等待 cookie 同步完成（内部先续 TGC 再写 WebView）
       await CasLoginService.getInstance().syncCookiesToWebView();
       console.info(TAG, 'syncCookies done, ready to load WebView');
+    } else if (this.url.includes('libspace') || this.url.includes('ignypt')) {
+      // libspace/ignypt 对 session cookie 敏感，只同步 CASTGC
+      console.info(TAG, 'libspace/ignypt: clear stale cookies + sync CASTGC only');
+      CasLoginService.getInstance().clearWebViewCookiesForDomain(
+        this.url.includes('libspace') ? 'libspace.xidian.edu.cn' : 'ignypt.xidian.edu.cn'
+      );
+      await CasLoginService.getInstance().checkAndAutoLogin();
+      await CasLoginService.getInstance().syncCasCookieOnly();
+      console.info(TAG, 'syncCasCookieOnly done');
     } else {
       console.info(TAG, 'syncCookies skip (non-CAS domain)');
     }
@@ -65,6 +75,9 @@ export struct PortalWebPage {
                 console.info(TAG, 'onControllerAttached: webUrl loaded');
                 if (this.useWeChatUA) {
                   this.webController.setCustomUserAgent(WE_CHAT_UA);
+                } else if (this.url.includes('libspace') || this.url.includes('ignypt')) {
+                  this.webController.setCustomUserAgent(MOBILE_CHROME_UA);
+                  console.info(TAG, 'onControllerAttached: set Mobile Chrome UA for ' + this.url.substring(0, 40));
                 }
               })
               .onSslErrorEventReceive((event) => {

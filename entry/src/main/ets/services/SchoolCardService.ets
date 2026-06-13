@@ -33,6 +33,13 @@ export class SchoolCardService {
 
   // ===== openid 管理 =====
 
+  /** 由外部（WebView OAuth）注入 openid，绕开 NETSTACK 跨域重定向限制 */
+  setOpenId(oid: string): void {
+    this.openid = oid;
+    this.openidFetchedAt = Date.now();
+    console.info(TAG, 'setOpenId: injected from WebView, len=' + oid.length);
+  }
+
   private isOpenIdValid(): boolean {
     if (this.openid.length === 0) return false;
     if (this.openidFetchedAt === 0) return false;
@@ -42,8 +49,7 @@ export class SchoolCardService {
 
   /**
    * 获取校园卡 openid。
-   * 流程：GET /home/openXDOAuth2Page → IDS OAuth2 重定向链 → 最终页面解析隐藏input
-   * 利用 ehall 同源 CAS cookie (MOD_AUTH_CAS) 走通重定向链
+   * 手动跟随 OAuth2 重定向链（同 Flutter 做法），确保每步携带对应域名的 Cookie
    */
   async ensureOpenId(forceRefresh: boolean = false): Promise<string> {
     if (!forceRefresh && this.isOpenIdValid()) {
@@ -53,17 +59,20 @@ export class SchoolCardService {
     this.openid = '';
     this.openidFetchedAt = 0;
 
-    // 用普通 GET 让 NETSTACK 自动跟随 IDS OAuth2 重定向链
+    // NETSTACK 自动跟随重定向时只带原始域名的 cookie。
+    // v8scan→ids CAS→v8scan 链中需 ids 的 CASTGC，提前拷贝过去。
+    this.http.copyCookiesForDomain('ids.xidian.edu.cn', 'v8scan.xidian.edu.cn');
+    this.http.copyCookiesForDomain('.ehall.xidian.edu.cn', 'v8scan.xidian.edu.cn');
+
     const startUrl = BASE_URL + '/home/openXDOAuth2Page';
-    console.info(TAG, 'ensureOpenId: start GET ' + startUrl);
+    console.info(TAG, 'ensureOpenId: start ' + startUrl);
 
-    const resp = await this.http.get(startUrl);
-    const html = resp.body || '';
-    console.info(TAG, 'ensureOpenId: status=' + resp.statusCode + ' page len=' + html.length);
-    // 调试：打印HTML前1000字符
-    console.info(TAG, 'ensureOpenId: HTML preview: ' + html.substring(0, 1000));
+    const finalResp = await this.followRedirects(startUrl, 8);
+    const html = finalResp.body || '';
+    console.info(TAG, 'ensureOpenId: status=' + finalResp.statusCode + ' page len=' + html.length);
+    console.info(TAG, 'ensureOpenId: HTML preview: ' + html.substring(0, 500));
 
-    // 解析 <input id="openid" type="hidden" value="xxx">
+    // 解析 openid
     const match = html.match(/id="openid"[^>]*type="hidden"[^>]*value="([^"]*)"/) ||
                   html.match(/type="hidden"[^>]*id="openid"[^>]*value="([^"]*)"/) ||
                   html.match(/name="openid"[^>]*type="hidden"[^>]*value="([^"]*)"/);
@@ -85,7 +94,13 @@ export class SchoolCardService {
     try {
       return await action(oid);
     } catch (e) {
-      console.info(TAG, 'withOpenIdRetry: first attempt failed, refreshing openid');
+      console.warn(TAG, 'withOpenIdRetry: first attempt failed: ' + String(e));
+      // WebView 注入的 openid 还在有效期内，直接重试同一 openid，
+      // 不要回退到 HTTP ensureOpenId（会触发 NETSTACK 跨域 cookie 死胡同）
+      if (this.isOpenIdValid()) {
+        console.info(TAG, 'withOpenIdRetry: retry with same WebView openid');
+        return await action(this.openid);
+      }
       const oid2 = await this.ensureOpenId(true);
       return await action(oid2);
     }
@@ -137,7 +152,7 @@ export class SchoolCardService {
     return moneyMatch ? moneyMatch[1] : '';
   }
 
-  // ===== 消费记录查询 =====
+  // ===== 余额查询 =====
 
   /**
    * 查询消费记录。
@@ -208,5 +223,33 @@ export class SchoolCardService {
       currentUrl = location;
     }
     throw new Error('校园卡重定向链过长(>' + maxSteps + '步)');
+  }
+
+  // ===== 付款码 =====
+
+  /**
+   * 获取付款二维码（base64 PNG）。
+   * 参照 Flutter getQRCode() 实现
+   */
+  async getQRCodeBase64(): Promise<string> {
+    return this.withOpenIdRetry(async (openid: string) => {
+      const homeUrl = BASE_URL + '/home/openHomePage?openid=' + openid;
+      const homeResp = await this.http.get(homeUrl);
+      const homeHtml = homeResp.body || '';
+      const aMatch = homeHtml.match(/\/virtualcard\/openVirtualcard[^"]*id=([^"&]+)/);
+      const cardId = aMatch ? aMatch[1] : '';
+      if (!cardId) throw new Error('虚拟卡 id 未找到');
+
+      const qrUrl = BASE_URL + '/virtualcard/openVirtualcard?openid=' + openid +
+        '&displayflag=1&id=' + cardId;
+      const qrResp = await this.http.get(qrUrl);
+      const qrHtml = qrResp.body || '';
+      const imgMatch = qrHtml.match(/id="qrcode"[^>]*src="(data:image\/png;base64,[^"]+)"/);
+      if (!imgMatch) throw new Error('付款码图片未找到');
+      let base64 = imgMatch[1];
+      base64 = base64.replace('data:image/png;base64,', '').replace(/\n/g, '');
+      console.info(TAG, 'getQRCodeBase64: got base64 len=' + base64.length);
+      return base64;
+    });
   }
 }

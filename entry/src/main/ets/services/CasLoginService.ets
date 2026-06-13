@@ -496,10 +496,43 @@ export class CasLoginService {
     return null;
   }
 
+  // 清除 WebView 指定域名下的所有 cookie（用 max-age=0 使其过期）
+  public clearWebViewCookiesForDomain(domain: string): void {
+    const urls = ['https://' + domain, 'http://' + domain];
+    for (const u of urls) {
+      const old: string = web_webview.WebCookieManager.fetchCookieSync(u);
+      console.error('CasLoginService', 'clearWebViewCookiesForDomain: domain=' + domain + ' url=' + u + ' old_len=' + old.length + ' old_cookies=' + old.substring(0, 200));
+      if (old.length === 0) continue;
+      const oldNames: string[] = [];
+      for (const kv of old.split('; ')) {
+        const eq: number = kv.indexOf('=');
+        if (eq > 0) oldNames.push(kv.substring(0, eq).trim());
+      }
+      console.error('CasLoginService', 'clearWebViewCookiesForDomain: clearing ' + oldNames.length + ' cookies for ' + domain);
+      for (const name of oldNames) {
+        try {
+          web_webview.WebCookieManager.setCookie(u, name + '=; Domain=.xidian.edu.cn; Path=/; max-age=0');
+        } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
   // Sync cookies to WebView CookieJar，覆盖所有 *.xidian.edu.cn 子域名
   async syncCookiesToWebView(): Promise<void> {
     const WCM = web_webview.WebCookieManager;
-    // 收集所有子域名的 cookie（warmUpWebViewSession 会在 xxcapp/order 下种 session）
+    const domains: string[] = [
+      'ids.xidian.edu.cn',
+      'ehall.xidian.edu.cn',
+      'xxcapp.xidian.edu.cn',  // 移动门户、水电缴费
+      'order.xidian.edu.cn',   // 订水系统
+      'sysj.xidian.edu.cn',    // 实验系统
+      // ignypt / libspace 对多域 cookie 敏感，不在此处同步，由 PortalWebPage 单独处理
+    ];
+    // 先清除每个目标域的旧 cookie（避免残留脏 cookie 触发 OpenResty 路由异常）
+    for (const domain of domains) {
+      this.clearWebViewCookiesForDomain(domain);
+    }
+    // 收集所有子域名的 cookie
     const sourceDomains: string[] = [
       'ids.xidian.edu.cn',
       'ehall.xidian.edu.cn',
@@ -517,17 +550,12 @@ export class CasLoginService {
       }
     }
     // 写 cookie 到所有可能用到的子域名
-    const hasTGC = allCookies.filter(c => c.toUpperCase().includes('TGC') || c.toUpperCase().includes('CASTGC')).length > 0;
+    const tgcCookies = allCookies.filter(c => c.toUpperCase().includes('TGC') || c.toUpperCase().includes('CASTGC'));
+    const hasTGC = tgcCookies.length > 0;
     console.info(TAG, 'syncCookiesToWebView: cookie count=' + allCookies.length + ' hasTGC=' + hasTGC);
-    const domains: string[] = [
-      'ids.xidian.edu.cn',
-      'ehall.xidian.edu.cn',
-      'xxcapp.xidian.edu.cn',  // 移动门户、水电缴费
-      'order.xidian.edu.cn',   // 订水系统
-      'ignypt.xidian.edu.cn',  // 水电缴费重定向
-      'sysj.xidian.edu.cn',    // 实验系统
-      'libspace.xidian.edu.cn', // 空间预约
-    ];
+    for (const t of tgcCookies) {
+      console.info(TAG, 'syncCookiesToWebView: TGC=' + t.substring(0, 80));
+    }
     for (const domain of domains) {
       for (const kv of allCookies) {
         try {
@@ -553,21 +581,27 @@ export class CasLoginService {
       console.warn(TAG, "syncCasCookieOnly: no ids cookies to sync");
       return;
     }
-    const cookies: string[] = [];
+    // 只提取 CASTGC，滤掉 route/JSESSIONID 等可能干扰目标域 OpenResty 的 cookie
+    const castgcOnly: string[] = [];
     for (const kv of idsCookies.split("; ")) {
       const t = kv.trim();
-      if (t.length > 0) cookies.push(t);
+      if (t.length > 0 && t.toUpperCase().startsWith("CASTGC=")) {
+        castgcOnly.push(t);
+      }
     }
-    const hasCASTGC = cookies.filter(c => c.toUpperCase().includes("CASTGC")).length > 0;
-    console.info(TAG, "syncCasCookieOnly: " + cookies.length + " ids cookies, hasCASTGC=" + hasCASTGC);
-    // Write ONLY to ids.xidian.edu.cn — same domain CAS server writes to.
+    if (castgcOnly.length === 0) {
+      console.warn(TAG, "syncCasCookieOnly: no CASTGC found in ids cookies");
+      return;
+    }
+    console.info(TAG, "syncCasCookieOnly: syncing CASTGC only (filtered " + castgcOnly.length + " from " + idsCookies.split("; ").length + " ids cookies)");
+    // Write ONLY CASTGC to ids.xidian.edu.cn
     // Domain=.xidian.edu.cn ensures Chromium auto-forwards to all subdomains.
-    for (const kv of cookies) {
+    for (const kv of castgcOnly) {
       try {
         WCM.setCookie("https://ids.xidian.edu.cn", kv + "; Domain=.xidian.edu.cn; Path=/");
       } catch (e) { /* ignore */ }
     }
-    console.info(TAG, "syncCasCookieOnly: done, synced to ids.xidian.edu.cn only");
+    console.info(TAG, "syncCasCookieOnly: done, synced CASTGC to ids.xidian.edu.cn only");
 
   }
   // For ignypt/libspace: pre-walk the OAuth/redirect chain via HttpUtil
@@ -618,9 +652,17 @@ export class CasLoginService {
       } catch (e2) {
         console.warn(TAG, "warmUpWebViewSession: xxcapp warm failed: " + String(e2));
       }
+      // Step 3: warm v8scan OAuth (校园卡) — 通过 xxcapp 的 CAS bridge
+      const t3 = Date.now();
+      try {
+        await this.http.get("https://xxcapp.xidian.edu.cn/a_xidian/api/cas-login/index?redirect=https%3A%2F%2Fxxcapp.xidian.edu.cn%2Fuc%2Fapi%2Foauth%2Findex%3Fredirect%3Dhttps%253A%252F%252Fv8scan.xidian.edu.cn%252Fhome%252FopenHomePage%26appid%3D200200923164459783");
+        console.info(TAG, "warmUpWebViewSession: v8scan warm done, cost=" + (Date.now() - t3) + "ms");
+      } catch (e3) {
+        console.warn(TAG, "warmUpWebViewSession: v8scan warm failed: " + String(e3));
+      }
       await this.http.saveCookies();
       // Diagnostic: log cookie sizes per domain
-      const srcs = ["ids.xidian.edu.cn", "ehall.xidian.edu.cn", "xxcapp.xidian.edu.cn", "order.xidian.edu.cn", "ignypt.xidian.edu.cn"];
+      const srcs = ["ids.xidian.edu.cn", "ehall.xidian.edu.cn", "xxcapp.xidian.edu.cn", "order.xidian.edu.cn", "ignypt.xidian.edu.cn", "v8scan.xidian.edu.cn"];
       let diag = "";
       for (const d of srcs) {
         const ck = this.http.getAllCookies(d);
