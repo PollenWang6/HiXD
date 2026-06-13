@@ -2343,7 +2343,22 @@ struct MainPage {
       Column() {
         Text('🎉 发现新版本').fontSize(18).fontWeight(FontWeight.Bold)
           .fontColor(ThemeColors.textPrimary).margin({ bottom: 8 })
-        Text('最新版本：v' + this.updateInfo.version).fontSize(14).fontColor(ThemeColors.textSecondary).margin({ bottom: 16 })
+        Text('最新版本：v' + this.updateInfo.version).fontSize(14).fontColor(ThemeColors.textSecondary).margin({ bottom: 4 })
+        // 更新日志
+        if (this.updateInfo.changelog && this.updateInfo.changelog.length > 0) {
+          Column() {
+            Text('更新内容').fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+              .width('100%').margin({ bottom: 6 })
+            ForEach(this.updateInfo.changelog, (line: string) => {
+              Text('• ' + line).fontSize(12).fontColor(ThemeColors.textSecondary).lineHeight(20)
+                .width('100%')
+            }, (line: string, __: number) => line)
+          }
+          .width('100%').alignItems(HorizontalAlign.Start)
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .backgroundColor(ThemeColors.bgInput).borderRadius(8)
+          .margin({ bottom: 16 })
+        }
         Row({ space: 10 }) {
           Button('稍后再说').layoutWeight(1).height(40)
             .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary)

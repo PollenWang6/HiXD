@@ -10,6 +10,7 @@ const VERSION_JSON_URL = 'https://raw.githubusercontent.com/PollenWang6/HiXD/mai
 export interface VersionInfo {
   version: string;
   url: string;
+  changelog: string[];
 }
 
 export class VersionService {
@@ -38,9 +39,11 @@ export class VersionService {
         const text: string = typeof resp.result === 'string' ? resp.result : '';
         if (text.length > 0) {
           const obj: Record<string, Object> = JSON.parse(text) as Record<string, Object>;
+          const cl: string[] = (obj['changelog'] as string[]) || [];
           return {
             version: String(obj['version'] ?? ''),
-            url: String(obj['url'] ?? '')
+            url: String(obj['url'] ?? ''),
+            changelog: cl
           };
         }
       }
