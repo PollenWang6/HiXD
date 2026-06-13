@@ -15,13 +15,6 @@
       }
     ],
     "buildModeSet": [
-      {
-        "name": "debug",
-      },
-      {
-        "name": "release"
-      }
-    ]
   },
   "modules": [
     {

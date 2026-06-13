@@ -2,7 +2,9 @@
 import { ThemeColors } from '../../utils/ThemeColors';
 import { VersionService } from '../../services/VersionService';
 import { VersionInfo } from '../../services/VersionService';
+import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 
 @Component
 export struct AboutPage {
@@ -13,6 +15,10 @@ export struct AboutPage {
   @State currentVersion: string = '';
   @State hasUpdate: boolean = false;
   @State checkingUpdate: boolean = false;
+  @State showUpdateDialog: boolean = false;
+  @State updateInfo: VersionInfo | null = null;
+  @State skipVersion: string = '';
+  private context = getContext(this) as common.UIAbilityContext;
 
   aboutToAppear(): void {
     VersionService.getCurrentVersion().then((v: string) => { this.currentVersion = v; });
@@ -26,8 +32,18 @@ export struct AboutPage {
     this.checkingUpdate = true;
     try {
       const info = await VersionService.checkForUpdate();
-      if (info) { this.hasUpdate = true; }
-      promptAction.showToast({ message: info ? '发现新版本 v' + info.version : '当前已是最新版本' });
+      if (info) {
+        this.hasUpdate = true;
+        this.updateInfo = info;
+        const skipped = PreferenceUtil.getString('skip_version');
+        if (skipped !== info.version) {
+          this.showUpdateDialog = true;
+        } else {
+          promptAction.showToast({ message: '当前已是最新版本' });
+        }
+      } else {
+        promptAction.showToast({ message: '当前已是最新版本' });
+      }
     } catch (_) {
       promptAction.showToast({ message: '检查失败，请检查网络' });
     }
@@ -81,6 +97,66 @@ export struct AboutPage {
         .padding({ bottom: 30 })
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+
+      // 版本更新弹窗
+      if (this.showUpdateDialog && this.updateInfo) {
+        Column() {
+          Column() {
+            Text('🎉 发现新版本').fontSize(18).fontWeight(FontWeight.Bold)
+              .fontColor(ThemeColors.textPrimary).margin({ bottom: 8 })
+            Text('最新版本：v' + this.updateInfo.version).fontSize(14)
+              .fontColor(ThemeColors.textSecondary).margin({ bottom: 4 })
+            if (this.updateInfo.changelog && this.updateInfo.changelog.length > 0) {
+              Column() {
+                Text('更新内容').fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                  .width('100%').margin({ bottom: 6 })
+                ForEach(this.updateInfo.changelog, (line: string) => {
+                  Text('• ' + line).fontSize(12).fontColor(ThemeColors.textSecondary).lineHeight(20)
+                    .width('100%')
+                }, (line: string) => line)
+              }
+              .width('100%').alignItems(HorizontalAlign.Start)
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .backgroundColor(ThemeColors.bgInput).borderRadius(8)
+              .margin({ bottom: 16 })
+            }
+            Row({ space: 10 }) {
+              Button('稍后再说').layoutWeight(1).height(40)
+                .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary)
+                .borderRadius(10)
+                .onClick(() => {
+                  this.showUpdateDialog = false;
+                  if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
+                })
+              Button('立即查看').layoutWeight(1).height(40)
+                .backgroundColor(this.accentColor).fontColor('#FFFFFF')
+                .borderRadius(10)
+                .onClick(() => {
+                  this.showUpdateDialog = false;
+                  if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
+                  if (this.updateInfo) {
+                    try { this.context.openLink(this.updateInfo.url); } catch (_) {
+                      console.warn("AboutPage", "openLink failed");
+                    }
+                  }
+                })
+            }.width('100%')
+            Row() {
+              Checkbox({ name: 'skip_' + (this.updateInfo?.version ?? ''), group: 'about_update_skip' })
+                .selectedColor(this.accentColor)
+                .width(16).height(16)
+                .onChange((value: boolean) => { this.skipVersion = value ? (this.updateInfo?.version ?? '') : ''; })
+              Text('此版本不再提示').fontSize(12).fontColor(ThemeColors.textHint).margin({ left: 6 })
+            }.margin({ top: 12 })
+          }
+          .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+          .shadow({ radius: 20, color: '#30000000' })
+        }
+        .width('100%').height('100%')
+        .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+        .backgroundColor(ThemeColors.overlay)
+        .onClick(() => { this.showUpdateDialog = false; })
+      }
     }
     .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])

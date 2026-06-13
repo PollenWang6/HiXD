@@ -425,7 +425,9 @@ export class EhallService {
   async getSemesterInfoYjspt(): Promise<string> {
     const cas = CasLoginService.getInstance();
     const http = HttpUtil.getInstance();
-    await cas.navigateToYjspt('https://yjspt.xidian.edu.cn/');
+    // 先走 portal 页面建立完整 session（处理 CAS OAuth 重定向链）
+    await cas.navigateToYjspt(
+      'https://yjspt.xidian.edu.cn/gsapp/sys/yjsemaphome/portal/index.do');
     const emptyBody: Object = new Object();
     const resp: HttpResponse = await http.post(
       'https://yjspt.xidian.edu.cn/gsapp/sys/yjsemaphome/modules/pubWork/getUserInfo.do',

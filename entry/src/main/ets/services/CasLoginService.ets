@@ -704,13 +704,29 @@ export class CasLoginService {
 
   // ========== 研究生 (yjspt) API ==========
 
-  // 走 CAS OAuth 链建立 yjspt session cookie，后续 API 调用复用此 session
+  // 走 CAS OAuth 链建立 yjspt session，自动跟随重定向直到拿到最终页面
   async navigateToYjspt(targetUrl: string): Promise<void> {
     console.info(TAG, 'navigateToYjspt: ' + targetUrl.substring(0, 60));
     try {
-      await this.http.get(targetUrl);
+      let currentUrl = targetUrl;
+      for (let hop = 0; hop < 8; hop++) {
+        const resp = await this.http.getNoRedirect(currentUrl);
+        if (!resp.isRedirect || !resp.location) {
+          // 已到达最终页面
+          await this.http.saveCookies();
+          console.info(TAG, 'navigateToYjspt: done at hop=' + hop + ' status=' + resp.statusCode);
+          return;
+        }
+        let next = resp.location;
+        if (next.startsWith('/')) {
+          const idx = currentUrl.indexOf('/', 8);
+          const base = idx > 0 ? currentUrl.substring(0, idx) : 'https://yjspt.xidian.edu.cn';
+          next = base + next;
+        }
+        currentUrl = next;
+      }
       await this.http.saveCookies();
-      console.info(TAG, 'navigateToYjspt: done');
+      console.info(TAG, 'navigateToYjspt: done (max hops)');
     } catch (e) {
       console.warn(TAG, 'navigateToYjspt: ' + String(e));
     }
@@ -720,14 +736,15 @@ export class CasLoginService {
   async checkWhetherPostgraduate(): Promise<void> {
     console.info(TAG, 'checkWhetherPostgraduate: start');
     try {
-      await this.navigateToYjspt('https://yjspt.xidian.edu.cn/');
+      await this.navigateToYjspt(
+        'https://yjspt.xidian.edu.cn/gsapp/sys/yjsemaphome/portal/index.do');
       const resp: HttpResponse = await this.http.post(
-        'https://yjspt.xidian.edu.cn/gsapp/sys/yjsemaphome/modules/pubWork/getUserInfo.do',
+        'https://yjspt.xidian.edu.cn/gsapp/sys/yjsemaphome/modules/pubWork/getCanVisitAppList.do',
         new Object()
       );
       if (resp.statusCode === 200 && resp.body.length > 200) {
         const data: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
-        if (data['code'] === '0' && data['data']) {
+        if (data['res'] !== null && data['res'] !== undefined) {
           PreferenceUtil.putBool('role', true);
           console.info(TAG, 'checkWhetherPostgraduate: role=postgraduate');
           return;
