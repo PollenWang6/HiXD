@@ -1,6 +1,7 @@
 // ClassTablePage.ets — 支持点击查看所有冲突课程版（已修复重叠课程覆盖问题）
 import { ThemeColors } from '../../utils/ThemeColors';
 import { EhallService, SemesterUtil, ClassItemModel, ExamItemModel } from '../../services/EhallService';
+import { ExperimentService } from '../../services/ExperimentService';
 import { ClassService } from '../../services/ClassService';
 import { UnscheduledCourse, ClassChange } from '../../services/Models';
 import { ExamService } from '../../services/ExamService';
@@ -445,7 +446,7 @@ export struct ClassTablePage {
         this.syncProgress = '正在同步实验数据...';
         let expCount = 0;
         try {
-          expCount = await this.ehall.preloadOtherExperimentsDirect();
+          expCount = await ExperimentService.getInstance().preloadDirect();
           if (expCount > 0) { this.mergeExperimentDataIntoGrid(); this.buildCellCache(); }
         } catch (_e) { /* ignore */ }
         try { await this.mergePhysicsExperiments(); } catch (_e) { /* ignore */ }

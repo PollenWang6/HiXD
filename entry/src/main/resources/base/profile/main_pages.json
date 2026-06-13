@@ -2,7 +2,6 @@
   "src": [
     "pages/Index",
     "pages/MainPage",
-    "pages/login/LoginPage",
-    "pages/schoolnet/SchoolNetLoginPage"
+    "pages/login/LoginPage"
   ]
 }

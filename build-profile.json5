@@ -1,24 +1,8 @@
 {
   "app": {
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001BCA594C7F0893A1A6B9EB53E1F5DBCF4961BA35A1DE37978DAB55FCA5F88752E37774182AF176F6",
-          "profile": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.p12",
-          "storePassword": "0000001BA8735F17AC97372456ED8A53B090D928CD03AC43E2112172CD29786795501871D9639A998ADFEE"
-        }
-      }
-    ],
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
         "targetSdkVersion": "6.0.2(22)",
         "compatibleSdkVersion": "6.0.2(22)",
         "runtimeOS": "HarmonyOS",

@@ -222,7 +222,7 @@ struct MainPage {
   @State userGrade: string = '';        // 年级
   @State userGender: string = '';       // 性别
   @State userRefreshing: boolean = false; // 用户信息刷新中
-  @State cardBalance: string = ''; // 校园卡余额显示（空字符串=未加载, '...'=加载中, '--'=失败）
+  @StorageLink('card_balance') cardBalance: string = ''; // 校园卡余额（由 SchoolCardPage WebView 写入 AppStorage）
   @State homeRefreshing: boolean = false;  // 主页下拉刷新
   @State userDormitory: string = '';   // 宿舍
   @State userStudentType: string = ''; // 学生类别
@@ -457,8 +457,11 @@ struct MainPage {
     this.checkPrivacyAgreement();
     // 从缓存加载用户信息（登录前也能显示名字和头像）
     this.loadCachedUserInfo();
-    // 后台获取校园卡余额（不阻塞 UI）
-    setTimeout(() => { this.fetchCardBalance(); }, 3000);
+    // 从 PreferenceUtil 读上次缓存余额（由 SchoolCardPage 写入）
+    const cachedBal: string = PreferenceUtil.getString('card_balance_cached', '');
+    if (cachedBal.length > 0) {
+      AppStorage.setOrCreate('card_balance', cachedBal);
+    }
   }
 
   // 异步获取应用级缓存目录（WebView 缓存存在这里，不在 HAP 级目录）
@@ -894,24 +897,6 @@ struct MainPage {
   }
 
   // 后台获取校园卡余额（不阻塞 UI，静默失败）
-  private fetchCardBalance(): void {
-    if (this.cardBalance.length > 0) return; // 已获取过
-    this.cardBalance = '...';
-    const svc = SchoolCardService.getInstance();
-    svc.ensureOpenId().then(() => {
-      svc.getBalance().then((bal: string) => {
-        this.cardBalance = bal;
-        console.info(TAG, 'fetchCardBalance: OK ' + bal);
-      }).catch((e: Object) => {
-        console.warn(TAG, 'fetchCardBalance: balance failed ' + String(e));
-        this.cardBalance = '--';
-      });
-    }).catch((e: Object) => {
-      console.warn(TAG, 'fetchCardBalance: openid failed ' + String(e));
-      this.cardBalance = '--';
-    });
-  }
-
   // 手动刷新用户信息 — 隐藏 WebView 加载 xgxt jbxxapp SPA → JS fetch API 提取
   private refreshUserInfo(): void {
     if (this.userRefreshing) {
@@ -1075,6 +1060,7 @@ struct MainPage {
     this.userRefreshing = false;
     console.info(TAG, 'xgxtCleanup: done');
   }
+
 
   // ==================== 缓存管理 ====================
   private formatBytes(bytes: number): string {
@@ -3095,7 +3081,7 @@ struct MainPage {
       this.MenuItemBuilder('💧', '订水系统', '再忙也不要忘记喝水呦！', '#0277BD',
         () => { this.pageInfo.pushPath({ name: 'PortalWeb_Dingshui' }); })
     } else if (name === 'Baoxiu') {
-      this.MenuItemBuilder('🔧', '后勤报修', '足不出户提交报修', '#5D4037',
+      this.MenuItemBuilder('🛠️', '后勤报修', '足不出户提交报修', '#5D4037',
         () => { this.pageInfo.pushPath({ name: 'PortalWeb_Baoxiu' }); })
     } else if (name === 'Space') {
       this.MenuItemBuilder('🏢', '空间预约', '找一个可以集体讨论的地方', '#1565C0',
@@ -3130,17 +3116,7 @@ struct MainPage {
       }.margin({ right: 16 })
       Column() {
         Text('校园卡').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-        if (this.cardBalance.length > 0) {
-          if (this.cardBalance === '...') {
-            Text('正在查询余额...').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-          } else if (this.cardBalance === '--') {
-            Text('余额获取失败').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-          } else {
-            Text('¥ ' + this.cardBalance).fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FF6D00').margin({ top: 2 })
-          }
-        } else {
-          Text('查余额和消费记录').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-        }
+        Text('查余额和消费记录').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
       }.layoutWeight(1)
       Text('›').fontSize(20).fontColor('#CCCCCC')
     }

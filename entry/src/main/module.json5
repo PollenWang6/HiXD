@@ -47,7 +47,7 @@
         "description": "$string:EntryAbility_desc",
         "icon": "$media:icon",
         "label": "$string:EntryAbility_label",
-        "startWindowIcon": "$media:icon_startwindow",  // 这里改对
+        "startWindowIcon": "$media:icon_startwindow",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
         "skills": [

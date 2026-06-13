@@ -1,7 +1,9 @@
 // ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ThemeColors } from '../../utils/ThemeColors';
-import { ExperimentData, ExperimentType, TimeRange, SemesterUtil } from '../../services/EhallService';
+import { ExperimentData, ExperimentType, TimeRange } from '../../services/Models';
+import { ExperimentService } from '../../services/ExperimentService';
+import { SemesterUtil, EhallService } from '../../services/EhallService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import router from '@ohos.router';
 

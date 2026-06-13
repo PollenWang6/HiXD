@@ -265,26 +265,13 @@ export struct DormWaterPage {
     NavDestination() {
       Stack() {
         Column() {
-          // 顶栏
-          Row() {
-            Button({ type: ButtonType.Circle, stateEffect: true }) {
-              Text('←').fontSize(22).fontColor(ThemeColors.textOnColor(this.accentColor))
-            }.width(40).height(40).backgroundColor('#00000000')
-            .onClick(() => { this.pageInfo.pop(); })
-
-            Text('宿舍水机').fontSize(18).fontWeight(FontWeight.Bold)
-              .fontColor(ThemeColors.textOnColor(this.accentColor))
-              .layoutWeight(1).textAlign(TextAlign.Center)
-
-            if (this.loggedIn) {
-              Button('退出').fontSize(13)
-                .fontColor(ThemeColors.textOnColor(this.accentColor)).backgroundColor('#00000000')
+          if (this.loggedIn) {
+            Row() {
+              Blank()
+              Button('退出').fontSize(13).fontColor('#FF7043').backgroundColor('#00000000')
                 .onClick(() => { this.doLogout(); })
-            } else {
-              Blank().width(40)
-            }
-          }.width('100%').height(48).padding({ left: 8, right: 8 })
-          .backgroundColor(this.accentColor)
+            }.width('100%').padding({ right: 16, top: 4 })
+          }
 
           if (this.loggedIn) {
             this.buildDeviceList();
@@ -300,8 +287,10 @@ export struct DormWaterPage {
         }
       }
     }
-    .hideTitleBar(true)
+    .title('宿舍水机', { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .onBackPressed(() => { this.pageInfo.pop(); return true; })
+    .backgroundColor(ThemeColors.bgPage)
   }
 
   // ===== 设备列表 UI =====

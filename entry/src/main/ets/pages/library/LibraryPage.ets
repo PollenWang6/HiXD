@@ -143,7 +143,10 @@ export struct LibraryPage {
         result.push(this.makeBorrowItem(rawList[i]));
       }
       this.borrowList = result;
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error('LibraryPage', 'loadBorrowList failed: ' + String(e));
+      this.errorMsg = '借阅列表加载失败，请下拉重试';
+    }
   }
 
   async searchBooks(): Promise<void> {
@@ -170,7 +173,11 @@ export struct LibraryPage {
         result.push(this.makeBookItem(rawList[i]));
       }
       this.books = result;
-    } catch { this.books = []; } finally { this.isSearching = false; }
+    } catch (e) {
+      console.error('LibraryPage', 'searchBooks failed: ' + String(e));
+      this.books = [];
+      this.errorMsg = '搜索失败，请检查网络后重试';
+    } finally { this.isSearching = false; }
   }
 
   build() {
