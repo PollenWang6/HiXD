@@ -85,4 +85,4 @@ MIT
 
 ## 致谢
 
-本项目部分 API 接口参考了 [Traintime PDA / XDYou](https://github.com/SuperBart/traintime_pda)（MPL-2.0），感谢该项目的接口探索工作。
+本项目部分 API 接口参考了 [Traintime PDA / XDYou](https://github.com/BenderBlog/traintime_pda)（MPL-2.0），感谢该项目的接口探索工作。
