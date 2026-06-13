@@ -1407,7 +1407,7 @@ export struct ClassTablePage {
       }
       .height(40)
       .width(40)
-      .bindMenu(this.buildClassTableMenu())
+      .bindMenu(this.buildClassTableMenu(), { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
     }
     .height(56)
     .width('100%')

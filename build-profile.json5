@@ -3,8 +3,9 @@
     "products": [
       {
         "name": "default",
-        "targetSdkVersion": "6.0.2(22)",
-        "compatibleSdkVersion": "6.0.2(22)",
+        "signingConfig": "default",
+        "targetSdkVersion": "6.1.0(23)",
+        "compatibleSdkVersion": "6.1.0(23)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
@@ -15,6 +16,28 @@
       }
     ],
     "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B90AA91B930EB51660D9D93B83B6FFD4E07FD5DBE6DCB8120B7C8B36F5FCB824342054F9413A2DB",
+          "profile": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\花粉WJL\\.ohos\\config\\default_HiXD_iBjaYu-8IEgESLi8W-ek8TKX2rLBd15fqfESSv7nHys=.p12",
+          "storePassword": "0000001B785BCBD8489275A4BA78273E9BA3E10248346497D26D28655443AB8EC645E118286239137DE112"
+        }
+      }
+    ]
   },
   "modules": [
     {

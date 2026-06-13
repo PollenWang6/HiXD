@@ -195,7 +195,7 @@ export class AttendanceService {
       match = blockRe.exec(html);
     }
 
-    console.info(TAG, 'parseCourseInfo: found ' + String(results.length) + ' courses');
+    console.info(TAG, 'parseCourseInfo: found ' + String(results.length) + ' courses');    console.info(TAG, 'parseCourseInfo: found ' + String(results.length) + ' courses');
     return results;
   }
 

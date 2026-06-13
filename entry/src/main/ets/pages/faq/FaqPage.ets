@@ -59,7 +59,7 @@ export struct FaqPage {
 
             // 反馈
             this.SectionText('问题反馈')
-            this.TextBlock('出现其他问题可通过 1727881630@qq.com 反馈，\n也不确定是否可以解决 😭')
+            this.TextBlock('出现其他问题可通过 pollenwang666@petalmail.com 反馈，\n也不确定是否可以解决 😭')
 
           }.width(this.isTablet ? '60%' : '100%').padding({ bottom: 32 })
           .alignSelf(ItemAlign.Center)

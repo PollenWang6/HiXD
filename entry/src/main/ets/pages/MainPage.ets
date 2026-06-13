@@ -288,12 +288,11 @@ struct MainPage {
   @State bgOpacityVal: number = 60; // 不透明度，存储为整数（60=60%）
   @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
   @State currentThemeLabel: string = '当前：浅色模式';
-  @State warmupActive: boolean = false;
-  private warmupUrl: string = 'https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1';
 
   // ==================== xgxt 隐藏 WebView（个人信息抓取 + 超星头像） ====================
   @State xgxtActive: boolean = false;
   private xgxtPhase: number = 0;  // 0=idle, 1=xgxt学工, 2=超星头像
+  private xgxtChaoxingRetries: number = 0;  // 超星头像重试计数
   private xgxtUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
   private xgxtController: web_webview.WebviewController = new web_webview.WebviewController();
   private xgxtTimeoutId: number = -1;
@@ -403,7 +402,6 @@ struct MainPage {
 
 
   private tabsController: HdsTabsController = new HdsTabsController();
-  private warmupController: web_webview.WebviewController = new web_webview.WebviewController();
   private context!: common.UIAbilityContext;
   // 应用级缓存目录（异步初始化，供 computeCacheSizeDirect 同步使用）
   private appCacheDir: string = '';
@@ -849,12 +847,17 @@ struct MainPage {
         ' className=' + this.userClassName);
     }).catch((e: Error) => {
       console.warn(TAG, 'loadUserInfo failed: ' + String(e));
-      // 用缓存兜底
       this.userDisplayName = rawName;
       this.userAvatarUrl = rawAvatar;
       this.userMajor = rawMajor;
       this.userCollege = rawCollege;
     });
+
+    // 首次登录时 LoginPage 已拉取并缓存，这里仅读取；若意外未初始化则自动补一次
+    if (!rawName && !PreferenceUtil.getBool('user_info_initialized')) {
+      console.info(TAG, 'loadUserInfo: name empty and not initialized, auto refresh');
+      setTimeout(() => { this.refreshUserInfo(); }, 2000);
+    }
   }
 
   // 下载头像到本地缓存（避免 Image 组件跟随 CDN 重定向失败的问题）
@@ -1046,16 +1049,28 @@ struct MainPage {
       await PreferenceUtil.putString('cx_uid', uid);
       this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + uid + '_80');
       console.info(TAG, 'xgxtChaoxingResult: saved uid=' + uid);
-    } else {
-      console.warn(TAG, 'xgxtChaoxingResult: no valid uid found, raw=' + uid);
+      this.xgxtCleanup();
+      return;
     }
-    this.xgxtCleanup();
+    // 重试：重新导航 i.chaoxing.com 再提取
+    this.xgxtChaoxingRetries++;
+    if (this.xgxtChaoxingRetries <= 3) {
+      console.info(TAG, 'xgxtChaoxingResult: retry ' + this.xgxtChaoxingRetries + '/3');
+      setTimeout((): void => {
+        if (!this.xgxtActive) return; // 已被超时清理
+        this.xgxtController.loadUrl('https://i.chaoxing.com/base');
+      }, 1500);
+    } else {
+      console.warn(TAG, 'xgxtChaoxingResult: no valid uid after 3 retries');
+      this.xgxtCleanup();
+    }
   }
 
   // 清理 xgxt WebView 状态
   private xgxtCleanup(): void {
     clearTimeout(this.xgxtTimeoutId);
     this.xgxtPhase = 0;
+    this.xgxtChaoxingRetries = 0;
     this.xgxtActive = false;
     this.userRefreshing = false;
     console.info(TAG, 'xgxtCleanup: done');
@@ -1783,23 +1798,6 @@ struct MainPage {
 
   build() {
     Stack() {
-    // 隐形 WebView：冷启动时走一遍 CAS OAuth 链刷新 session cookie
-    if (this.warmupActive) {
-      Web({ src: this.warmupUrl, controller: this.warmupController })
-        .width('100%')
-        .height('100%')
-        .onPageEnd((event) => {
-          if (event && event.url && event.url.indexOf('order.xidian.edu.cn') >= 0) {
-            console.error(TAG, 'warmup done: ' + event.url);
-            setTimeout(() => { this.warmupActive = false; }, 2000);
-          }
-        })
-        .onErrorReceive(() => {
-          console.error(TAG, 'warmup error, disabling');
-          setTimeout(() => { this.warmupActive = false; }, 5000);
-        })
-        .domStorageAccess(true)
-    }
     // 隐藏 xgxt WebView：加载 jbxxapp SPA 后用 JS 抓取个人信息
     if (this.xgxtActive) {
       Web({ src: this.xgxtUrl, controller: this.xgxtController })
@@ -2797,19 +2795,6 @@ struct MainPage {
       Divider().color('#F0F0F0')
 
       List({ space: 8 }) {
-        // 提示卡片
-        ListItem() {
-          Row() {
-            Text('💡').fontSize(16)
-            Text('部分功能需从「订水系统」预热登录后使用')
-              .fontSize(12).fontColor(ThemeColors.textSecondary)
-              .margin({ left: 6 }).layoutWeight(1)
-              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-          }
-          .width('100%').padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .backgroundColor(ThemeColors.isDark ? '#1A2A3A' : '#FFF8E1')
-          .borderRadius(8)
-        }
         // 功能列表
         ForEach(this.portalMenuOrder, (name: string, idx: number) => {
           ListItem() {

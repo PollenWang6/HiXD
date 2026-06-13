@@ -217,7 +217,7 @@ export struct PortalWebPage {
       }
       .height(40)
       .width(40)
-      .bindMenu(this.WebviewMenu())
+      .bindMenu(this.WebviewMenu(), { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
     }
     .padding({ left: 12, right: 12 })
     .height(56)

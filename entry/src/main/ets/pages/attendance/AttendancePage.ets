@@ -91,7 +91,7 @@ export struct AttendancePage {
       const ctx = getContext(this);
       const filePath: string = ctx.filesDir + '/class_table_' + semCode + '.json';
       if (!fileIo.accessSync(filePath)) {
-        console.warn('AttendancePage', 'fillTotalTimes: class table file not found');
+        console.warn('AttendancePage', 'fillTotalTimes: class table file not found at ' + filePath);
         return;
       }
       const file: fileIo.File = fileIo.openSync(filePath, fileIo.OpenMode.READ_ONLY);

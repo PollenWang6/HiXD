@@ -79,7 +79,7 @@ struct LoginPage {
       if (!fields.execution) {
         await PreferenceUtil.putBool('is_logged_in', true);
         // 异步抓取 xgxt 用户基本信息
-        this.runXgxtFetch();
+        await this.runXgxtFetch(5000);
         this.statusText = '自动登录成功！';
         setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 400);
         return;
@@ -142,8 +142,8 @@ struct LoginPage {
         await PreferenceUtil.putBool('is_logged_in', true);
         await this.cas.syncCookiesToWebView();
         await this.cas.checkWhetherPostgraduate();
-        // 异步抓取 xgxt 用户基本信息
-        this.runXgxtFetch();
+        // 首次登录自动拉取个人信息（带超时保护，不阻塞登录）
+        await this.runXgxtFetch(5000);
         // 研究生：拉取 yjspt 学期码并缓存
         if (PreferenceUtil.getBool('role')) {
           try {
@@ -165,14 +165,20 @@ struct LoginPage {
     }
   }
 
-  // 异步抓取 ehall 用户信息 + 诊断日志
-  private runXgxtFetch(): void {
-    console.info(TAG, 'runXgxtFetch: start, username=' + this.username);
-    UserInfoService.getInstance().fetchFromEhall(this.username).then((ok: boolean) => {
-      console.info(TAG, 'runXgxtFetch: result=' + String(ok));
-    }).catch((e: Error) => {
-      console.error(TAG, 'runXgxtFetch: exception=' + e.message);
+  // 首次登录自动拉取个人信息（带超时保护，成功则置标记防止后续误触发）
+  private async runXgxtFetch(timeoutMs: number): Promise<void> {
+    const controller = UserInfoService.getInstance();
+    const fetchPromise = controller.fetchFromEhall(this.username);
+    const timeoutPromise = new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(false), timeoutMs);
     });
+    const ok: boolean = await Promise.race([fetchPromise, timeoutPromise]);
+    if (ok) {
+      await PreferenceUtil.putBool('user_info_initialized', true);
+      console.info(TAG, 'runXgxtFetch: OK, info cached');
+    } else {
+      console.warn(TAG, 'runXgxtFetch: timeout or failed, will retry on MainPage');
+    }
   }
 
   toForm(): void {
