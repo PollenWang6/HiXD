@@ -292,14 +292,6 @@ struct MainPage {
   @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
   @State currentThemeLabel: string = '当前：浅色模式';
 
-  // ==================== xgxt 隐藏 WebView（个人信息抓取 + 超星头像） ====================
-  @State xgxtActive: boolean = false;
-  private xgxtPhase: number = 0;  // 0=idle, 1=xgxt学工, 2=超星头像
-  private xgxtChaoxingRetries: number = 0;  // 超星头像重试计数
-  private xgxtUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
-  private xgxtController: web_webview.WebviewController = new web_webview.WebviewController();
-  private xgxtTimeoutId: number = -1;
-
   // ==================== 版本更新弹窗 ====================
   @State showUpdateDialog: boolean = false;
   @State updateInfo: VersionInfo | null = null;
@@ -919,163 +911,31 @@ struct MainPage {
   }
 
   // 后台获取校园卡余额（不阻塞 UI，静默失败）
-  // 手动刷新用户信息 — 隐藏 WebView 加载 xgxt jbxxapp SPA → JS fetch API 提取
+  // 手动刷新用户信息 — 直接走 UserInfoService HTTP 路径
   private refreshUserInfo(): void {
     if (this.userRefreshing) {
       console.info(TAG, 'refreshUserInfo: already refreshing, skip');
       return;
     }
     this.userRefreshing = true;
-    console.info(TAG, 'refreshUserInfo: START (WebView → xgxt)');
+    console.info(TAG, 'refreshUserInfo: START (HTTP via UserInfoService)');
 
-    // 清除旧 WebView 状态
-    clearTimeout(this.xgxtTimeoutId);
-    this.xgxtActive = false;
-
-    // 下一帧激活 WebView，触发 CAS SSO → jbxxapp SPA 加载
-    this.xgxtPhase = 1;
-    setTimeout(() => { this.xgxtActive = true; }, 100);
-
-    // 超时保护
-    this.xgxtTimeoutId = setTimeout(() => {
-      console.warn(TAG, 'xgxt fetch TIMEOUT');
-      this.xgxtCleanup();
-    }, 25000);
-  }
-
-  // xgxt SPA 加载完成后注入 JS 抓取 getStuBaseInfo
-  private xgxtInjectFetch(): void {
-    const xh: string = this.username || PreferenceUtil.getString('ids_account');
-    // 等待 SPA 初始化后再调用 API
-    const js: string =
-      'setTimeout(function(){' +
-      '  var body="requestParamStr="+encodeURIComponent(\'{"XSBH":"' + xh + '"}\');' +
-      '  fetch("/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do",{' +
-      '    method:"POST",' +
-      '    headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"},' +
-      '    body:body' +
-      '  }).then(function(r){return r.text();})' +
-      '    .then(function(d){console.log("XGXT_INFO:"+d);})' +
-      '    .catch(function(e){console.log("XGXT_ERR:"+e.message);});' +
-      '},4000);';
-    this.xgxtController.runJavaScript(js);
-    console.info(TAG, 'xgxtInjectFetch: JS injected, waiting for SPA init...');
-  }
-
-  // 处理 JS fetch 返回的 getStuBaseInfo JSON
-  private xgxtProcessResult(raw: string): void {
-    try {
-      console.info(TAG, 'xgxtProcessResult: raw[0:500]=' + raw.substring(0, 500));
-      const obj: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
-      const returnCode: string = String(obj['returnCode'] ?? '');
-      if (returnCode !== '#E000000000000') {
-        const desc: string = String(obj['description'] ?? JSON.stringify(raw).substring(0, 120));
-        console.warn(TAG, 'xgxt API failed: ' + desc);
-        this.xgxtCleanup();
-        return;
-      }
-      const data: Record<string, Object> = obj['data'] as Record<string, Object>;
-      if (!data) {
-        console.warn(TAG, 'xgxt result: no data field');
-        this.xgxtCleanup();
-        return;
-      }
-      // 提取字段（与实际 API 返回一致）
-      const name: string = String(data['XM'] ?? '');
-      const gender: string = String(data['XBDM_DISPLAY'] ?? '');
-      const college: string = String(data['DWDM_DISPLAY'] ?? '');
-      const major: string = String(data['ZYDM_DISPLAY'] ?? '');
-      const grade: string = String(data['XZNJ'] ?? '');
-      const cls: string = String(data['BJDM_DISPLAY'] ?? '');
-      const dorm: string = String(data['ZSDZ'] ?? '');
-      const stype: string = String(data['XSLBDM_DISPLAY'] ?? '');
-
-      // 持久化
-      Promise.all([
-        name ? PreferenceUtil.putString('user_name', name) : Promise.resolve(),
-        college ? PreferenceUtil.putString('user_college', college) : Promise.resolve(),
-        major ? PreferenceUtil.putString('user_major', major) : Promise.resolve(),
-        grade ? PreferenceUtil.putString('user_grade', grade) : Promise.resolve(),
-        gender ? PreferenceUtil.putString('user_gender', gender) : Promise.resolve(),
-        cls ? PreferenceUtil.putString('user_class', cls) : Promise.resolve(),
-        dorm ? PreferenceUtil.putString('user_dormitory', dorm) : Promise.resolve(),
-        stype ? PreferenceUtil.putString('user_student_type', stype) : Promise.resolve(),
-      ]).catch(() => {});
-      if (stype) PreferenceUtil.putString('user_student_type', stype);
-
-      console.info(TAG, 'xgxt result: OK name=' + name + ' college=' + college +
-        ' major=' + major + ' grade=' + grade + ' gender=' + gender +
-        ' dorm=' + dorm + ' stype=' + stype + ' cls=' + cls);
-      this.loadUserInfo();
-
-      // 学工数据拿到后，进入阶段2：超星头像提取
-      // 读缓存：若已有有效 UID（纯数字）则跳过 WebView
-      const cachedUid: string = PreferenceUtil.getString('cx_uid');
-      if (cachedUid.length > 0 && /^\d+$/.test(cachedUid)) {
-        this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + cachedUid + '_80');
-        console.info(TAG, 'xgxt result: using cached uid=' + cachedUid);
-        this.xgxtCleanup();
-        return;
-      }
-
-      // 无缓存 → 纯 HTTP 提取超星 UID（不再走 WebView，避免离屏优化导致回调丢失）
-      console.info(TAG, 'xgxt result: extracting uid via pure HTTP...');
-      UserInfoService.getInstance().fetchChaoxingUid().then((uid: string): void => {
-        if (uid.length > 0) {
-          this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + uid + '_80');
-        }
-        this.xgxtCleanup();
-      });
-      return;
-    } catch (e) {
-      console.error(TAG, 'xgxt parse error: ' + JSON.stringify(e));
-    }
-    this.xgxtCleanup();
-  }
-
-  // 阶段2: 注入 JS 提取超星 UID
-  private xgxtInjectChaoxing(): void {
-    const js: string =
-      '(function(){' +
-      '  var s=document.body.innerHTML;' +
-      '  var m=s.match(/photo\\.chaoxing\\.com\\/p\\/(\\d+)/);' +
-      '  if(m){console.log("CX_UID:"+m[1]);}else{console.log("CX_UID:none");}' +
-      '})();';
-    this.xgxtController.runJavaScript(js);
-    console.info(TAG, 'xgxtInjectChaoxing: JS injected');
-  }
-
-  // 处理提取到的超星 UID
-  private async xgxtChaoxingResult(uid: string): Promise<void> {
-    if (uid.length > 0 && uid !== 'none' && /^\d+$/.test(uid)) {
-      await PreferenceUtil.putString('cx_uid', uid);
-      this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + uid + '_80');
-      console.info(TAG, 'xgxtChaoxingResult: saved uid=' + uid);
-      this.xgxtCleanup();
-      return;
-    }
-    // 重试：重新导航 i.chaoxing.com 再提取
-    this.xgxtChaoxingRetries++;
-    if (this.xgxtChaoxingRetries <= 3) {
-      console.info(TAG, 'xgxtChaoxingResult: retry ' + this.xgxtChaoxingRetries + '/3');
-      setTimeout((): void => {
-        if (!this.xgxtActive) return; // 已被超时清理
-        this.xgxtController.loadUrl('https://i.chaoxing.com/base');
-      }, 1500);
-    } else {
-      console.warn(TAG, 'xgxtChaoxingResult: no valid uid after 3 retries');
-      this.xgxtCleanup();
-    }
-  }
-
-  // 清理 xgxt WebView 状态
-  private xgxtCleanup(): void {
-    clearTimeout(this.xgxtTimeoutId);
-    this.xgxtPhase = 0;
-    this.xgxtChaoxingRetries = 0;
-    this.xgxtActive = false;
-    this.userRefreshing = false;
-    console.info(TAG, 'xgxtCleanup: done');
+    UserInfoService.getInstance().fetchAll().then((info) => {
+      if (info.name) { this.userDisplayName = info.name; }
+      if (info.avatar) { this.downloadAndSetAvatar(info.avatar); }
+      if (info.major) { this.userMajor = info.major; }
+      if (info.college) { this.userCollege = info.college; }
+      if (info.grade) { this.userGrade = info.grade; }
+      if (info.gender) { this.userGender = info.gender; }
+      if (info.dormitory) { this.userDormitory = info.dormitory; }
+      if (info.studentType) { this.userStudentType = info.studentType; }
+      if (info.className) { this.userClassName = info.className; }
+      console.info(TAG, 'refreshUserInfo: OK name=' + this.userDisplayName + ' college=' + this.userCollege);
+      this.userRefreshing = false;
+    }).catch((e: Error) => {
+      console.warn(TAG, 'refreshUserInfo failed: ' + String(e));
+      this.userRefreshing = false;
+    });
   }
 
 
@@ -1808,56 +1668,6 @@ struct MainPage {
 
   build() {
     Stack() {
-    // 隐藏 xgxt WebView：加载 jbxxapp SPA 后用 JS 抓取个人信息
-    if (this.xgxtActive) {
-      Web({ src: this.xgxtUrl, controller: this.xgxtController })
-        .width('300px')
-        .height('300px')
-        .position({ x: -400, y: 0 })
-        .onPageEnd((event) => {
-          if (event && event.url) {
-            console.info(TAG, 'xgxt pageEnd: url=' + event.url.substring(0, 120));
-            if (this.xgxtPhase === 1 && event.url.indexOf('xgxt.xidian.edu.cn') >= 0) {
-              console.info(TAG, 'xgxt pageEnd: xgxt page loaded, injecting JS...');
-              this.xgxtInjectFetch();
-            } else if (this.xgxtPhase === 2 && event.url.indexOf('i.chaoxing.com') >= 0) {
-              console.info(TAG, 'xgxt pageEnd: chaoxing page loaded, extracting uid...');
-              this.xgxtInjectChaoxing();
-            }
-          } else {
-            console.info(TAG, 'xgxt pageEnd: no url in event');
-          }
-        })
-        .onConsole((event): boolean => {
-          if (event && event.message) {
-            const msg: string = event.message.getMessage();
-            if (msg.indexOf('XGXT_INFO:') === 0) {
-              const raw: string = msg.substring(10);
-              console.info(TAG, 'xgxt console: XGXT_INFO len=' + String(raw.length));
-              this.xgxtProcessResult(raw);
-              return true;
-            }
-            if (msg.indexOf('XGXT_ERR:') === 0) {
-              console.warn(TAG, 'xgxt console: XGXT_ERR ' + msg.substring(10));
-              this.xgxtCleanup();
-              return true;
-            }
-            if (msg.indexOf('CX_UID:') === 0) {
-              const uid: string = msg.substring(7).trim();
-              console.info(TAG, 'xgxt console: CX_UID=' + uid);
-              this.xgxtChaoxingResult(uid);
-              return true;
-            }
-          }
-          return false;
-        })
-        .onErrorReceive(() => {
-          console.error(TAG, 'xgxt WebView error');
-          this.xgxtCleanup();
-        })
-        .domStorageAccess(true)
-        .javaScriptAccess(true)
-    }
     Navigation(this.pageInfo) {
       if (deviceInfo.distributionOSApiVersion >= 60100) {
         HdsTabs({ controller: this.tabsController }) {

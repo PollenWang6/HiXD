@@ -11,8 +11,15 @@ const EXTERNAL_SCHEMES: string[] = ['weixin://', 'alipays://', 'wechat://'];
 
 // 伪装微信浏览器 UA，绕过移动门户的微信限制
 const WE_CHAT_UA: string = 'Mozilla/5.0 (Linux; Android 12; HarmonyOS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36 MicroMessenger/8.0.50';
-// 通用 Android Chrome UA，绕过 OpenResty 对 ArkWeb 指纹的 404（libspace/ignypt）
-const MOBILE_CHROME_UA: string = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.196 Mobile Safari/537.36';
+// 手动切换 UA 标识（参考妮可之记 DailyNic）
+const DESKTOP_UA: string = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+const MOBILE_UA: string = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.196 Mobile Safari/537.36';
+const TABLET_UA: string = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.196 Safari/537.36';
+
+const UA_AUTO: number = 0;   // 跟随系统（原生 UA）
+const UA_MOBILE: number = 1;
+const UA_TABLET: number = 2;
+const UA_DESKTOP: number = 3;
 
 @Component
 export struct PortalWebPage {
@@ -29,6 +36,7 @@ export struct PortalWebPage {
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @State message: string = '';
   @Prop isTablet: boolean = false;
+  @State uaMode: number = UA_AUTO;  // 当前 UA 模式
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
   private context!: common.UIAbilityContext;
@@ -75,9 +83,6 @@ export struct PortalWebPage {
                 console.info(TAG, 'onControllerAttached: webUrl loaded');
                 if (this.useWeChatUA) {
                   this.webController.setCustomUserAgent(WE_CHAT_UA);
-                } else if (this.url.includes('libspace') || this.url.includes('ignypt')) {
-                  this.webController.setCustomUserAgent(MOBILE_CHROME_UA);
-                  console.info(TAG, 'onControllerAttached: set Mobile Chrome UA for ' + this.url.substring(0, 40));
                 }
               })
               .onSslErrorEventReceive((event) => {
@@ -98,6 +103,8 @@ export struct PortalWebPage {
                 console.info(TAG, 'onPageEnd OK: ' + this.url.substring(0, 80));
                 if (this.useWeChatUA && !this.keepWeChatUA) {
                   this.webController.setCustomUserAgent('');
+                } else if (!this.useWeChatUA) {
+                  this.applyUA();  // 页面跳转后重新应用手动选择的 UA
                 }
               })
               .onOverrideUrlLoading((req) => {
@@ -228,6 +235,9 @@ export struct PortalWebPage {
     Menu() {
       MenuItem({ content: '刷新', startIcon: $r('app.media.refresh') })
         .onClick(() => { this.webController.refresh(); })
+      MenuItem({ content: '切换 UA', builder: this.changeUAMenu(),
+        startIcon: $r('app.media.ic_public_rotate_switch'), endIcon: $r('app.media.ic_public_arrow_right') })
+        .enabled(!this.useWeChatUA)
       MenuItem({ content: '全屏展示', startIcon: $r('app.media.ic_public_enlarge') })
         .enabled(this.isTablet && !this.portalFullscreen)
         .onClick(() => { this.portalFullscreen = true; })
@@ -250,5 +260,49 @@ export struct PortalWebPage {
           }
         })
     }
+  }
+
+  @Builder changeUAMenu() {
+    Menu() {
+      MenuItem({ content: '跟随系统', startIcon: $r('app.media.ic_controlcenter_auto_rotate_filled'), endIcon: (this.uaMode === UA_AUTO ? $r('app.media.checkmark') : undefined) })
+        .onClick(() => { this.setUA(UA_AUTO); })
+      MenuItem({ content: '手机版', startIcon: $r('app.media.ic_public_devices_phone'), endIcon: (this.uaMode === UA_MOBILE ? $r('app.media.checkmark') : undefined) })
+        .onClick(() => { this.setUA(UA_MOBILE); })
+      MenuItem({ content: '平板版', startIcon: $r('app.media.ic_device_pad'), endIcon: (this.uaMode === UA_TABLET ? $r('app.media.checkmark') : undefined) })
+        .onClick(() => { this.setUA(UA_TABLET); })
+      MenuItem({ content: '电脑版', startIcon: $r('app.media.ic_device_matebook'), endIcon: (this.uaMode === UA_DESKTOP ? $r('app.media.checkmark') : undefined) })
+        .onClick(() => { this.setUA(UA_DESKTOP); })
+    }
+  }
+
+  uaIcon(): Resource {
+    if (this.uaMode === UA_AUTO) {
+      return $r('app.media.ic_controlcenter_auto_rotate_filled');
+    } else if (this.uaMode === UA_MOBILE) {
+      return $r('app.media.ic_public_devices_phone');
+    } else if (this.uaMode === UA_TABLET) {
+      return $r('app.media.ic_device_pad');
+    } else {
+      return $r('app.media.ic_device_matebook');
+    }
+  }
+
+  setUA(mode: number): void {
+    this.uaMode = mode;
+    this.applyUA();
+    this.webController.refresh();
+  }
+
+  applyUA(): void {
+    if (this.uaMode === UA_AUTO) {
+      this.webController.setCustomUserAgent('');
+    } else if (this.uaMode === UA_MOBILE) {
+      this.webController.setCustomUserAgent(MOBILE_UA);
+    } else if (this.uaMode === UA_TABLET) {
+      this.webController.setCustomUserAgent(TABLET_UA);
+    } else {
+      this.webController.setCustomUserAgent(DESKTOP_UA);
+    }
+    console.info(TAG, 'UA switched to mode=' + this.uaMode);
   }
 }
