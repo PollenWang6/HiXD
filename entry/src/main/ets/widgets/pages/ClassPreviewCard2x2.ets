@@ -16,6 +16,12 @@ struct ClassPreviewCard2x2 {
   @LocalStorageProp('tomorrowTimes') tomorrowTimes: string[] = [];
   @LocalStorageProp('tomorrowRooms') tomorrowRooms: string[] = [];
   @LocalStorageProp('tomorrowStarts') tomorrowStarts: number[] = [];
+  @LocalStorageProp('todayTeachers') todayTeachers: string[] = [];
+  @LocalStorageProp('todayTypes') todayTypes: string[] = [];
+  @LocalStorageProp('todaySeats') todaySeats: string[] = [];
+  @LocalStorageProp('tomorrowTeachers') tomorrowTeachers: string[] = [];
+  @LocalStorageProp('tomorrowTypes') tomorrowTypes: string[] = [];
+  @LocalStorageProp('tomorrowSeats') tomorrowSeats: string[] = [];
   @LocalStorageProp('tomorrowCount') tomorrowCount: number    = 0;
   @LocalStorageProp('weekNum')       weekNum: number         = 1;
   @LocalStorageProp('weekLabel')     weekLabel: string       = '';
@@ -33,227 +39,87 @@ struct ClassPreviewCard2x2 {
   @LocalStorageProp('tomorrowExamRooms') tomorrowExamRooms: string[] = [];
   @LocalStorageProp('tomorrowExamCount') tomorrowExamCount: number   = 0;
 
-  @Builder
-  ExamRow(name: string, time: string, room: string) {
-    Column() {
-      Row() {
-        Column() {
-          Line()
-            .stroke('#FF9800')
-            .width(3).height(20)
-            .strokeLineCap(LineCapStyle.Round)
-            .strokeWidth(3)
-        }
-        .width(8).margin({ right: 6 }).justifyContent(FlexAlign.Center)
-
-        Text(name)
-          .fontSize(12).fontWeight(FontWeight.Bold)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-
-        if (time.length > 0) {
-          Text(time).fontSize(10).fontColor('#FF9800').flexShrink(0)
-        }
-      }
-      .width('100%')
-
-      if (room.length > 0) {
-        Row() {
-          Text(room)
-            .fontSize(9)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: '80%' })
-        }
-        .width('100%').padding({ left: 14 })
-      }
-    }
-    .width('100%').padding({ top: 3, bottom: 3 })
-  }
+  private curNames(): string[] { return this.showTomorrow ? this.tomorrowNames : this.todayNames; }
+  private curTimes(): string[] { return this.showTomorrow ? this.tomorrowTimes : this.todayTimes; }
+  private curRooms(): string[] { return this.showTomorrow ? this.tomorrowRooms : this.todayRooms; }
+  private curTeachers(): string[] { return this.showTomorrow ? this.tomorrowTeachers : this.todayTeachers; }
+  private curTypes(): string[] { return this.showTomorrow ? this.tomorrowTypes : this.todayTypes; }
+  private curSeats(): string[] { return this.showTomorrow ? this.tomorrowSeats : this.todaySeats; }
+  private curCount(): number { return this.showTomorrow ? this.tomorrowCount : this.todayCount; }
+  private isExamIdx(idx: number): boolean { return idx < this.curTypes().length && this.curTypes()[idx] === 'exam'; }
+  private timeAt(idx: number): string { return idx < this.curTimes().length ? this.curTimes()[idx] : ''; }
+  private roomAt(idx: number): string { return idx < this.curRooms().length ? this.curRooms()[idx] : ''; }
+  private teacherAt(idx: number): string { return idx < this.curTeachers().length ? this.curTeachers()[idx] : ''; }
+  private seatAt(idx: number): string { return idx < this.curSeats().length ? this.curSeats()[idx] : ''; }
+  private colorAt(idx: number): string { return this.isExamIdx(idx) ? '#FF9800' : COLORS_2X2[idx % COLORS_2X2.length]; }
 
   @Builder
-  CourseRow(name: string, time: string, room: string, colorIdx: number) {
+  Row2x2(color: string, name: string, sub1: string, sub2: string, time: string) {
     Column() {
       Row() {
-        Column() {
-          Line()
-            .stroke(COLORS_2X2[colorIdx % COLORS_2X2.length])
-            .width(3).height(20)
-            .strokeLineCap(LineCapStyle.Round)
-            .strokeWidth(3)
-        }
-        .width(8).margin({ right: 6 }).justifyContent(FlexAlign.Center)
-
-        Text(name)
-          .fontSize(12).fontWeight(FontWeight.Bold)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-
-        if (time.length > 0) {
-          Text(time.split('-')[0])
-            .fontSize(10).fontColor('#42A5F5').flexShrink(0)
-        }
-      }
-      .width('100%')
-
-      if (room.length > 0) {
+        Line().stroke(color).width(3).height(16).strokeLineCap(LineCapStyle.Round).strokeWidth(3)
         Row() {
-          Text(room)
-            .fontSize(9)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: '80%' })
-        }
-        .width('100%').padding({ left: 14 })
+          Text(name).fontSize(11).fontWeight(FontWeight.Bold).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: '60%' })
+          Text(' ' + sub1 + ' ').fontSize(7).fontColor('#FFFFFF')
+            .backgroundColor(sub1 === '考试' ? '#FF9800' : '#42A5F5')
+            .borderRadius(3).height(12).flexShrink(0)
+        }.layoutWeight(1).margin({ left: 5 })
+        if (time.length > 0) { Text(time).fontSize(9).fontColor('#42A5F5').flexShrink(0) }
+      }.width('100%').alignItems(VerticalAlign.Center)
+      if (sub2.length > 0) {
+        Text(sub2)
+          .fontSize(8).fontColor('#888888').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%').padding({ left: 8 })
       }
-    }
-    .width('100%').padding({ top: 3, bottom: 3 })
+    }.width('100%').padding({ top: 1, bottom: 1 })
   }
 
   build() {
     Column() {
       Row() {
-        Text('\u8BFE\u7A0B\u9884\u544A')
-          .fontSize(14).fontWeight(FontWeight.Bold)
-
-        if (this.showTomorrow && this.tomorrowCount > 0) {
-          Text(' ' + this.tomorrowCount)
-            .fontSize(10).fontColor('#FFFFFF')
-            .backgroundColor('#42A5F5')
-            .height(14).borderRadius(7)
-            .textAlign(TextAlign.Center).padding({ left: 3, right: 3 })
-        } else if (this.todayCount > 0) {
-          Text(' ' + this.todayCount)
-            .fontSize(10).fontColor('#FFFFFF')
-            .backgroundColor('#42A5F5')
-            .height(14).borderRadius(7)
-            .textAlign(TextAlign.Center).padding({ left: 3, right: 3 })
-        }
-
+        Text('课程预告').fontSize(14).fontWeight(FontWeight.Bold)
+        Text(' ' + this.curCount()).fontSize(10).fontColor('#FFFFFF').backgroundColor('#42A5F5')
+          .height(14).borderRadius(7).textAlign(TextAlign.Center).padding({ left: 3, right: 3 })
         Blank()
-
-        Text(this.showTomorrow ? '\u2190' : '\u2192')
-          .fontSize(14).fontWeight(FontWeight.Medium)
-          .margin({ right: 8 })
-          .onClick(() => {
-            postCardAction(this, { action: 'message', params: { msgTest: 'toggle' } });
-          })
-
-        Image($r('app.media.ic_public_refresh'))
-          .width(14).height(14)
-          .onClick(() => {
-            postCardAction(this, { action: 'message', params: { msgTest: 'schedule' } });
-          })
-      }
-      .width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 2 })
+        Text(this.showTomorrow ? '←' : '→').fontSize(14).fontWeight(FontWeight.Medium).margin({ right: 8 })
+          .onClick(() => { postCardAction(this, { action: 'message', params: { msgTest: 'toggle' } }); })
+        Image($r('app.media.ic_public_refresh')).width(14).height(14)
+          .onClick(() => { postCardAction(this, { action: 'message', params: { msgTest: 'schedule' } }); })
+      }.width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 2 })
 
       Row() {
-        Text(this.weekLabel + (this.dateLabel.length > 0 ? ' · ' + this.dateLabel : ''))
-          .fontSize(10).maxLines(1)
+        Text(this.weekLabel + (this.dateLabel.length > 0 ? ' · ' + this.dateLabel : '')).fontSize(10).maxLines(1)
         Blank()
-        Text(this.showTomorrow ? '\u660E\u5929' : '\u4ECA\u65E5')
-          .fontSize(10)
-          .fontColor(this.showTomorrow ? '#E91E63' : '#42A5F5')
-      }
-      .width('100%').margin({ bottom: 4 })
+        Text(this.showTomorrow ? '明天' : '今天').fontSize(10).fontColor(this.showTomorrow ? '#E91E63' : '#42A5F5')
+      }.width('100%').margin({ bottom: 4 })
 
       if (this.isEmpty && !this.showTomorrow) {
-        Column() {
-          Text(this.isWeekend ? '\u5468\u672B\u4F11\u606F' : '\u4ECA\u5929\u6CA1\u6709\u8BFE')
-            .fontSize(15)
-        }
-        .width('100%').height(28).justifyContent(FlexAlign.Center)
+        Column() { Text(this.isWeekend ? '周末休息' : '今天没有课').fontSize(15) }
+          .width('100%').height(28).justifyContent(FlexAlign.Center)
       } else {
         List() {
-          if (this.showTomorrow) {
-            ForEach(this.tomorrowNames,
-              (name: string, index: number) => {
-                ListItem() {
-                  Column() {
-                    this.CourseRow(name,
-                      index < this.tomorrowTimes.length ? this.tomorrowTimes[index] : '',
-                      index < this.tomorrowRooms.length ? this.tomorrowRooms[index] : '',
-                      index
-                    )
-                    if (index < this.tomorrowNames.length - 1) { Divider().width('94%') }
-                  }
-                }
-              },
-              (name: string, index: number): string => name + 't' + index
-            )
-            if (this.tomorrowExamCount > 0) {
-              ListItem() {
-                Column() {
-                  Divider().width('94%').color('#FFE0B2').margin({ top: 4, bottom: 4 })
-                  ForEach(this.tomorrowExamNames,
-                    (name: string, index: number) => {
-                      Column() {
-                        this.ExamRow(name,
-                          index < this.tomorrowExamTimes.length ? this.tomorrowExamTimes[index] : '',
-                          index < this.tomorrowExamRooms.length ? this.tomorrowExamRooms[index] : ''
-                        )
-                        if (index < this.tomorrowExamNames.length - 1) { Divider().width('94%') }
-                      }
-                    },
-                    (name: string, index: number): string => name + 'te' + index
-                  )
-                }
-              }
-            }
-          } else {
-            ForEach(this.todayNames,
-              (name: string, index: number) => {
-                ListItem() {
-                  Column() {
-                    this.CourseRow(name,
-                      index < this.todayTimes.length ? this.todayTimes[index] : '',
-                      index < this.todayRooms.length ? this.todayRooms[index] : '',
-                      index
-                    )
-                    if (index < this.todayNames.length - 1) { Divider().width('94%') }
-                  }
-                }
-              },
-              (name: string, index: number): string => name + 'd' + index
-            )
-            if (this.todayExamCount > 0) {
-              ListItem() {
-                Column() {
-                  Divider().width('94%').color('#FFE0B2').margin({ top: 4, bottom: 4 })
-                  ForEach(this.todayExamNames,
-                    (name: string, index: number) => {
-                      Column() {
-                        this.ExamRow(name,
-                          index < this.todayExamTimes.length ? this.todayExamTimes[index] : '',
-                          index < this.todayExamRooms.length ? this.todayExamRooms[index] : ''
-                        )
-                        if (index < this.todayExamNames.length - 1) { Divider().width('94%') }
-                      }
-                    },
-                    (name: string, index: number): string => name + 'de' + index
-                  )
-                }
-              }
+          ListItem() {
+            Column() {
+              ForEach(this.curNames(), (name: string, idx: number) => {
+                this.Row2x2(this.colorAt(idx), name,
+                  this.isExamIdx(idx) ? '考试' : '课程',
+                  this.isExamIdx(idx) ? (this.roomAt(idx) + (this.seatAt(idx).length > 0 ? ' · 座' + this.seatAt(idx) : ''))
+                    : (this.teacherAt(idx) + (this.roomAt(idx).length > 0 ? ' · ' + this.roomAt(idx) : '')).replace(/^·\s*/, '').replace(/\s*·$/, ''),
+                  this.timeAt(idx))
+                if (idx < this.curCount() - 1) { Divider().width('94%') }
+              }, (name: string, idx: number): string => name + '2x' + idx)
             }
           }
-        }
-        .width('100%').layoutWeight(1)
+        }.width('100%').layoutWeight(1)
       }
 
       if (this.lastRefresh.length > 0) {
-        Text(this.lastRefresh)
-          .fontSize(7)
-          .width('100%').textAlign(TextAlign.Center).margin({ top: 2 })
+        Text(this.lastRefresh).fontSize(7).width('100%').textAlign(TextAlign.Center).margin({ top: 2 })
       }
-    }
-    .width('100%').height('100%')
+    }.width('100%').height('100%')
     .padding({ top: 6, left: 8, right: 8, bottom: 4 })
-    .backgroundColor(Color.Transparent)
-    .borderRadius(16)
-    .onClick(() => {
-      postCardAction(this, {
-        action: 'router',
-        abilityName: 'EntryAbility',
-        params: { router: 'Schedule' }
-      });
-    })
+    .backgroundColor(Color.Transparent).borderRadius(16)
+    .onClick(() => { postCardAction(this, { action: 'router', abilityName: 'EntryAbility', params: { router: 'Schedule' } }); })
   }
 }

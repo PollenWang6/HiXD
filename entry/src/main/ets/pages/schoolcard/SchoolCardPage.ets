@@ -1,10 +1,10 @@
-// SchoolCardPage.ets — 校园卡原生页面
+// SchoolCardPage.ets — 校园卡原生页面（纯 HTTP，对标 Flutter）
 // 余额、付款码、消费记录
-import { webview } from '@kit.ArkWeb';
 import { promptAction } from '@kit.ArkUI';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { PaidRecord, SchoolCardService } from '../../services/SchoolCardService';
+import { CasLoginService } from '../../services/CasLoginService';
 
 @Component
 export struct SchoolCardPage {
@@ -20,19 +20,53 @@ export struct SchoolCardPage {
   // 日期筛选
   @State beginDate: string = '';
   @State endDate: string = '';
-  // WebView
-  @State wvActive: boolean = false;
-  @State wvPhase: number = 0; // 0=home, 1=OAuth, 2=余额+消费, 3=取QR
-  private wvUrl: string = 'https://v8scan.xidian.edu.cn/home/openXDOAuth2Page';
-  private wvController: webview.WebviewController = new webview.WebviewController();
-  private openid: string = '';
+  // Service
+  private cardSvc: SchoolCardService = SchoolCardService.getInstance();
 
   aboutToAppear(): void {
     const now = new Date();
-    const thirtyAgo = new Date(now.getTime() - 30 * 86400000);
     this.endDate = this.fmtDate(now);
-    this.beginDate = this.fmtDate(thirtyAgo);
-    this.triggerOAuth();
+    this.beginDate = this.fmtDate(new Date(now.getTime() - 30 * 86400000));
+    this.initData();
+  }
+
+  async initData(): Promise<void> {
+    this.loading = true;
+    this.error = '';
+    try {
+      // Step 0: 确保 CAS TGC 有效（触发自动恢复/密码登录）
+      const loggedIn = await CasLoginService.getInstance().checkAndAutoLogin();
+      if (!loggedIn) {
+        this.error = '请先登录校园账号';
+        this.loading = false;
+        return;
+      }
+
+      // Step 1: OAuth 获取 openid（5min 内缓存）
+      const oid = await this.cardSvc.ensureOpenId();
+      console.info('SchoolCardPage', 'initData: openid len=' + oid.length);
+
+      // Step 2: 并行获取余额 + 消费记录
+      const results = await Promise.all([
+        this.cardSvc.getBalance(),
+        this.cardSvc.getPaidRecords(this.beginDate, this.endDate),
+      ]);
+      this.balance = results[0] as string;
+      this.records = results[1] as PaidRecord[];
+      console.info('SchoolCardPage', 'initData: bal=' + (results[0] as string) + ' recs=' + (results[1] as PaidRecord[]).length);
+      this.loading = false;
+    } catch (e) {
+      // 尝试仅余额
+      try {
+        const bal = await this.cardSvc.getBalance();
+        this.balance = bal;
+        this.loading = false;
+      } catch (_e2) {
+        this.error = '校园卡加载失败';
+        this.loading = false;
+        console.error('SchoolCardPage', 'initData error: ' + String(e));
+      }
+    }
   }
 
   fmtDate(d: Date): string {
@@ -49,80 +83,41 @@ export struct SchoolCardPage {
     return new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
   }
 
-  triggerOAuth(): void {
-    if (this.wvActive) return;
-    console.info('SchoolCardPage', 'triggerOAuth');
-    this.wvActive = true;
-    this.wvPhase = 1;
-    this.loading = true;
-    this.error = '';
-  }
-
-  wvCleanup(): void {
-    this.wvActive = false;
-    this.wvPhase = 0;
-  }
-
-  // 余额
-  injectFetchBalance(): void {
-    const js: string =
-      'fetch("' + this.wvUrl.replace('/home/openXDOAuth2Page','/myaccount/openMyAccount?openid=') + this.openid + '")' +
-      '.then(function(r){return r.text();}).then(function(t){console.log("SC_BAL:"+t.length+"|"+t);})' +
-      '.catch(function(e){console.log("SC_BAL_ERR:"+e);});';
-    this.wvController.runJavaScript(js);
-  }
-
-  // 消费记录
-  injectFetchRecords(begin: string, end: string): void {
-    const body: string = JSON.stringify({
-      beginDate: begin,
-      endDate: end,
-      tradeType: '-1',
-      openid: this.openid,
-    });
-    const js: string =
-      'var x=new XMLHttpRequest();' +
-      'x.open("POST","' + this.wvUrl.replace('/home/openXDOAuth2Page','/selftrade/queryCardSelfTradeList?openid=') + this.openid + '",true);' +
-      'x.setRequestHeader("Content-Type","application/json; charset=utf-8");' +
-      'x.onload=function(){console.log("SC_RECS:"+x.responseText);};' +
-      'x.onerror=function(){console.log("SC_ERR:recs_network");};' +
-      'x.send(' + JSON.stringify(body) + ');';
-    this.wvController.runJavaScript(js);
-  }
-
   // 二维码：按需获取
-  fetchQRCode(): void {
+  async fetchQRCode(): Promise<void> {
     if (this.qrBase64) {
       this.showBarcode = true;
       return;
     }
-    if (!this.openid) return;
     this.qrLoading = true;
-    this.wvPhase = 3;
-    this.wvController.loadUrl('https://v8scan.xidian.edu.cn/virtualcard/openVirtualcard?openid=' +
-      this.openid + '&displayflag=1&id=2022082613');
+    try {
+      this.qrBase64 = await this.cardSvc.getQRCodeBase64();
+      this.showBarcode = true;
+    } catch (e) {
+      console.error('SchoolCardPage', 'fetchQRCode error: ' + String(e));
+    } finally {
+      this.qrLoading = false;
+    }
   }
 
-  private balDone: boolean = false;
-  private recDone: boolean = false;
-
-  checkInitDone(): void {
-    if (this.balDone && this.recDone) {
+  async onQueryRecords(): Promise<void> {
+    try {
+      this.loading = true;
+      this.error = '';
+      this.records = await this.cardSvc.getPaidRecords(this.beginDate, this.endDate);
+      promptAction.showToast({ message: '查询成功，共 ' + String(this.records.length) + ' 条', duration: 2000 });
+    } catch (e) {
+      console.error('SchoolCardPage', 'onQueryRecords error: ' + String(e));
+      promptAction.showToast({ message: '查询失败', duration: 2000 });
+    } finally {
       this.loading = false;
     }
   }
 
-  onQueryRecords(): void {
-    if (!this.wvActive || !this.openid) return;
-    this.injectFetchRecords(this.beginDate, this.endDate);
-    this.loading = true;
-  }
-
   setDateRange(days: number): void {
     const now = new Date();
-    const start = new Date(now.getTime() - days * 86400000);
     this.endDate = this.fmtDate(now);
-    this.beginDate = this.fmtDate(start);
+    this.beginDate = this.fmtDate(new Date(now.getTime() - days * 86400000));
     this.onQueryRecords();
   }
 
@@ -148,309 +143,158 @@ export struct SchoolCardPage {
 
   build() {
     NavDestination() {
-      Stack() {
+      Column() {
+        // ========== 余额卡片 ==========
         Column() {
-          // ========== 余额卡片 ==========
-          Column() {
-            Row() {
-              Text('校园卡余额').fontSize(14).fontColor('#FFFFFFB3')
-              Blank()
-              Button() {
-                Text(this.showBarcode ? '隐藏付款码' : '显示付款码')
-                  .fontSize(13).fontColor('#FFFFFF')
-              }
-              .height(32).borderRadius(16)
-              .border({ width: 1, color: '#FFFFFF80' })
-              .padding({ left: 14, right: 14 })
-              .onClick(() => {
-                if (this.showBarcode) {
-                  this.showBarcode = false;
-                } else {
-                  this.fetchQRCode();
-                }
-              })
-            }.width('100%').padding({ left: 20, right: 16, top: 16, bottom: 0 })
-
-            Row() {
-              Text('¥ ' + this.balance)
-                .fontSize(42).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
-            }.width('100%').padding({ left: 20, right: 20, top: 4, bottom: 18 })
-          }
-          .width('100%')
-          .borderRadius(16)
-          .linearGradient({
-            angle: 135,
-            colors: [['#4A90D9', 0], ['#2979FF', 0.5], ['#1565C0', 1]]
-          })
-          .margin({ left: 16, right: 16, top: 8 })
-
-          // ========== 付款码 ==========
-          if (this.showBarcode) {
-            Column() {
-              Row() {
-                Text('付款码').fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-              }.width('100%').padding({ left: 18, right: 18, top: 14 })
-
-              if (this.qrLoading) {
-                LoadingProgress().width(24).height(24).margin({ top: 24, bottom: 24 })
-              } else if (this.qrBase64) {
-                Divider().color('#EEEEEE').strokeWidth(0.5).margin({ left: 18, right: 18 })
-                Row() {
-                  Image('data:image/png;base64,' + this.qrBase64)
-                    .width(220).height(220).objectFit(ImageFit.Contain)
-                }.width('100%').justifyContent(FlexAlign.Center)
-                .padding({ top: 8, bottom: 14 })
-              } else {
-                Text('二维码加载失败').fontSize(13).fontColor(ThemeColors.textHint)
-                  .width('100%').textAlign(TextAlign.Center).padding({ top: 20, bottom: 20 })
-              }
+          Row() {
+            Text('校园卡余额').fontSize(14).fontColor('#FFFFFFB3')
+            Blank()
+            Button() {
+              Text(this.showBarcode ? '隐藏付款码' : '显示付款码')
+                .fontSize(13).fontColor('#FFFFFF')
             }
-            .borderRadius(14).backgroundColor(ThemeColors.bgCard)
-            .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
-            .margin({ left: 16, right: 16, top: 10 })
-          }
+            .height(32).borderRadius(16)
+            .border({ width: 1, color: '#FFFFFF80' })
+            .padding({ left: 14, right: 14 })
+            .onClick(() => {
+              if (this.showBarcode) {
+                this.showBarcode = false;
+              } else {
+                this.fetchQRCode();
+              }
+            })
+          }.width('100%').padding({ left: 20, right: 16, top: 16, bottom: 0 })
 
-          // ========== 消费记录 ==========
+          Row() {
+            Text('¥ ' + this.balance)
+              .fontSize(42).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+          }.width('100%').padding({ left: 20, right: 20, top: 4, bottom: 18 })
+        }
+        .width('100%')
+        .borderRadius(16)
+        .linearGradient({
+          angle: 135,
+          colors: [['#4A90D9', 0], ['#2979FF', 0.5], ['#1565C0', 1]]
+        })
+        .margin({ left: 16, right: 16, top: 8 })
+
+        // ========== 付款码 ==========
+        if (this.showBarcode) {
           Column() {
             Row() {
-              Text('消费记录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-              Blank()
-              Text(this.records.length + ' 条').fontSize(12).fontColor(ThemeColors.textHint)
-            }.width('100%').padding({ left: 18, right: 18, top: 14, bottom: 6 })
+              Text('付款码').fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+            }.width('100%').padding({ left: 18, right: 18, top: 14 })
 
-            // 快捷日期
-            Row({ space: 8 }) {
-              this.dateTag('近7天', 7)
-              this.dateTag('近30天', 30)
-              this.dateTag('近90天', 90)
-            }.width('100%').padding({ left: 18, right: 18, bottom: 8 })
-
-            // 日期选择行 — 点击弹出 DatePicker
-            Row({ space: 8 }) {
-              Text('起').fontSize(13).fontColor(ThemeColors.textHint)
+            if (this.qrLoading) {
+              LoadingProgress().width(24).height(24).margin({ top: 24, bottom: 24 })
+            } else if (this.qrBase64) {
+              Divider().color('#EEEEEE').strokeWidth(0.5).margin({ left: 18, right: 18 })
               Row() {
-                Text(this.beginDate).fontSize(13).fontColor(ThemeColors.textPrimary)
-              }
-              .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-              .borderRadius(6).backgroundColor(ThemeColors.bgPage)
-              .onClick(() => { this.pickDate(0); })
-
-              Text('~').fontSize(13).fontColor(ThemeColors.textHint)
-
-              Text('止').fontSize(13).fontColor(ThemeColors.textHint)
-              Row() {
-                Text(this.endDate).fontSize(13).fontColor(ThemeColors.textPrimary)
-              }
-              .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-              .borderRadius(6).backgroundColor(ThemeColors.bgPage)
-              .onClick(() => { this.pickDate(1); })
-
-              Blank()
-              Button('查询').fontSize(13).height(32)
-                .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(6)
-                .padding({ left: 14, right: 14 })
-                .onClick(() => { this.onQueryRecords(); })
-            }.width('100%').padding({ left: 18, right: 18, bottom: 10 })
-
-            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 18, right: 18 })
-
-            if (this.records.length === 0) {
-              Text(this.loading ? '加载中...' : '暂无消费记录')
-                .fontSize(14).fontColor(ThemeColors.textSecondary)
-                .width('100%').textAlign(TextAlign.Center).padding({ top: 28, bottom: 28 })
+                Image('data:image/png;base64,' + this.qrBase64)
+                  .width(220).height(220).objectFit(ImageFit.Contain)
+              }.width('100%').justifyContent(FlexAlign.Center)
+              .padding({ top: 8, bottom: 14 })
             } else {
-              List() {
-                ForEach(this.records, (item: PaidRecord, idx: number) => {
-                  ListItem() {
-                    Row() {
-                      Column({ space: 3 }) {
-                        Text(item.place || '未知商户')
-                          .fontSize(14).fontColor(ThemeColors.textPrimary)
-                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                        Text(item.date)
-                          .fontSize(11).fontColor(ThemeColors.textHint)
-                      }.layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ right: 10 })
-
-                      Text(item.money)
-                        .fontSize(15).fontWeight(FontWeight.Medium)
-                        .fontColor('#E53935')
-                    }
-                    .width('100%')
-                    .padding({ left: 18, right: 18, top: 11, bottom: 11 })
-                  }
-                }, (item: PaidRecord, idx: number) => idx.toString())
-              }
-              .layoutWeight(1)
-              .divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
+              Text('二维码加载失败').fontSize(13).fontColor(ThemeColors.textHint)
+                .width('100%').textAlign(TextAlign.Center).padding({ top: 20, bottom: 20 })
             }
           }
           .borderRadius(14).backgroundColor(ThemeColors.bgCard)
           .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
           .margin({ left: 16, right: 16, top: 10 })
-          .layoutWeight(1)
         }
-        .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
 
-        // ========== 隐藏 WebView ==========
-        if (this.wvActive) {
-          Web({ src: this.wvUrl, controller: this.wvController })
-            .width('300px').height('300px')
-            .position({ x: -400, y: 0 })
-            .domStorageAccess(true).javaScriptAccess(true)
-            .onPageEnd((event) => {
-              if (!event || !event.url) return;
-              const url: string = event.url;
-              console.info('SchoolCardPage', 'wv pageEnd phase=' + this.wvPhase +
-                ' url=' + url.substring(0, 150));
+        // ========== 消费记录 ==========
+        Column() {
+          Row() {
+            Text('消费记录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+            Blank()
+            Text(this.records.length + ' 条').fontSize(12).fontColor(ThemeColors.textHint)
+          }.width('100%').padding({ left: 18, right: 18, top: 14, bottom: 6 })
 
-              if (this.wvPhase === 1 && url.indexOf('v8scan.xidian.edu.cn') >= 0 &&
-                url.indexOf('openXDOAuth2Page') < 0) {
-                const js: string = 'var i=document.getElementById("openid");' +
-                  'if(i&&i.value){console.log("SC_OPENID:"+i.value);}' +
-                  'else{console.log("SC_ERR:openid_not_found");}';
-                this.wvController.runJavaScript(js);
-                return;
-              }
+          // 快捷日期
+          Row({ space: 8 }) {
+            this.dateTag('近7天', 7)
+            this.dateTag('近30天', 30)
+            this.dateTag('近90天', 90)
+          }.width('100%').padding({ left: 18, right: 18, bottom: 8 })
 
-              if (this.wvPhase === 3 && url.indexOf('openVirtualcard') >= 0) {
-                const qrJs: string =
-                  'var imgs=document.querySelectorAll("img");' +
-                  'for(var i=0;i<imgs.length;i++){' +
-                  'var src=imgs[i].getAttribute("src")||"";' +
-                  'if(src.indexOf("data:image/png;base64,")===0){' +
-                  'console.log("SC_QR:"+src.substring(22));break;' +
-                  '}}' +
-                  'if(!imgs.length||!imgs[0]){console.log("SC_QR_SKIP:no_img");}';
-                this.wvController.runJavaScript(qrJs);
-                return;
-              }
-            })
-            .onConsole((event): boolean => {
-              if (!event || !event.message) return false;
-              const msg: string = event.message.getMessage();
+          // 日期选择行
+          Row({ space: 8 }) {
+            Text('起').fontSize(13).fontColor(ThemeColors.textHint)
+            Row() {
+              Text(this.beginDate).fontSize(13).fontColor(ThemeColors.textPrimary)
+            }
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .borderRadius(6).backgroundColor(ThemeColors.bgPage)
+            .onClick(() => { this.pickDate(0); })
 
-              if (msg.indexOf('SC_OPENID:') === 0) {
-                this.openid = msg.substring(9).trim().replace(/^:/, '');
-                console.info('SchoolCardPage', 'SC_OPENID=' + this.openid);
-                SchoolCardService.getInstance().setOpenId(this.openid);
-                this.wvPhase = 2;
-                this.balDone = false;
-                this.recDone = false;
-                this.injectFetchBalance();
-                this.injectFetchRecords(this.beginDate, this.endDate);
-                return true;
-              }
+            Text('~').fontSize(13).fontColor(ThemeColors.textHint)
 
-              if (msg.indexOf('SC_BAL:') === 0) {
-                const payload: string = msg.substring(7);
-                const pipe: number = payload.indexOf('|');
-                const balLen: number = pipe >= 0 ? parseInt(payload.substring(0, pipe)) : payload.length;
-                const html: string = pipe >= 0 ? payload.substring(pipe + 1) : payload;
-                console.info('SchoolCardPage', 'SC_BAL len=' + balLen);
-                if (balLen > 100) {
-                  const mMoney = html.match(/(\d+\.\d{2})元/)?.[1] ||
-                    html.match(/(\d+\.\d{2})/)?.[1] || '';
-                  this.balance = mMoney || '--';
-                } else {
-                  this.balance = '--';
-                }
-                AppStorage.setOrCreate('card_balance', this.balance);
-                PreferenceUtil.putString('card_balance_cached', this.balance);
-                this.balDone = true;
-                this.checkInitDone();
-                return true;
-              }
+            Text('止').fontSize(13).fontColor(ThemeColors.textHint)
+            Row() {
+              Text(this.endDate).fontSize(13).fontColor(ThemeColors.textPrimary)
+            }
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .borderRadius(6).backgroundColor(ThemeColors.bgPage)
+            .onClick(() => { this.pickDate(1); })
 
-              if (msg.indexOf('SC_BAL_ERR:') === 0) {
-                console.warn('SchoolCardPage', 'SC_BAL_ERR: ' + msg.substring(11));
-                this.balance = '--';
-                this.balDone = true;
-                this.checkInitDone();
-                return true;
-              }
+            Blank()
+            Button('查询').fontSize(13).height(32)
+              .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(6)
+              .padding({ left: 14, right: 14 })
+              .onClick(() => { this.onQueryRecords(); })
+          }.width('100%').padding({ left: 18, right: 18, bottom: 10 })
 
-              if (msg.indexOf('SC_QR:') === 0) {
-                this.qrBase64 = msg.substring(6);
-                console.info('SchoolCardPage', 'SC_QR len=' + this.qrBase64.length);
-                this.showBarcode = true;
-                this.qrLoading = false;
-                this.wvPhase = 2;
-                return true;
-              }
+          Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 18, right: 18 })
 
-              if (msg.indexOf('SC_QR_SKIP:') === 0) {
-                console.info('SchoolCardPage', 'QR skip: ' + msg.substring(11));
-                this.qrLoading = false;
-                this.wvPhase = 2;
-                return true;
-              }
+          if (this.records.length === 0) {
+            Text(this.loading ? '加载中...' : '暂无消费记录')
+              .fontSize(14).fontColor(ThemeColors.textSecondary)
+              .width('100%').textAlign(TextAlign.Center).padding({ top: 28, bottom: 28 })
+          } else {
+            List() {
+              ForEach(this.records, (item: PaidRecord, idx: number) => {
+                ListItem() {
+                  Row() {
+                    Column({ space: 3 }) {
+                      Text(item.place || '未知商户')
+                        .fontSize(14).fontColor(ThemeColors.textPrimary)
+                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Text(item.date)
+                        .fontSize(11).fontColor(ThemeColors.textHint)
+                    }.layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ right: 10 })
 
-              if (msg.indexOf('SC_RECS:') === 0) {
-                const raw: string = msg.substring(8);
-                console.info('SchoolCardPage', 'SC_RECS len=' + raw.length);
-                try {
-                  const data = JSON.parse(raw) as Record<string, Object>;
-                  const resultData = data['resultData'] as Array<Record<string, string>>;
-                  if (resultData) {
-                    const list: PaidRecord[] = [];
-                    for (let i = 0; i < resultData.length; i++) {
-                      const item = resultData[i];
-                      list.push({
-                        place: item['mername'] || '',
-                        date: item['txdate'] || '',
-                        money: item['txamt'] || '',
-                      });
-                    }
-                    this.records = list;
-                    promptAction.showToast({ message: '查询成功，共 ' + String(list.length) + ' 条', duration: 2000 });
+                    Text(item.money)
+                      .fontSize(15).fontWeight(FontWeight.Medium)
+                      .fontColor('#E53935')
                   }
-                } catch (e) {
-                  console.warn('SchoolCardPage', 'SC_RECS parse failed: ' + String(e));
+                  .width('100%')
+                  .padding({ left: 18, right: 18, top: 11, bottom: 11 })
                 }
-                this.recDone = true;
-                this.checkInitDone();
-                return true;
-              }
-
-              if (msg.indexOf('SC_ERR:') === 0) {
-                console.warn('SchoolCardPage', 'SC_ERR ' + msg.substring(7));
-                this.error = '校园卡加载失败';
-                this.loading = false;
-                this.wvCleanup();
-                return true;
-              }
-
-              return false;
-            })
-            .onErrorReceive((event) => {
-              console.error('SchoolCardPage', 'wv error: ' + JSON.stringify(event));
-              this.error = '校园卡网络错误';
-              this.loading = false;
-              this.wvCleanup();
-            })
+              }, (item: PaidRecord, idx: number) => idx.toString())
+            }
+            .layoutWeight(1)
+            .divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
+          }
         }
+        .borderRadius(14).backgroundColor(ThemeColors.bgCard)
+        .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
+        .margin({ left: 16, right: 16, top: 10 })
+        .layoutWeight(1)
 
-        // 错误提示
+        // ========== 错误提示 ==========
         if (this.error) {
           Column({ space: 12 }) {
             Text(this.error).fontSize(15).fontColor('#C62828')
-            Row({ space: 10 }) {
-              Button('重试').fontSize(14)
-                .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(20)
-                .padding({ left: 24, right: 24 })
-                .onClick(() => { this.triggerOAuth(); })
-              Button('网页管理').fontSize(14)
-                .backgroundColor('#E0E0E0').fontColor(ThemeColors.textSecondary).borderRadius(20)
-                .padding({ left: 24, right: 24 })
-                .onClick(() => {
-                  this.pageInfo.pop();
-                  this.pageInfo.pushPath({ name: 'PortalWeb_SchoolCard' });
-                })
-            }
-          }
-          .width('100%').position({ x: '50%', y: '45%' }).markAnchor({ x: '50%', y: '50%' })
+            Button('重试').fontSize(14)
+              .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(20)
+              .padding({ left: 24, right: 24 })
+              .onClick(() => { this.initData(); })
+          }.width('100%').position({ x: '50%', y: '45%' }).markAnchor({ x: '50%', y: '50%' })
         }
       }
+      .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
     }
     .title('校园卡', { backgroundColor: this.accentColor })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])

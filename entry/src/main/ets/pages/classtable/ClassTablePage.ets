@@ -173,7 +173,7 @@ export struct ClassTablePage {
   private localFilePath: string = '';
   private readonly EXP_CACHE_KEY: string = 'sysj_exp_cache';
   private lastRenderedRaw: string = '';
-  private ROW_HEIGHT: number = 56;
+  private ROW_HEIGHT: number = 64;
   private swiperController: SwiperController = new SwiperController(); // GPU 级滑动
   @State _weekList: number[] = [1]; // Swiper 数据源，maxWeek 变化时更新
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
@@ -1073,7 +1073,7 @@ export struct ClassTablePage {
             Column() {
               // 标题栏
               Row() {
-                Text('添加课程').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                Text(this.editingCustomIndex >= 0 ? '编辑课程' : '添加课程').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
                 Blank()
                 Row() { Text('✕').fontSize(20).fontColor('#999999') }
                   .width(32).height(32).borderRadius(16).backgroundColor(ThemeColors.bgInput)
@@ -1122,14 +1122,17 @@ export struct ClassTablePage {
                       { value: '周六' },
                       { value: '周日' }
                     ])
+                      .value(this.getDayValue())
                       .selected(this.addCourseDay).onSelect((idx: number) => { this.addCourseDay = idx; }).layoutWeight(1)
                   }.width('100%')
                   Row() { Text('开始节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
                     Select(this.buildSectionOptions())
+                      .value(this.getSectionValue(this.addCourseStartSection))
                       .selected(this.addCourseStartSection).onSelect((idx: number) => { this.addCourseStartSection = idx; }).layoutWeight(1)
                   }.width('100%')
                   Row() { Text('结束节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(72)
                     Select(this.buildSectionOptions())
+                      .value(this.getSectionValue(this.addCourseEndSection))
                       .selected(this.addCourseEndSection).onSelect((idx: number) => { this.addCourseEndSection = idx; }).layoutWeight(1)
                   }.width('100%')
                 }.width('100%')
@@ -1137,7 +1140,7 @@ export struct ClassTablePage {
               Row({ space: 12 }) {
                 Button('取消').layoutWeight(1).backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
                   .onClick(() => { this.showAddCourseDialog = false; this.resetAddCourseForm(); })
-                Button('添加').layoutWeight(1).backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).fontColor('#FFFFFF')
+                Button(this.editingCustomIndex >= 0 ? '保存' : '添加').layoutWeight(1).backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).fontColor('#FFFFFF')
                   .onClick(() => { this.addCustomCourse(); })
               }.margin({ top: 16 }).width('100%')
             }.width('82%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(12)
@@ -1356,6 +1359,14 @@ export struct ClassTablePage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady(() => {})
+    .onShown(() => {
+      // 从实验/考试页面返回时，重新合并缓存数据到课表
+      if (!this.loading) {
+        this.mergeExperimentDataIntoGrid();
+        this.loadExamDataInPlace();
+        this.mergePhysicsExperiments();
+      }
+    })
     .onBackPressed(() => {
       if (this.showAddCourseDialog) {
         this.showAddCourseDialog = false;
@@ -1503,7 +1514,7 @@ export struct ClassTablePage {
 
   // 获取总网格高度（含分隔行）
   private getTotalGridHeight(): number {
-    return SECTION_COUNT * this.ROW_HEIGHT + 2 * BREAK_HEIGHT;
+    return SECTION_COUNT * this.ROW_HEIGHT + 2 * BREAK_HEIGHT + 24;
   }
 
   // 节次开始分钟 (如第1节 8:30 → 510)
@@ -1649,8 +1660,11 @@ export struct ClassTablePage {
     Scroll() {
       Column() {
         Row() {
+          // Top-align both columns so time labels match grid rows
           // Left: time labels (fixed)
           Column() {
+            // Spacer to align with day header row
+            Column().width(40).height(50)
             ForEach([1, 2, 3, 4], (section: number) => {
               Column() {
                 Text(String(section)).fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Medium)
@@ -1676,6 +1690,7 @@ export struct ClassTablePage {
                 Text(SECTION_TIMES[section].split('-')[1] || '').fontSize(9).fontColor(ThemeColors.textHint).margin({ top: 1 })
               }.width(40).height(this.ROW_HEIGHT).justifyContent(FlexAlign.Center)
             }, (section: number) => `sec_${section}`)
+            Row().width(40).height(24)
           }.width(40)
 
           // Right: Swiper (GPU-native horizontal scroll, one page per week)
@@ -1751,6 +1766,7 @@ export struct ClassTablePage {
                         }, (day: number) => `grid_${day}`)
                       }.width('100%')
                     }, (section: number) => `sec_${section}`)
+                    Row().width('100%').height(24)
                   }.width('100%')
 
                   // Cells for this week
@@ -1759,13 +1775,13 @@ export struct ClassTablePage {
                       Column() {
                         Text(cell.name).fontSize(10)
                           .fontColor('#FFFFFF')
-                          .fontWeight(FontWeight.Medium).maxLines(3)
+                          .fontWeight(FontWeight.Medium).maxLines(2)
                           .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        Text(cell.classroom).fontSize(9)
+                        Text(cell.classroom).fontSize(8)
                           .fontColor('#FFFFFFCC')
                           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
                         if (cell.teacher) {
-                          Text(cell.teacher).fontSize(8)
+                          Text(cell.teacher).fontSize(7)
                             .fontColor('#FFFFFFAA')
                             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
                         }
@@ -1816,7 +1832,7 @@ export struct ClassTablePage {
                       })
                     }, (cell: ClassCell) => `cell_${day}_${cell.startSection}_${cell.name}_${cell.kch}`)
                   }, (day: number) => `day_${day}`)
-                }.layoutWeight(1)
+                }.width('100%')
               }.width('100%')
             }, (week: number) => `week_${week}`)
           }
@@ -1829,7 +1845,7 @@ export struct ClassTablePage {
             this.buildCellCache();
           })
           .layoutWeight(1)
-        }.width('100%')
+        }.width('100%').alignItems(VerticalAlign.Top)
       }.width('100%')
     }.scrollable(ScrollDirection.Vertical).scrollBar(BarState.Auto).layoutWeight(1)
   }
@@ -2234,9 +2250,11 @@ export struct ClassTablePage {
       this.customList.push(this.cellToItem(cell));
     }
     this.saveCustomList();
-    // 保存后重新从文件加载→应用grid，保证和重进页面走同一条路径
     this.loadCustomCourses(this.classGrid);
     this.classGrid = this.classGrid.slice(0, this.classGrid.length);
+
+    // 关闭详情弹窗，用户可重新点击更新后的卡片查看
+    this.showDetailDialog = false;
 
     this.showAddCourseDialog = false;
     this.resetAddCourseForm();
@@ -2290,6 +2308,15 @@ export struct ClassTablePage {
     return opts;
   }
 
+  private getDayValue(): string {
+    const v: string[] = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    return this.addCourseDay > 0 && this.addCourseDay < v.length ? v[this.addCourseDay] : '请选择星期';
+  }
+
+  private getSectionValue(idx: number): string {
+    return idx > 0 && idx <= 11 ? '第' + idx + '节' : '请选择';
+  }
+
   private buildWeekOptions(): number[] {
     const weeks: number[] = [];
     for (let i = 1; i <= this.maxWeek; i++) {
@@ -2331,6 +2358,7 @@ export struct ClassTablePage {
     } catch (e) {
       console.error('ClassTablePage', 'saveCustomList error' + String(e));
     }
+    AppStorage.setOrCreate('ct_updated', String(Date.now()) + '_' + String(Math.floor(Math.random() * 10000)));
   }
 
   private deleteCustomCourse(cell: ClassCell): void {
@@ -2361,7 +2389,9 @@ export struct ClassTablePage {
       item.name === cell.name && item.day === cell.day &&
       item.startSection === cell.startSection && item.endSection === cell.endSection
     );
-    this.showAddCourseDialog = true;
+    // 先关再开确保表单刷新
+    this.showAddCourseDialog = false;
+    setTimeout(() => { this.showAddCourseDialog = true; }, 50);
   }
 
   // 后台获取物理实验（wlsy.xidian.edu.cn），有密码才尝试，没数据也不报错

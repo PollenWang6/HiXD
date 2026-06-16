@@ -3,6 +3,7 @@ import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { EhallService } from './EhallService';
 import { CasLoginService } from './CasLoginService';
+import { AttendanceService } from './AttendanceService';
 
 const TAG: string = 'UserInfoService';
 
@@ -64,7 +65,7 @@ export class UserInfoService {
   async fetchFromEhall(xh: string): Promise<boolean> {
     console.info(TAG, 'fetchFromEhall: start, xh=' + xh);
     try {
-      // ─── Step 0: 确保 CAS TGC 有效（checkEhallLogin 只看 MOD_AUTH_CAS，不验证 TGC） ───
+      // ──── Step 0: 确保 CAS TGC 有效 ────
       const casRestored: boolean = await CasLoginService.getInstance().tryAutoRestoreLogin();
       console.info(TAG, 'fetchFromEhall: tryAutoRestoreLogin=' + String(casRestored));
       if (!casRestored) {
@@ -72,7 +73,7 @@ export class UserInfoService {
         return false;
       }
 
-      // ─── Step 1: 先 GET xgxt，让它自己触发 CAS 302（service 参数由 xgxt 生成，CAS 才认） ───
+      // ──── Step 1: 先 GET xgxt，让它自己触发 CAS 302 ────
       const xgxtIndex: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
       let currentUrl: string = xgxtIndex;
       let resp: HttpResponse = await this.http.getNoRedirect(xgxtIndex);
@@ -93,11 +94,10 @@ export class UserInfoService {
       console.info(TAG, 'fetchFromEhall: SSO done, final status=' + String(resp.statusCode) +
         ' url=' + currentUrl.substring(0, 80));
 
-      // 不要 copy ids → xgxt：ids 的 route/JSESSIONID/happyVoyage 与 xgxt 不同，会覆盖 xgxt SSO 拿到的正确 session
       const xgxtCookies: string = this.http.getCookiesForDomain('xgxt.xidian.edu.cn');
       console.info(TAG, 'fetchFromEhall: xgxt cookies=' + xgxtCookies.substring(0, 200));
 
-      // ─── Step 2: getAppConfig 初始化模块（初始化 session，可能设置必要 cookie） ───
+      // ──── Step 2: getAppConfig 初始化模块 ────
       const xgxtHeaders: Record<string, string> = {
         'Referer': 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do',
         'Host': 'xgxt.xidian.edu.cn',
@@ -107,7 +107,7 @@ export class UserInfoService {
       console.info(TAG, 'fetchFromEhall: getAppConfig status=' + String(resp.statusCode) +
         ' body=' + resp.body.substring(0, 200));
 
-      // ─── Step 3: getStuBaseInfo 拉取信息 ───
+      // ──── Step 3: getStuBaseInfo 拉取信息 ────
       const infoUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do';
       const infoBody: Record<string, string> = {
         'requestParamStr': '{"XSBH":"' + xh + '"}'
@@ -121,7 +121,6 @@ export class UserInfoService {
         return false;
       }
 
-      // xgxt API 返回纯 JSON: {"returnCode":"...","data":{...}}
       const obj: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
       const returnCode: string = String(obj['returnCode'] ?? '');
       console.info(TAG, 'fetchFromEhall: returnCode=' + returnCode);
@@ -137,7 +136,6 @@ export class UserInfoService {
         return false;
       }
 
-      // 打印全部字段便于诊断
       const dataKeys: string[] = Object.keys(data);
       console.info(TAG, 'fetchFromEhall: data keys=' + dataKeys.join(',') +
         ' count=' + String(dataKeys.length));
@@ -163,7 +161,7 @@ export class UserInfoService {
       console.info(TAG, 'fetchFromEhall: OK name=' + name + ' college=' + college +
         ' major=' + major + ' grade=' + grade + ' gender=' + gender);
 
-      // 顺带拉取超星 UID（异步，不阻塞返回）
+      // 顺便拉取超星 UID（异步，不阻塞返回）
       this.fetchChaoxingUid();
 
       return name.length > 0;
@@ -173,15 +171,67 @@ export class UserInfoService {
     }
   }
 
-  // 超星平台 UID 缓存读取（纯 HTTP 提取不可行：fanya 不在 CAS 白名单，
-  // i.chaoxing.com 是 SPA，实际提取由 MainPage 隐藏 WebView 完成）
+  // 超星平台 UID 获取（纯 HTTP，不走 WebView）
+  // 流程：CAS SSO → loginToLearning → HTTP GET i.chaoxing.com/base → 正则提取 UID
   async fetchChaoxingUid(): Promise<string> {
     const cached: string = PreferenceUtil.getString('cx_uid');
     if (cached.length > 0) {
       console.info(TAG, 'fetchChaoxingUid: from cache, uid=' + cached);
       return cached;
     }
-    console.info(TAG, 'fetchChaoxingUid: no cache');
-    return '';
+
+    console.info(TAG, 'fetchChaoxingUid: no cache, fetching via HTTP...');
+    try {
+      // 确保 CAS session 存活
+      const casOk: boolean = await CasLoginService.getInstance().tryAutoRestoreLogin();
+      if (!casOk) {
+        console.warn(TAG, 'fetchChaoxingUid: CAS session expired');
+        return '';
+      }
+
+      // 通过 xdspoc SSO 登录超星（CAS 白名单内）
+      await AttendanceService.getInstance().loginToLearning();
+      console.info(TAG, 'fetchChaoxingUid: loginToLearning complete');
+
+      // 把子域 cookie 搬运到超星主站域
+      const srcDomains: string[] = ['fanya.chaoxing.com', 'xdspoc.fanya.chaoxing.com',
+        'fycourse.fanya.chaoxing.com', 'mobilelearn.chaoxing.com'];
+      const cxDomains: string[] = ['i.chaoxing.com', 'passport2.chaoxing.com', 'chaoxing.com'];
+      for (let si = 0; si < srcDomains.length; si++) {
+        for (let di = 0; di < cxDomains.length; di++) {
+          this.http.copyCookiesForDomain(srcDomains[si], cxDomains[di]);
+        }
+      }
+
+      // HTTP GET i.chaoxing.com/base（服务端渲染，UID 在初始 HTML 中）
+      const resp: HttpResponse = await this.http.get('https://i.chaoxing.com/base');
+      const body: string = resp.body || '';
+      console.info(TAG, 'fetchChaoxingUid: base page status=' + String(resp.statusCode) +
+        ' len=' + String(body.length));
+
+      if (!resp.isOk || body.length < 500) {
+        console.warn(TAG, 'fetchChaoxingUid: base page too short or not OK');
+        return '';
+      }
+
+      // 正则提取 UID：优先 JS 变量，降级头像 URL
+      let match: RegExpMatchArray | null = body.match(/var uid\s*=\s*'(\d+)'/);
+      if (!match) {
+        match = body.match(/photo\.chaoxing\.com\/p\/(\d+)_80/);
+      }
+
+      if (!match) {
+        console.warn(TAG, 'fetchChaoxingUid: UID not found in base page HTML');
+        return '';
+      }
+
+      const uid: string = match[1];
+      PreferenceUtil.putString('cx_uid', uid);
+      console.info(TAG, 'fetchChaoxingUid: saved uid=' + uid);
+      return uid;
+    } catch (e) {
+      console.warn(TAG, 'fetchChaoxingUid: exception: ' + String(e));
+      return '';
+    }
   }
 }

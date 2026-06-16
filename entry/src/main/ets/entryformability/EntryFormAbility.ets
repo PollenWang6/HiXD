@@ -33,12 +33,16 @@ class FormDataClass {
   todayRooms: string[];
   todayStarts: number[];
   todayTeachers: string[];
+  todayTypes: string[];
+  todaySeats: string[];
   todayCount: number;
   tomorrowNames: string[];
   tomorrowTimes: string[];
   tomorrowRooms: string[];
   tomorrowStarts: number[];
   tomorrowTeachers: string[];
+  tomorrowTypes: string[];
+  tomorrowSeats: string[];
   tomorrowCount: number;
   // 考试数据
   todayExamNames: string[];
@@ -64,12 +68,16 @@ class FormDataClass {
     this.todayRooms = [];
     this.todayStarts = [];
     this.todayTeachers = [];
+    this.todayTypes = [];
+    this.todaySeats = [];
     this.todayCount = 0;
     this.tomorrowNames = [];
     this.tomorrowTimes = [];
     this.tomorrowRooms = [];
     this.tomorrowStarts = [];
     this.tomorrowTeachers = [];
+    this.tomorrowTypes = [];
+    this.tomorrowSeats = [];
     this.tomorrowCount = 0;
     this.todayExamNames = [];
     this.todayExamTimes = [];
@@ -369,66 +377,92 @@ function mergePhysicsPreview(form: FormDataClass, currentWeek: number, localDay:
   }
 }
 
-function mergeExamPreview(form: FormDataClass, currentWeek: number, localDay: number): void {
-  try {
-    const cached: string = PreferenceUtil.getString('exam_schedule_cache');
-    if (cached.length === 0) { return; }
-    const items: Object[] = JSON.parse(cached) as Object[];
-    const todayDay: number = localDay;
-    const tomorrowDay: number = todayDay === 7 ? 1 : todayDay + 1;
 
-    hilog.info(DOMAIN, TAG, 'mergeExamPreview: items=' + items.length + ' currentWeek=' + currentWeek);
+// 从考试时间字符串推算对应节次
+function getExamSection(timeStr: string): number {
+  const idx: number = timeStr.indexOf('-');
+  const startTime: string = idx >= 0 ? timeStr.substring(0, idx) : timeStr;
+  const parts: string[] = startTime.split(':');
+  if (parts.length < 2) return 11;
+  const h: number = parseInt(parts[0]);
+  const m: number = parseInt(parts[1]);
+  const totalMin: number = h * 60 + m;
+  for (let i: number = 1; i < SECTION_TIMES.length; i++) {
+    const sep: string[] = SECTION_TIMES[i].split('-');
+    const sh: number = parseInt(sep[0].split(':')[0]);
+    const sm: number = parseInt(sep[0].split(':')[1]);
+    if (totalMin <= sh * 60 + sm) return i;
+  }
+  return 11;
+}
+function mergeExamPreview(form: FormDataClass, currentWeek: number, localDay: number, context: common.Context): void {
+  try {
+    // 从共享文件读取（绕过 Preferences 跨进程隔离）
+    let cached: string = PreferenceUtil.readSharedFile('exam_schedule', context.filesDir);
+    if (cached.length === 0) {
+      cached = PreferenceUtil.getString('exam_schedule_cache');
+    }
+    if (cached.length === 0) { return; }
+    const root: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
+    const ds: Record<string, Object> = root['datas'] as Record<string, Object>;
+    if (!ds) { return; }
+    const wdksap: Record<string, Object> = ds['wdksap'] as Record<string, Object>;
+    if (!wdksap) { return; }
+    const items: Object[] = wdksap['rows'] as Object[];
+    if (!items || items.length === 0) { return; }
+
+    const now: Date = new Date();
+    const pad = (n: number): string => n < 10 ? '0' + n : String(n);
+    const todayStr: string = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+    const tm: Date = new Date(now.getTime() + 86400000);
+    const tomorrowStr: string = tm.getFullYear() + '-' + pad(tm.getMonth() + 1) + '-' + pad(tm.getDate());
 
     for (let i: number = 0; i < items.length; i++) {
       const item: Record<string, Object> = items[i] as Record<string, Object>;
-      const ksrq: string = item['ksrq'] as string || '';
-      const kssjms: string = item['kssjms'] as string || '';
+      const ksrq: string = item['KSRQ'] as string || '';
+      const kssjms: string = item['KSSJMS'] as string || '';
       if (!ksrq || !kssjms) continue;
 
-      // 计算考试周次
-      const dateParts: string[] = ksrq.split('-');
-      const examDate: Date = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-      const startDate: Date = getSemesterStartDate();
-      const diffDays: number = Math.floor((examDate.getTime() - startDate.getTime()) / 86400000);
-      const weekNum: number = Math.floor(diffDays / 7) + 1;
-      const weekday: number = examDate.getDay() === 0 ? 7 : examDate.getDay();
-
-      if (weekNum !== currentWeek) continue;
+      // KSRQ may include time: "2026-06-15 00:00:00"
+      const dateOnly: string = ksrq.length >= 10 ? ksrq.substring(0, 10) : ksrq;
+      if (dateOnly !== todayStr && dateOnly !== tomorrowStr) continue;
 
       // 解析考试时间
       const spaceIdx: number = kssjms.indexOf(' ');
       const timeWithDay: string = spaceIdx >= 0 ? kssjms.substring(spaceIdx + 1) : kssjms;
       const parenIdx: number = timeWithDay.indexOf('(');
       const timeOnly: string = parenIdx >= 0 ? timeWithDay.substring(0, parenIdx) : timeWithDay;
-      const timeParts: string[] = timeOnly.split('-');
-      const timeStr: string = timeParts.length >= 2 ? timeParts[0].trim() + '-' + timeParts[1].trim() : timeOnly;
 
-      const name: string = (item['kcm'] as string) || (item['ksmc'] as string) || '考试';
-      const room: string = (item['jasmc'] as string) || '';
-      const weekDayNames: string[] = ['', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
-      const examTimeDesc: string = timeOnly + ' ' + weekDayNames[examDate.getDay() || 7];
+      const name: string = (item['KCM'] as string) || (item['KSMC'] as string) || '考试';
+      const room: string = (item['JASMC'] as string) || '';
+      const seat: string = (item['ZWH'] as string) || '';
+      const examTimeDesc: string = timeOnly;
 
-      hilog.info(DOMAIN, TAG, 'Exam[' + i + ']: name=' + name + ' weekday=' + weekday + ' time=' + timeStr);
-
-      if (weekday === todayDay) {
-        form.todayExamNames.push('📝 ' + name);
-        form.todayExamTimes.push(examTimeDesc);
-        form.todayExamRooms.push(room);
-      } else if (weekday === tomorrowDay) {
-        form.tomorrowExamNames.push('📝 ' + name);
-        form.tomorrowExamTimes.push(examTimeDesc);
-        form.tomorrowExamRooms.push(room);
+      if (dateOnly === todayStr) {
+        form.todayNames.push(name);
+        form.todayTimes.push(examTimeDesc);
+        form.todayRooms.push(room);
+        form.todayTeachers.push('');
+        form.todayStarts.push(getExamSection(timeOnly));
+        form.todayTypes.push('exam');
+        form.todaySeats.push(seat);
+      } else {
+        form.tomorrowNames.push(name);
+        form.tomorrowTimes.push(examTimeDesc);
+        form.tomorrowRooms.push(room);
+        form.tomorrowTeachers.push('');
+        form.tomorrowStarts.push(getExamSection(timeOnly));
+        form.tomorrowTypes.push('exam');
+        form.tomorrowSeats.push(seat);
       }
     }
 
-    form.todayExamCount = form.todayExamNames.length;
-    form.tomorrowExamCount = form.tomorrowExamNames.length;
-    hilog.info(DOMAIN, TAG, 'mergeExamPreview done: today=' + form.todayExamCount + ' tomorrow=' + form.tomorrowExamCount);
+    form.todayExamCount = form.todayTypes.filter((t: string) => t === 'exam').length;
+    form.tomorrowExamCount = form.tomorrowTypes.filter((t: string) => t === 'exam').length;
   } catch (e) {
     hilog.warn(DOMAIN, TAG, 'mergeExamPreview error: ' + JSON.stringify(e));
   }
 }
-
 function getSemesterStartDate(): Date {
   const now: Date = new Date();
   return new Date(2026, 2, 2);
@@ -474,14 +508,14 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
   mergePhysicsPreview(form, currentWeek, localDay);
 
   // ── 加载考试数据 ──
-  mergeExamPreview(form, currentWeek, localDay);
+  mergeExamPreview(form, currentWeek, localDay, context);
 
   if (!cache || cache.length === 0) {
     form.todayCount = form.todayNames.length;
     form.tomorrowCount = form.tomorrowNames.length;
-    form.todayExamCount = form.todayExamNames.length;
-    form.tomorrowExamCount = form.tomorrowExamNames.length;
-    form.isEmpty = form.todayNames.length === 0 && form.todayExamNames.length === 0;
+    form.todayExamCount = form.todayTypes.filter((t: string) => t === 'exam').length;
+    form.tomorrowExamCount = form.tomorrowTypes.filter((t: string) => t === 'exam').length;
+        form.isEmpty = form.todayNames.length === 0;
     sortEntries(form.todayNames, form.todayTimes, form.todayRooms, form.todayTeachers, form.todayStarts);
     sortEntries(form.tomorrowNames, form.tomorrowTimes, form.tomorrowRooms, form.tomorrowTeachers, form.tomorrowStarts);
     hilog.info(DOMAIN, TAG, 'buildFormData done (no cache): today=' + form.todayCount + ' tomorrow=' + form.tomorrowCount +
@@ -597,10 +631,10 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
     // 按节次排序 tomorrow
     sortEntries(form.tomorrowNames, form.tomorrowTimes, form.tomorrowRooms, form.tomorrowTeachers, form.tomorrowStarts);
 
-    form.todayExamCount = form.todayExamNames.length;
-    form.tomorrowExamCount = form.tomorrowExamNames.length;
+    form.todayExamCount = form.todayTypes.filter((t: string) => t === 'exam').length;
+    form.tomorrowExamCount = form.tomorrowTypes.filter((t: string) => t === 'exam').length;
 
-    form.isEmpty = form.todayNames.length === 0 && form.todayExamNames.length === 0;
+        form.isEmpty = form.todayNames.length === 0;
     hilog.info(DOMAIN, TAG, 'buildFormData done: today=' + form.todayCount + ' tomorrow=' + form.tomorrowCount +
       ' rows=' + totalRows + ' weekdaySkip=' + weekdayFiltered + ' weekSkip=' + weekFiltered);
 

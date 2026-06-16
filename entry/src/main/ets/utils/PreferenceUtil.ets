@@ -3,6 +3,8 @@ import dataPreferences from '@ohos.data.preferences';
 import { Context } from '@kit.AbilityKit';
 import web from '@ohos.web.webview';
 import { HttpUtil } from './HttpUtil';
+import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 
 type ValueType = string | number | boolean;
 
@@ -10,6 +12,7 @@ const TAG = 'PreferenceUtil';
 const STORE_NAME = 'hixd_prefs';
 
 let prefsInstance: dataPreferences.Preferences | null = null;
+let sFilesDir: string = '';  // 共享文件目录（主应用/卡片进程均可访问）
 
 // 内存缓存：在 prefs 还没 init 时，put 的值先存在这里
 const inMemoryCache: Map<string, string | boolean | number> = new Map();
@@ -25,7 +28,8 @@ export class PreferenceUtil {
   static async init(context: Context): Promise<void> {
     try {
       prefsInstance = await dataPreferences.getPreferences(context, STORE_NAME);
-      console.info(TAG, 'Preferences initialized');
+      sFilesDir = context.filesDir;
+      console.info(TAG, 'Preferences initialized, filesDir=' + sFilesDir);
       await HttpUtil.getInstance().loadCookies();
       console.info(TAG, 'HttpUtil cookies loaded from storage');
       await PreferenceUtil.syncCookiesToWeb();
@@ -134,5 +138,59 @@ export class PreferenceUtil {
       }
     }
     return false;
+  }
+
+  // 共享文件读写（主应用/卡片进程都可通过 filesDir 访问同一文件）
+  // 用于绕过 Preferences 的跨进程隔离
+  static saveSharedFile(filename: string, content: string): void {
+    console.error(TAG, '[DIAG-SAVE] sFilesDir="' + sFilesDir + '" len=' + sFilesDir.length);
+    if (sFilesDir.length === 0) {
+      console.warn(TAG, 'saveSharedFile: filesDir not initialized');
+      return;
+    }
+    try {
+      const path: string = sFilesDir + '/' + filename + '.json';
+      console.error(TAG, '[DIAG-SAVE] writing to: ' + path + ' contentLen=' + content.length);
+      const encoder = new util.TextEncoder();
+      const encoded: Uint8Array = encoder.encodeInto(content);
+      const file: fileIo.File = fileIo.openSync(path,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.WRITE_ONLY);
+      fileIo.writeSync(file.fd, encoded.buffer);
+      fileIo.closeSync(file);
+      console.error(TAG, '[DIAG-SAVE] SUCCESS: ' + filename + ' written (' + content.length + ' chars)');
+    } catch (e) {
+      console.error(TAG, '[DIAG-SAVE] FAIL: ' + JSON.stringify(e));
+    }
+  }
+
+  static readSharedFile(filename: string, filesDir: string = ''): string {
+    const dir: string = filesDir.length > 0 ? filesDir : sFilesDir;
+    console.error(TAG, '[DIAG-READ] filesDir="' + filesDir + '" sFilesDir="' + sFilesDir + '" useDir="' + dir + '"');
+    if (dir.length === 0) {
+      console.error(TAG, '[DIAG-READ] FAIL: no dir');
+      return '';
+    }
+    try {
+      const path: string = dir + '/' + filename + '.json';
+      console.error(TAG, '[DIAG-READ] trying path: ' + path);
+      const file: fileIo.File = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      const stat = fileIo.statSync(path);
+      console.error(TAG, '[DIAG-READ] file opened, size=' + stat.size);
+      const buf = new ArrayBuffer(stat.size);
+      fileIo.readSync(file.fd, buf);
+      fileIo.closeSync(file);
+      const decoder = util.TextDecoder.create('utf-8');
+      const result: string = decoder.decodeToString(new Uint8Array(buf));
+      console.error(TAG, '[DIAG-READ] SUCCESS, rawLen=' + result.length + ' first80=' + result.substring(0, 80));
+      // strip BOM if present
+      if (result.length > 0 && result.charCodeAt(0) === 0xFEFF) {
+        console.error(TAG, '[DIAG-READ] BOM detected, stripping');
+        return result.substring(1);
+      }
+      return result;
+    } catch (e) {
+      console.error(TAG, '[DIAG-READ] FAIL: ' + JSON.stringify(e));
+      return '';
+    }
   }
 }

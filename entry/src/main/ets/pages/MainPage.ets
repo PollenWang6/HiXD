@@ -1,4 +1,4 @@
-// MainPage.ets - 底部Tab栏主页(主页·更多功能·我的)
+﻿// MainPage.ets - 底部Tab栏主页(主页·更多功能·我的)
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
 import { AccentColors, ACCENT_PRESETS } from '../utils/AccentColors';
@@ -23,7 +23,6 @@ import { PortalWebPage } from './portal/PortalWebPage';
 import { FaqPage } from './faq/FaqPage';
 import { AboutPage } from './about/AboutPage';
 import { AttendancePage } from './attendance/AttendancePage';
-import { AttendanceService } from '../services/AttendanceService';
 import { SchoolCardService } from '../services/SchoolCardService';
 import { DormWaterPage } from './dormwater/DormWaterPage';
 import { UserInfoService } from '../services/UserInfoService';
@@ -75,6 +74,8 @@ const SECTION_TIMES: string[][] = [
 class PreviewCell {
   name: string = '';
   classroom: string = '';
+  teacher: string = '';
+  seat: string = '';
   day: number = 0;        // 1-7 周一~周日
   startSection: number = 0; // 1-11
   endSection: number = 0;   // 1-11
@@ -229,6 +230,7 @@ struct MainPage {
   @State userClassName: string = '';   // 班级
   @State previewCells: PreviewCell[] = [];
   @State previewLoaded: boolean = false;
+  @State previewVersion: number = 0;
   @State isTablet: boolean = deviceInfo.deviceType === 'tablet';
   @State selectedMenuIndex: number = 0;
   private menuNames: string[] = ['课程表', '实验信息', '考试安排', '成绩查询', '空教室', '图书馆', '校园卡', '校园网', '水电查询', '我的'];
@@ -237,10 +239,11 @@ struct MainPage {
   pageInfo: NavPathStack = new NavPathStack();
   @StorageLink('electricity_cache') elCache: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
-  @StorageLink('ct_updated') @Watch('onClassTableUpdated') ctUpdated: string = '';
+  @StorageLink('ct_updated') ctUpdated: string = '';
+  private _lastCtUpdated: string = '';
 
   onClassTableUpdated(): void {
-    if (this.ctUpdated.length > 0) { this.loadClassPreview(); }
+    // @Watch on @StorageLink 在 Navigation 隐藏时不触发，改用定时轮询
   }
   @State cacheSize: string = '计算中...';
   @State showPhyPwdDialog: boolean = false;
@@ -502,9 +505,25 @@ struct MainPage {
   // 从后台切回前台时刷新登录状态
   onPageShow(): void {
     const now = Date.now();
-    if (now - this.lastForegroundCheck < 30000) return; // 30s 防抖
-    this.lastForegroundCheck = now;
-    this.refreshSessionIfNeeded();
+    if (now - this.lastForegroundCheck >= 30000) {
+      this.lastForegroundCheck = now;
+      this.refreshSessionIfNeeded();
+    }
+    this.tryRefreshPreview();
+  }
+
+  // 每次 build 时检查课表是否更新（直接读 AppStorage，避免 @StorageLink 在隐藏 Tab 不更新）
+  private tryRefreshPreview(): void {
+    const current: string = AppStorage.get('ct_updated') as string || '';
+    if (current !== this._lastCtUpdated && current.length > 0) {
+      this._lastCtUpdated = current;
+      this.loadClassPreview();
+    }
+  }
+
+  private get _previewDirty(): boolean {
+    this.tryRefreshPreview();
+    return true;
   }
 
   private async refreshSessionIfNeeded(): Promise<void> {
@@ -999,29 +1018,12 @@ struct MainPage {
         return;
       }
 
-      // 无缓存 → HTTP 走考勤 SSO 入口建超星 session → WebView 直连 i.chaoxing
-      // 关键：走 xdspoc.fanya.chaoxing.com（CAS 白名单内），不走 i.chaoxing.com（外域被拦截）
-      this.xgxtPhase = 2;
-      const attSvc: AttendanceService = AttendanceService.getInstance();
-      console.info(TAG, 'xgxt result: logging into chaoxing via xdspoc SSO...');
-      attSvc.loginToLearning().then(() => {
-        // 把 fanya/xdspoc 子域的 cookie 复制到超星主站域（i.chaoxing / passport2）
-        const http = HttpUtil.getInstance();
-        const srcDomains: string[] = ['fanya.chaoxing.com', 'xdspoc.fanya.chaoxing.com',
-          'fycourse.fanya.chaoxing.com', 'mobilelearn.chaoxing.com'];
-        const cxDomains: string[] = ['i.chaoxing.com', 'passport2.chaoxing.com', 'chaoxing.com'];
-        for (let si = 0; si < srcDomains.length; si++) {
-          for (let di = 0; di < cxDomains.length; di++) {
-            http.copyCookiesForDomain(srcDomains[si], cxDomains[di]);
-          }
+      // 无缓存 → 纯 HTTP 提取超星 UID（不再走 WebView，避免离屏优化导致回调丢失）
+      console.info(TAG, 'xgxt result: extracting uid via pure HTTP...');
+      UserInfoService.getInstance().fetchChaoxingUid().then((uid: string): void => {
+        if (uid.length > 0) {
+          this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + uid + '_80');
         }
-        // 同步所有 cookie 到 WebView（现在包含 i.chaoxing / passport2）
-        CasLoginService.getInstance().syncCookiesToWebView();
-        const cxUrl: string = 'https://i.chaoxing.com/base';
-        console.info(TAG, 'xgxt result: chaoxing session ready, nav=' + cxUrl);
-        this.xgxtController.loadUrl(cxUrl);
-      }).catch((err: Error) => {
-        console.error(TAG, 'xgxt result: loginToLearning failed: ' + err.message);
         this.xgxtCleanup();
       });
       return;
@@ -1202,6 +1204,7 @@ struct MainPage {
         }
         const cell = new PreviewCell();
         cell.name = item.kcm;
+        cell.teacher = item.skjs;
         cell.classroom = item.jasmc;
         cell.day = day;
         cell.startSection = startSec;
@@ -1367,6 +1370,7 @@ struct MainPage {
         const cell = new PreviewCell();
         cell.name = item['name'] as string || '';
         cell.classroom = item['classroom'] as string || '';
+        cell.teacher = item['teacher'] as string || '';
         cell.day = day;
         cell.startSection = startSec;
         cell.endSection = endSec > startSec ? endSec : startSec;
@@ -1383,16 +1387,22 @@ struct MainPage {
   }
 
   // 合并考试数据到预览grid
+  // exam_schedule_cache 格式: {"datas":{"wdksap":{"rows":[...]}}}（API 原始响应，键名大写）
   private mergeExamPreview(grid: PreviewCell[][][]): void {
     const cached: string = PreferenceUtil.getString('exam_schedule_cache');
     if (cached.length === 0) return;
     try {
-      const items: Object[] = JSON.parse(cached) as Object[];
+      const root: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
+      const datas: Record<string, Object> = root['datas'] as Record<string, Object>;
+      if (!datas) return;
+      const wdksap: Record<string, Object> = datas['wdksap'] as Record<string, Object>;
+      const items: Object[] = wdksap ? wdksap['rows'] as Object[] : [];
+      if (!items || items.length === 0) return;
       const startDate: Date = new Date(2026, 2, 2);
       for (let i = 0; i < items.length; i++) {
         const item: Record<string, Object> = items[i] as Record<string, Object>;
-        const ksrq: string = item['ksrq'] as string || '';
-        const kssjms: string = item['kssjms'] as string || '';
+        const ksrq: string = item['KSRQ'] as string || '';
+        const kssjms: string = item['KSSJMS'] as string || '';
         if (!ksrq || !kssjms) continue;
         const dateParts: string[] = ksrq.split('-');
         const examDate: Date = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
@@ -1404,16 +1414,16 @@ struct MainPage {
         const timeWithDay: string = spaceIdx >= 0 ? kssjms.substring(spaceIdx + 1) : kssjms;
         const parenIdx: number = timeWithDay.indexOf('(');
         const timeOnly: string = parenIdx >= 0 ? timeWithDay.substring(0, parenIdx) : timeWithDay;
-        const weekDayNames: string[] = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
         const cell = new PreviewCell();
-        cell.name = '📝 ' + ((item['kcm'] as string) || (item['ksmc'] as string) || '考试');
-        cell.classroom = item['jasmc'] as string || '';
+        cell.name = ((item['KCM'] as string) || (item['KSMC'] as string) || '考试');
+        cell.classroom = item['JASMC'] as string || '';
+        cell.seat = item['ZWH'] as string || '';
         cell.day = weekday;
         cell.startSection = 0;
         cell.endSection = 0;
         cell.isExam = true;
         cell.weekNum = weekNum;
-        cell.examTimeDesc = timeOnly + ' ' + weekDayNames[examDate.getDay()];
+        cell.examTimeDesc = timeOnly;
         if (weekday <= 7) {
           grid[weekday][0].push(cell);
         }
@@ -2536,22 +2546,23 @@ struct MainPage {
             // 课程信息
             Column() {
               Row() {
+                if (cell.isExam) {
+                  Text('📝考试')
+                    .fontSize(12).fontColor('#E91E63')
+                } else if (cell.isExperiment) {
+                  Text('🧪实验')
+                    .fontSize(12).fontColor(ThemeColors.warning)
+                } else if (cell.isCustom) {
+                  Text('📌自定')
+                    .fontSize(12).fontColor('#66BB6A')
+                }
                 Text(cell.name)
                   .fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
                   .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   .layoutWeight(1)
+                  .margin({ left: cell.isExam || cell.isExperiment || cell.isCustom ? 6 : 0 })
               }
               Row() {
-                if (cell.isExam) {
-                  Text('📝考试')
-                    .fontSize(11).fontColor('#E91E63')
-                } else if (cell.isExperiment) {
-                  Text('  实验')
-                    .fontSize(11).fontColor(ThemeColors.warning)
-                } else if (cell.isCustom) {
-                  Text('  自定')
-                    .fontSize(11).fontColor('#66BB6A')
-                }
                 if (cell.isExam && cell.examTimeDesc.length > 0) {
                   Text(cell.examTimeDesc)
                     .fontSize(12).fontColor('#E91E63')
@@ -2559,11 +2570,19 @@ struct MainPage {
                   Text(SECTION_TIMES[cell.startSection - 1][0] + '-' + SECTION_TIMES[cell.endSection - 1][1])
                     .fontSize(12).fontColor(ThemeColors.textSecondary)
                 }
+                if (cell.teacher.length > 0) {
+                  Text('  ' + cell.teacher)
+                    .fontSize(12).fontColor(ThemeColors.textSecondary)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
                 if (cell.classroom.length > 0) {
                   Text('  ' + cell.classroom)
                     .fontSize(12).fontColor(ThemeColors.textSecondary)
                     .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
+                }
+                if (cell.seat.length > 0) {
+                  Text('  ' + cell.seat)
+                    .fontSize(12).fontColor('#888888')
                 }
               }.margin({ top: 4 })
             }
@@ -2737,6 +2756,8 @@ struct MainPage {
       .backgroundColor(this.accentColor)
 
       // 课表预览卡片
+      // 课表预览卡片 — ctUpdated 变化时通过 getter 触发刷新
+      if (this._previewDirty) { /* noop */ }
       this.ClassPreviewCard()
 
       // 电费查询已移至功能菜单

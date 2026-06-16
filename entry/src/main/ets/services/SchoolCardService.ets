@@ -59,17 +59,22 @@ export class SchoolCardService {
     this.openid = '';
     this.openidFetchedAt = 0;
 
-    // NETSTACK 自动跟随重定向时只带原始域名的 cookie。
-    // v8scan→ids CAS→v8scan 链中需 ids 的 CASTGC，提前拷贝过去。
-    this.http.copyCookiesForDomain('ids.xidian.edu.cn', 'v8scan.xidian.edu.cn');
-    this.http.copyCookiesForDomain('.ehall.xidian.edu.cn', 'v8scan.xidian.edu.cn');
+    // v8scan OAuth 链: v8scan → xxcapp/uc/api/oauth → xxcapp/uc/wap/login
+    //   → xxcapp/a_xidian/cas-login → ids CAS（验证 TGC）→ 原路返回
+    // appid/state 是 xxcapp 的独立查询参数，不能编码进 redirect 值
+    const redirect1 = encodeURIComponent('https://v8scan.xidian.edu.cn/home/openHomePage');
+    const ucOauth = 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=' + redirect1 + '&appid=200200923164459783&state=STATE';
+    const redirect2 = encodeURIComponent(ucOauth);
+    const ucWapLogin = 'https://xxcapp.xidian.edu.cn/uc/wap/login?redirect=' + redirect2;
+    const redirect3 = encodeURIComponent(ucWapLogin);
+    const casCallback = 'https://xxcapp.xidian.edu.cn/a_xidian/api/cas-login/index?redirect=' + redirect3 + '&from=wap';
+    const serviceParam = encodeURIComponent(casCallback);
+    const casUrl = 'https://ids.xidian.edu.cn/authserver/login?service=' + serviceParam;
+    console.info(TAG, 'ensureOpenId: CAS URL len=' + casUrl.length);
 
-    const startUrl = BASE_URL + '/home/openXDOAuth2Page';
-    console.info(TAG, 'ensureOpenId: start ' + startUrl);
-
-    const finalResp = await this.followRedirects(startUrl, 8);
-    const html = finalResp.body || '';
-    console.info(TAG, 'ensureOpenId: status=' + finalResp.statusCode + ' page len=' + html.length);
+    const resp = await this.http.get(casUrl);
+    const html = resp.body || '';
+    console.info(TAG, 'ensureOpenId: status=' + resp.statusCode + ' page len=' + html.length);
     console.info(TAG, 'ensureOpenId: HTML preview: ' + html.substring(0, 500));
 
     // 解析 openid

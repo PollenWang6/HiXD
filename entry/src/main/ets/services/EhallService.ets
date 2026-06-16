@@ -401,6 +401,8 @@ export class EhallService {
       }).then((raw: string) => {
         if (raw && raw.length > 100) {
           PreferenceUtil.putString('exam_schedule_cache', raw);
+          console.error(TAG, '[DIAG-SAVE] preload: calling saveSharedFile rawLen=' + raw.length);
+          PreferenceUtil.saveSharedFile('exam_schedule', raw);
           console.info(TAG, 'preload: exam saved, ' + raw.length + ' chars');
         } else {
           console.warn(TAG, 'preload: exam data too short (' + (raw ? raw.length : 0) + '), keeping old cache');

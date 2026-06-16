@@ -1,6 +1,6 @@
 // LibraryPage.ets — 图书馆页面
 import { ThemeColors } from '../../utils/ThemeColors';
-import { HttpUtil } from '../../utils/HttpUtil';
+import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService, LibraryAuthResult } from '../../services/CasLoginService';
 
@@ -26,12 +26,20 @@ interface BookItem {
   items: BookLocation[];
   totalCount: number;   // 馆藏总数
   availableCount: number; // 可借数
+  imageUrl: string;
 }
 
 interface BorrowItem {
-  name: string;
-  borrowDate: string;
-  returnDate: string;
+  title: string;
+  author: string;
+  publisher: string;
+  isbn: string;
+  barcode: string;
+  loanDate: string;
+  normReturnDate: string;
+  lendDay: number;
+  imageUrl: string;
+  locationName: string;
 }
 
 
@@ -91,16 +99,25 @@ export struct LibraryPage {
       subject: String(raw['subject'] ?? ''),
       items: locations,
       totalCount: locations.length,
-      availableCount: available
+      availableCount: available,
+      imageUrl: ''
     };
   }
 
   private makeBorrowItem(raw: Record<string, string>): BorrowItem {
-    const item: BorrowItem = { name: '', borrowDate: '', returnDate: '' };
-    item.name = raw['title'] || raw['bookName'] || '';
-    item.borrowDate = raw['loanDate'] || '';
-    item.returnDate = raw['returnDate'] || raw['normReturnDateTime'] || '';
-    return item;
+    const ld: number = parseInt(raw['lendDay'] || '0');
+    return {
+      title: raw['title'] || '',
+      author: raw['author'] || '',
+      publisher: raw['publisher'] || '',
+      isbn: raw['isbn'] || raw['isbn13'] || raw['isbn10'] || '',
+      barcode: raw['barcode'] || '',
+      loanDate: raw['loanDate'] || '',
+      normReturnDate: raw['normReturnDate'] || '',
+      lendDay: isNaN(ld) ? 0 : ld,
+      imageUrl: '',
+      locationName: raw['locationName'] || ''
+    };
   }
 
   private buildFormBody(...pairs: string[]): string {
@@ -109,6 +126,81 @@ export struct LibraryPage {
       parts.push(encodeURIComponent(pairs[i]) + '=' + encodeURIComponent(pairs[i + 1] || ''));
     }
     return parts.join('&');
+  }
+
+  private async renewBook(borrow: BorrowItem): Promise<void> {
+    const userId: string = PreferenceUtil.getString('library_user_id');
+    const token: string = PreferenceUtil.getString('library_token');
+    if (!userId || !token) {
+      this.errorMsg = '认证已过期，请下拉重试';
+      return;
+    }
+    try {
+      const body: string = this.buildFormBody(
+        'libraryId', '5', 'userId', userId, 'token', token,
+        'cardNumber', PreferenceUtil.getString('ids_account'),
+        'barNumber', borrow.barcode
+      );
+      const resp: HttpResponse = await this.http.postRaw(
+        'https://shuwo.xidian.edu.cn/xidian_book/api/borrow/renewBook.html',
+        body, 'application/x-www-form-urlencoded; charset=UTF-8', undefined
+      );
+      if (resp.statusCode === 200) {
+        const raw: Record<string, Object> = resp.json<Record<string, Object>>();
+        const msg: string = String(raw['msg'] ?? '续借成功');
+        this.errorMsg = msg;
+      } else {
+        this.errorMsg = '续借失败 (HTTP ' + resp.statusCode + ')';
+      }
+    } catch (e) {
+      this.errorMsg = '续借请求失败';
+    }
+    // 清除提示
+    setTimeout(() => { this.errorMsg = ''; }, 3000);
+  }
+
+  private fmtDateShort(raw: string): string {
+    // "2026-05-20" or "2026/05/20" → "05/20"
+    const m: RegExpMatchArray | null = (raw).match(/(\d{2})[\/-](\d{2})$/);
+    return m ? (m[1] + '/' + m[2]) : raw.substring(0, 10);
+  }
+
+  private lendDayColor(day: number): string {
+    if (day < 0) return '#E53935';
+    if (day <= 3) return '#FF9800';
+    return '#4CAF50';
+  }
+
+  private fmtLendDay(day: number): string {
+    if (day < 0) return '已逾期 ' + Math.abs(day) + ' 天 😥';
+    if (day === 0) return '今日到期 ⚡';
+    if (day <= 3) return '剩余 ' + day + ' 天 ⚡';
+    return '剩余 ' + day + ' 天';
+  }
+
+  private async fetchBorrowCovers(borrows: BorrowItem[]): Promise<void> {
+    for (let i: number = 0; i < borrows.length; i += 5) {
+      const batch: BorrowItem[] = borrows.slice(i, i + 5);
+      const tasks: Promise<string>[] = batch.map((b: BorrowItem) =>
+        this.fetchBookCover(b.title, b.isbn, b.barcode)
+      );
+      const urls: string[] = await Promise.all(tasks);
+      for (let j: number = 0; j < batch.length; j++) {
+        batch[j].imageUrl = urls[j];
+      }
+    }
+    // 新建对象数组触发 ForEach 重渲染
+    const updated: BorrowItem[] = [];
+    for (let k: number = 0; k < borrows.length; k++) {
+      const b: BorrowItem = borrows[k];
+      updated.push({
+        title: b.title, author: b.author, publisher: b.publisher,
+        isbn: b.isbn, barcode: b.barcode,
+        loanDate: b.loanDate, normReturnDate: b.normReturnDate,
+        lendDay: b.lendDay, imageUrl: b.imageUrl, locationName: b.locationName
+      });
+    }
+    this.borrowList = updated;
   }
 
   async loadBorrowList(): Promise<void> {
@@ -143,10 +235,60 @@ export struct LibraryPage {
         result.push(this.makeBorrowItem(rawList[i]));
       }
       this.borrowList = result;
+      this.fetchBorrowCovers(result);
     } catch (e) {
       console.error('LibraryPage', 'loadBorrowList failed: ' + String(e));
       this.errorMsg = '借阅列表加载失败，请下拉重试';
     }
+  }
+
+  private async fetchBookCover(title: string, isbn: string, docNumber: string): Promise<string> {
+    try {
+      const resp: HttpResponse = await this.http.postRaw(
+        'https://findxidian.libsp.cn/find/unify/getPItemAndOnShelfCountAndDuxiuImageUrl',
+        JSON.stringify({ title: title, isbn: isbn, recordId: parseInt(docNumber) || 0 }),
+        'application/json',
+        { 'Referer': 'https://findxidian.libsp.cn/', 'groupCode': '200755' }
+      );
+      if (resp.statusCode === 200) {
+        const raw: Record<string, Object> = resp.json<Record<string, Object>>();
+        const data: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
+        const url = String(data['duxiuImageUrl'] ?? '');
+        return url;
+      }
+    } catch (e) {
+      // 封面获取失败不影响主流程
+    }
+    return '';
+  }
+
+  private cloneBookItem(b: BookItem): BookItem {
+    return {
+      bookName: b.bookName, author: b.author, publisher: b.publisher,
+      publishYear: b.publishYear, isbn: b.isbn, docNumber: b.docNumber,
+      callNos: b.callNos, groupCode: b.groupCode, subject: b.subject,
+      items: b.items, totalCount: b.totalCount, availableCount: b.availableCount,
+      imageUrl: b.imageUrl
+    };
+  }
+
+  private async fetchAllCovers(books: BookItem[]): Promise<void> {
+    for (let i: number = 0; i < books.length; i += 5) {
+      const batch: BookItem[] = books.slice(i, i + 5);
+      const tasks: Promise<string>[] = batch.map((b: BookItem) =>
+        this.fetchBookCover(b.bookName, b.isbn, b.docNumber)
+      );
+      const urls: string[] = await Promise.all(tasks);
+      for (let j: number = 0; j < batch.length; j++) {
+        batch[j].imageUrl = urls[j];
+      }
+    }
+    // 创建全新对象引用，触发 ForEach 重渲染
+    const updated: BookItem[] = [];
+    for (let k: number = 0; k < books.length; k++) {
+      updated.push(this.cloneBookItem(books[k]));
+    }
+    this.books = updated;
   }
 
   async searchBooks(): Promise<void> {
@@ -173,6 +315,7 @@ export struct LibraryPage {
         result.push(this.makeBookItem(rawList[i]));
       }
       this.books = result;
+      this.fetchAllCovers(result);
     } catch (e) {
       console.error('LibraryPage', 'searchBooks failed: ' + String(e));
       this.books = [];
@@ -218,6 +361,17 @@ export struct LibraryPage {
             ForEach(this.books, (book: BookItem, idx?: number) => {
               ListItem() {
                 Row() {
+                  if (book.imageUrl && book.imageUrl.length > 0) {
+                    Image(book.imageUrl).width(48).height(68)
+                      .objectFit(ImageFit.Cover).borderRadius(4)
+                  } else {
+                    Column() {
+                      Text('📖').fontSize(20)
+                    }.width(48).height(68).borderRadius(4)
+                    .backgroundColor(this.themeIsDark ? '#252525' : '#F5F5F5')
+                    .justifyContent(FlexAlign.Center)
+                    .border({ width: 0.5, color: this.themeIsDark ? '#3A3A3A' : '#DDDDDD' })
+                  }
                   Column() {
                     Text(book.bookName).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
                       .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -230,7 +384,7 @@ export struct LibraryPage {
                         .fontColor(book.availableCount > 0 ? '#4CAF50' : '#E53935')
                       Text(`  馆藏 ${book.totalCount}`).fontSize(11).fontColor('#AAAAAA')
                     }.width('100%').margin({ top: 4 })
-                  }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+                  }.layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ left: 12 })
                 }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
                 .borderRadius(8).backgroundColor(ThemeColors.bgCard)
                 .onClick(() => {
@@ -241,7 +395,7 @@ export struct LibraryPage {
                   });
                 })
               }.padding({ left: 12, right: 12 })
-            }, (book: BookItem, idx?: number) => `book_${idx}`)
+            }, (book: BookItem, idx?: number) => `book_${idx}_${book.imageUrl.length > 0 ? '1' : '0'}`)
           }.layoutWeight(1)
         } else {
           Column() {
@@ -251,19 +405,94 @@ export struct LibraryPage {
         }
       } else {
         if (this.borrowList.length > 0) {
-          List({ space: 8 }) {
+          Column() {
+            if (this.errorMsg.length > 0) {
+              Text(this.errorMsg).fontSize(13).fontColor('#FFFFFF')
+                .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+                .backgroundColor(this.errorMsg.includes('成功') ? '#4CAF50' : '#FF7043')
+                .borderRadius(8).width('100%')
+                .margin({ left: 14, right: 14, bottom: 4 })
+            }
+            List({ space: 10 }) {
             ForEach(this.borrowList, (borrow: BorrowItem, idx?: number) => {
               ListItem() {
                 Column() {
-                  Text(borrow.name).fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                    .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Row({ space: 16 }) {
-                    Text('借: ' + borrow.borrowDate).fontSize(11).fontColor(ThemeColors.textSecondary)
-                    Text('还: ' + borrow.returnDate).fontSize(11).fontColor('#FF7043')
-                  }.margin({ top: 4 })
-                }.width('100%').padding(16).alignItems(HorizontalAlign.Start)
-              }.padding({ left: 16, right: 16 })
-            }, (borrow: BorrowItem, idx?: number) => `borrow_${idx}`)
+                  Row() {
+                    // 封面
+                    if (borrow.imageUrl && borrow.imageUrl.length > 0) {
+                      Image(borrow.imageUrl).width(72).height(100)
+                        .objectFit(ImageFit.Cover).borderRadius(6)
+                    } else {
+                      Column() {
+                        Text('📖').fontSize(28)
+                        Text(borrow.title).fontSize(8).maxLines(2)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          .textAlign(TextAlign.Center)
+                          .padding({ left: 3, right: 3 })
+                          .fontColor(this.themeIsDark ? '#888888' : '#AAAAAA')
+                      }.width(72).height(100).borderRadius(6)
+                      .backgroundColor(this.themeIsDark ? '#252525' : '#F5F5F5')
+                      .justifyContent(FlexAlign.Center)
+                      .border({ width: 0.5, color: this.themeIsDark ? '#3A3A3A' : '#DDDDDD' })
+                    }
+                    // 右侧信息
+                    Column() {
+                      Text(borrow.title).fontSize(15).fontWeight(FontWeight.Medium)
+                        .fontColor(ThemeColors.textPrimary)
+                        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      if (borrow.author.length > 0) {
+                        Row() {
+                          Text(borrow.author).fontSize(12).fontColor('#888888')
+                            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                            .layoutWeight(1)
+                          if (borrow.locationName.length > 0) {
+                            Text('📍' + borrow.locationName).fontSize(10)
+                              .fontColor('#8E24AA')
+                              .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+                              .border({ width: 0.5, color: '#E1BEE7', radius: 8 })
+                          }
+                        }.width('100%').margin({ top: 3 })
+                      }
+                      // 日期戳
+                      Row({ space: 6 }) {
+                        Row({ space: 2 }) {
+                          Text('📅').fontSize(10)
+                          Text(this.fmtDateShort(borrow.loanDate)).fontSize(11)
+                            .fontColor('#666666')
+                        }.padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                        .backgroundColor(this.themeIsDark ? '#1E2A1E' : '#E8F5E9')
+                        .borderRadius(10)
+                        Text('→').fontSize(11).fontColor('#CCCCCC')
+                        Row({ space: 2 }) {
+                          Text('⏰').fontSize(10)
+                          Text(this.fmtDateShort(borrow.normReturnDate)).fontSize(11)
+                            .fontColor('#E65100')
+                        }.padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                        .backgroundColor(this.themeIsDark ? '#2E1E1E' : '#FFF3E0')
+                        .borderRadius(10)
+                      }.margin({ top: 8 })
+                    }.layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ left: 12 })
+                  }.width('100%')
+                  // 剩余天数 + 续借
+                  Row() {
+                    Text(this.fmtLendDay(borrow.lendDay)).fontSize(13).fontWeight(FontWeight.Medium)
+                      .fontColor(this.lendDayColor(borrow.lendDay)).layoutWeight(1)
+                    if (borrow.lendDay >= 0) {
+                      Text('🔄 续借').fontSize(12).fontColor('#8E24AA')
+                        .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                        .border({ width: 1, color: '#CE93D8', radius: 14 })
+                        .onClick(() => { this.renewBook(borrow); })
+                    } else {
+                      Text('已逾期不可续').fontSize(11).fontColor('#CCCCCC')
+                        .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                        .border({ width: 1, color: '#EEEEEE', radius: 14 })
+                    }
+                  }.width('100%').margin({ top: 10 })
+                }.width('100%').padding(14)
+                .backgroundColor(ThemeColors.bgCard).borderRadius(10)
+              }.padding({ left: 14, right: 14 })
+            }, (borrow: BorrowItem, idx?: number) => `borrow_${idx}_${borrow.imageUrl.length > 0 ? '1' : '0'}`)
+          }.layoutWeight(1)
           }.layoutWeight(1)
         } else {
           Column() {
@@ -330,6 +559,28 @@ export struct LibraryPage {
         .onClick(() => { this.closeBookDetail(); })
       }.width('100%').padding({ bottom: 8 })
 
+      // 封面
+      if (this.selectedBook?.imageUrl && (this.selectedBook!.imageUrl.length > 0)) {
+        Image(this.selectedBook!.imageUrl)
+          .width(100).height(140)
+          .objectFit(ImageFit.Cover).borderRadius(8)
+          .margin({ bottom: 10 })
+      } else {
+        Column() {
+          Text('📖').fontSize(36)
+          Text(this.selectedBook!.bookName)
+            .fontSize(10).maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .textAlign(TextAlign.Center)
+            .padding({ left: 8, right: 8 })
+            .fontColor(this.themeIsDark ? '#888888' : '#999999')
+        }.width(100).height(140).borderRadius(8)
+        .backgroundColor(this.themeIsDark ? '#252525' : '#F5F5F5')
+        .justifyContent(FlexAlign.Center)
+        .border({ width: 0.5, color: this.themeIsDark ? '#3A3A3A' : '#DDDDDD' })
+        .margin({ bottom: 10 })
+      }
+
       // 作者
       Text(this.selectedBook?.author ?? '').fontSize(13).fontColor(ThemeColors.textSecondary)
       Divider().margin({ top: 10, bottom: 10 }).color('#F0F0F0')
@@ -339,22 +590,22 @@ export struct LibraryPage {
         Column() {
           // 信息网格
           Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-            this.infoTag('可借', `${this.selectedBook?.availableCount ?? 0}`, this.selectedBook !== null && this.selectedBook.availableCount > 0 ? '#4CAF50' : '#E53935')
-            this.infoTag('馆藏', `${this.selectedBook?.totalCount ?? 0}`, '#333333')
-            this.infoTag('索书号', this.selectedBook?.callNos || (this.selectedBook !== null && this.selectedBook.items.length > 0 ? this.selectedBook.items[0].searchCode : '') || '-', '#555555')
-            this.infoTag('发行时间', this.selectedBook?.publishYear ?? '-', '#555555')
-            this.infoTag('ISBN', this.selectedBook?.isbn ?? '-', '#555555')
-            this.infoTag('编排号码', this.selectedBook?.docNumber ?? '-', '#555555')
+            this.infoTag('📚 可借', `${this.selectedBook?.availableCount ?? 0}`, this.selectedBook !== null && this.selectedBook.availableCount > 0 ? '#4CAF50' : '#E53935')
+            this.infoTag('🏢 馆藏', `${this.selectedBook?.totalCount ?? 0}`, '#333333')
+            this.infoTag('🏷️ 索书号', this.selectedBook?.callNos || (this.selectedBook !== null && this.selectedBook.items.length > 0 ? this.selectedBook.items[0].searchCode : '') || '-', '#555555')
+            this.infoTag('📅 发行时间', this.selectedBook?.publishYear ?? '-', '#555555')
+            this.infoTag('🔢 ISBN', this.selectedBook?.isbn ?? '-', '#555555')
+            this.infoTag('📋 编排号码', this.selectedBook?.docNumber ?? '-', '#555555')
           }.width('100%')
           // 馆藏位置列表
           if (this.selectedBook !== null && this.selectedBook.items.length > 0) {
-            Text('馆藏位置').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+            Text('📍 馆藏位置').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
               .margin({ top: 14, bottom: 6 }).width('100%')
             ForEach(this.selectedBook.items, (loc: BookLocation) => {
               Row() {
                 Column() {
                   Text(loc.locationName).fontSize(13).fontColor(ThemeColors.textPrimary)
-                  Text(loc.barCode).fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                  Text('🔖 书籍编号：' + loc.barCode).fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
                 }.layoutWeight(1).alignItems(HorizontalAlign.Start)
                 Text(loc.processType).fontSize(12)
                   .fontColor(loc.processType === '在架' ? '#4CAF50' : '#E53935')

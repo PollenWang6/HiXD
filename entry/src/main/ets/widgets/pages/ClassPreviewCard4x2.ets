@@ -17,7 +17,11 @@ struct ClassPreviewCard4x2 {
   @LocalStorageProp('tomorrowRooms') tomorrowRooms: string[] = [];
   @LocalStorageProp('tomorrowStarts') tomorrowStarts: number[] = [];
   @LocalStorageProp('todayTeachers')   todayTeachers: string[]   = [];
+  @LocalStorageProp('todayTypes')      todayTypes: string[]      = [];
+  @LocalStorageProp('todaySeats')      todaySeats: string[]      = [];
   @LocalStorageProp('tomorrowTeachers') tomorrowTeachers: string[] = [];
+  @LocalStorageProp('tomorrowTypes')     tomorrowTypes: string[]     = [];
+  @LocalStorageProp('tomorrowSeats')     tomorrowSeats: string[]     = [];
   @LocalStorageProp('tomorrowCount') tomorrowCount: number    = 0;
   @LocalStorageProp('weekNum')       weekNum: number         = 1;
   @LocalStorageProp('weekLabel')     weekLabel: string       = '';
@@ -35,258 +39,90 @@ struct ClassPreviewCard4x2 {
   @LocalStorageProp('tomorrowExamRooms') tomorrowExamRooms: string[] = [];
   @LocalStorageProp('tomorrowExamCount') tomorrowExamCount: number   = 0;
 
-  @Builder
-  ExamRow(name: string, time: string, room: string) {
-    Row() {
-      Column() {
-        Line()
-          .stroke('#FF9800')
-          .width(3).height(20)
-          .strokeLineCap(LineCapStyle.Round)
-          .strokeWidth(3)
-      }
-      .width(8).margin({ right: 6 })
-
-      Column() {
-        Row() {
-          Text(name)
-            .fontSize(14).fontWeight(FontWeight.Bold)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%')
-
-        if (time.length > 0) {
-          Text('🕐 ' + time)
-            .fontSize(10).fontColor('#FF9800')
-        }
-        if (room.length > 0) {
-          Text('📍 ' + room)
-            .fontSize(10)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-      }
-      .layoutWeight(1)
-    }
-    .width('100%').padding({ top: 4, bottom: 4 })
+  private curNames(): string[] { return this.showTomorrow ? this.tomorrowNames : this.todayNames; }
+  private curTimes(): string[] { return this.showTomorrow ? this.tomorrowTimes : this.todayTimes; }
+  private curRooms(): string[] { return this.showTomorrow ? this.tomorrowRooms : this.todayRooms; }
+  private curTeachers(): string[] { return this.showTomorrow ? this.tomorrowTeachers : this.todayTeachers; }
+  private curTypes(): string[] { return this.showTomorrow ? this.tomorrowTypes : this.todayTypes; }
+  private curSeats(): string[] { return this.showTomorrow ? this.tomorrowSeats : this.todaySeats; }
+  private curCount(): number { return this.showTomorrow ? this.tomorrowCount : this.todayCount; }
+  private isExamIdx(idx: number): boolean { return idx < this.curTypes().length && this.curTypes()[idx] === 'exam'; }
+  private timeAt(idx: number): string { return idx < this.curTimes().length ? this.curTimes()[idx] : ''; }
+  private roomAt(idx: number): string { return idx < this.curRooms().length ? this.curRooms()[idx] : ''; }
+  private teacherAt(idx: number): string { return idx < this.curTeachers().length ? this.curTeachers()[idx] : ''; }
+  private seatAt(idx: number): string { return idx < this.curSeats().length ? this.curSeats()[idx] : ''; }
+  private colorAt(idx: number): string {
+    return this.isExamIdx(idx) ? '#FF9800' : COLORS_4X2[idx % COLORS_4X2.length];
+  }
+  private subText(idx: number): string {
+    if (this.isExamIdx(idx)) { return this.roomAt(idx) + (this.seatAt(idx).length > 0 ? ' · 座位' + this.seatAt(idx) : ''); }
+    const t: string = this.teacherAt(idx); const r: string = this.roomAt(idx);
+    if (t.length > 0 && r.length > 0) { return t + ' · ' + r; }
+    return t.length > 0 ? t : r;
   }
 
   @Builder
-  CourseRow(name: string, time: string, room: string, teacher: string, colorIdx: number) {
+  ItemRow(color: string, name: string, tag: string, tagColor: string, sub: string, time: string) {
     Row() {
-      Column() {
-        Line()
-          .stroke(COLORS_4X2[colorIdx % COLORS_4X2.length])
-          .width(3).height(20)
-          .strokeLineCap(LineCapStyle.Round)
-          .strokeWidth(3)
+      Line().stroke(color).width(3).height(18).strokeLineCap(LineCapStyle.Round).strokeWidth(3)
+      Row() {
+        Text(name).fontSize(13).fontWeight(FontWeight.Bold).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .constraintSize({ maxWidth: '55%' })
+        Text(' ' + tag + ' ').fontSize(8).fontColor('#FFFFFF').backgroundColor(tagColor)
+          .borderRadius(3).height(13).flexShrink(0)
+      }.layoutWeight(1).margin({ left: 6 })
+      if (sub.length > 0) {
+        Text(sub).fontSize(10).fontColor('#888888').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .constraintSize({ maxWidth: 90 }).flexShrink(0).margin({ right: 6 })
       }
-      .width(8).margin({ right: 6 })
-
-      Column() {
-        Row() {
-          Text(name)
-            .fontSize(14).fontWeight(FontWeight.Bold)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: '65%' })
-          Text(' ' + this.getTypeLabel(name) + ' ')
-            .fontSize(9).fontColor('#FFFFFF')
-            .backgroundColor(this.getTypeColor(name))
-            .borderRadius(4)
-            .height(12)
-            .flexShrink(0)
-          Blank()
-        }
-        .width('100%')
+      if (time.length > 0) {
+        Text(time).fontSize(11).fontWeight(FontWeight.Medium).fontColor('#42A5F5').flexShrink(0)
       }
-      .layoutWeight(3)
-      .alignItems(HorizontalAlign.Start)
-
-      Column() {
-        if (teacher.length > 0) {
-          Text(teacher)
-            .fontSize(10)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: 70 })
-        }
-        if (room.length > 0) {
-          Text(room)
-            .fontSize(10)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: 70 })
-        }
-      }
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 6, right: 6 })
-
-      Column() {
-        if (time.length > 0) {
-          Text(time.split('-')[0])
-            .fontSize(12).fontWeight(FontWeight.Medium).fontColor('#42A5F5')
-        }
-        if (time.length > 0 && time.includes('-')) {
-          Text(time.split('-')[1])
-            .fontSize(12).fontWeight(FontWeight.Medium).fontColor('#42A5F5')
-        }
-      }
-      .alignItems(HorizontalAlign.End)
-    }
-    .width('100%').padding({ top: 4, bottom: 4 }).alignItems(VerticalAlign.Center)
-  }
-
-  getTypeLabel(name: string): string {
-    if (name.includes('\u{1F9EA}')) return '\u{5B9E}\u{9A8C}';
-    return '\u{8BFE}\u{7A0B}';
-  }
-  getTypeColor(name: string): string {
-    if (name.includes('\u{1F9EA}')) return '#9C27B0';
-    return '#42A5F5';
+    }.width('100%').padding({ top: 3, bottom: 3 }).alignItems(VerticalAlign.Center)
   }
 
   build() {
     Column() {
       Row() {
-        Text('\u8BFE\u7A0B\u9884\u544A')
-          .fontSize(15).fontWeight(FontWeight.Bold)
-
-        if (this.showTomorrow && this.tomorrowCount > 0) {
-          Text(' ' + this.tomorrowCount)
-            .fontSize(10).fontColor('#FFFFFF')
-            .backgroundColor('#42A5F5')
-            .height(16).borderRadius(8)
-            .textAlign(TextAlign.Center)
-            .padding({ left: 3, right: 3 })
-        } else if (this.todayCount > 0) {
-          Text(' ' + this.todayCount)
-            .fontSize(10).fontColor('#FFFFFF')
-            .backgroundColor('#42A5F5')
-            .height(16).borderRadius(8)
-            .textAlign(TextAlign.Center)
-            .padding({ left: 3, right: 3 })
-        }
-
+        Text('课程预告').fontSize(15).fontWeight(FontWeight.Bold)
+        Text(' ' + this.curCount()).fontSize(10).fontColor('#FFFFFF').backgroundColor('#42A5F5')
+          .height(16).borderRadius(8).textAlign(TextAlign.Center).padding({ left: 3, right: 3 })
         Blank()
-
-        Text(this.showTomorrow ? '\u2190' : '\u2192')
-          .fontSize(16).fontWeight(FontWeight.Medium)
-          .margin({ right: 8 })
-          .onClick(() => {
-            postCardAction(this, { action: 'message', params: { msgTest: 'toggle' } });
-          })
-
-        Image($r('app.media.ic_public_refresh'))
-          .width(16).height(16)
-          .onClick(() => {
-            postCardAction(this, { action: 'message', params: { msgTest: 'schedule' } });
-          })
-      }
-      .width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 4 })
+        Text(this.showTomorrow ? '←' : '→').fontSize(16).fontWeight(FontWeight.Medium).margin({ right: 8 })
+          .onClick(() => { postCardAction(this, { action: 'message', params: { msgTest: 'toggle' } }); })
+        Image($r('app.media.ic_public_refresh')).width(16).height(16)
+          .onClick(() => { postCardAction(this, { action: 'message', params: { msgTest: 'schedule' } }); })
+      }.width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 4 })
 
       Row() {
-        Text(this.weekLabel + (this.dateLabel.length > 0 ? ' · ' + this.dateLabel : ''))
-          .fontSize(9).maxLines(1)
+        Text(this.weekLabel + (this.dateLabel.length > 0 ? ' · ' + this.dateLabel : '')).fontSize(9).maxLines(1)
         Blank()
-        Text(this.showTomorrow ? '\u660E\u5929' : '\u4ECA\u65E5')
-          .fontSize(9)
-          .fontColor(this.showTomorrow ? '#E91E63' : '#42A5F5')
-      }
-      .width('100%').margin({ bottom: 6 })
+        Text(this.showTomorrow ? '明天' : '今天').fontSize(9).fontColor(this.showTomorrow ? '#E91E63' : '#42A5F5')
+      }.width('100%').margin({ bottom: 6 })
 
       if (this.isEmpty && !this.showTomorrow) {
-        Column() {
-          Text(this.isWeekend ? '\u5468\u672B\u4F11\u606F' : '\u4ECA\u5929\u6CA1\u6709\u8BFE')
-            .fontSize(14)
-        }
-        .width('100%').height(40).justifyContent(FlexAlign.Center)
+        Column() { Text(this.isWeekend ? '周末休息' : '今天没有课').fontSize(14) }
+          .width('100%').height(40).justifyContent(FlexAlign.Center)
       } else {
-        if (this.showTomorrow) {
-          List() {
-            ListItem() {
-              Column() {
-                ForEach(this.tomorrowNames,
-                  (name: string, index: number) => {
-                    this.CourseRow(name,
-                      index < this.tomorrowTimes.length ? this.tomorrowTimes[index] : '',
-                      index < this.tomorrowRooms.length ? this.tomorrowRooms[index] : '',
-                      index < this.tomorrowTeachers.length ? this.tomorrowTeachers[index] : '',
-                      index
-                    )
-                    if (index < this.tomorrowNames.length - 1) { Divider().width('94%') }
-                  },
-                  (name: string, index: number): string => name + 't' + index
-                )
-                if (this.tomorrowExamCount > 0) {
-                  Divider().width('94%').color('#FFE0B2').margin({ top: 4, bottom: 4 })
-                  ForEach(this.tomorrowExamNames,
-                    (name: string, index: number) => {
-                      this.ExamRow(name,
-                        index < this.tomorrowExamTimes.length ? this.tomorrowExamTimes[index] : '',
-                        index < this.tomorrowExamRooms.length ? this.tomorrowExamRooms[index] : ''
-                      )
-                      if (index < this.tomorrowExamNames.length - 1) { Divider().width('94%') }
-                    },
-                    (name: string, index: number): string => name + 'te' + index
-                  )
-                }
-              }
+        List() {
+          ListItem() {
+            Column() {
+              ForEach(this.curNames(), (name: string, idx: number) => {
+                this.ItemRow(this.colorAt(idx), name, this.isExamIdx(idx) ? '考试' : '课程',
+                  this.isExamIdx(idx) ? '#FF9800' : '#42A5F5', this.subText(idx), this.timeAt(idx))
+                if (idx < this.curCount() - 1) { Divider().width('94%') }
+              }, (name: string, idx: number): string => name + '4x' + idx)
             }
           }
-          .layoutWeight(1).width('100%')
-        } else {
-          List() {
-            ListItem() {
-              Column() {
-                ForEach(this.todayNames,
-                  (name: string, index: number) => {
-                    this.CourseRow(name,
-                      index < this.todayTimes.length ? this.todayTimes[index] : '',
-                      index < this.todayRooms.length ? this.todayRooms[index] : '',
-                      index < this.todayTeachers.length ? this.todayTeachers[index] : '',
-                      index
-                    )
-                    if (index < this.todayNames.length - 1) { Divider().width('94%') }
-                  },
-                  (name: string, index: number): string => name + 'd' + index
-                )
-                if (this.todayExamCount > 0) {
-                  Divider().width('94%').color('#FFE0B2').margin({ top: 4, bottom: 4 })
-                  ForEach(this.todayExamNames,
-                    (name: string, index: number) => {
-                      this.ExamRow(name,
-                        index < this.todayExamTimes.length ? this.todayExamTimes[index] : '',
-                        index < this.todayExamRooms.length ? this.todayExamRooms[index] : ''
-                      )
-                      if (index < this.todayExamNames.length - 1) { Divider().width('94%') }
-                    },
-                    (name: string, index: number): string => name + 'de' + index
-                  )
-                }
-              }
-            }
-          }
-          .layoutWeight(1).width('100%')
-        }
+        }.layoutWeight(1).width('100%')
       }
 
       if (this.lastRefresh.length > 0) {
-        Text(this.lastRefresh)
-          .fontSize(8)
-          .width('100%').textAlign(TextAlign.Center)
-          .margin({ top: 4 })
+        Text(this.lastRefresh).fontSize(8).width('100%').textAlign(TextAlign.Center).margin({ top: 4 })
       }
-    }
-    .width('100%').height('100%')
+    }.width('100%').height('100%')
     .padding({ top: 10, left: 12, right: 12, bottom: 6 })
-    .backgroundColor(Color.Transparent)
-    .borderRadius(16)
-    .onClick(() => {
-      postCardAction(this, {
-        action: 'router',
-        abilityName: 'EntryAbility',
-        params: { router: 'Schedule' }
-      });
-    })
+    .backgroundColor(Color.Transparent).borderRadius(16)
+    .onClick(() => { postCardAction(this, { action: 'router', abilityName: 'EntryAbility', params: { router: 'Schedule' } }); })
   }
 }

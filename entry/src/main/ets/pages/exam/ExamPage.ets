@@ -27,6 +27,7 @@ export struct ExamPage {
   @State notArranged: ExamItemModel[] = [];
   @State selectedSemester: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+  @State isRefreshing: boolean = false;
 
   aboutToAppear(): void {
     this.selectedSemester = SemesterUtil.getCurrentSemesterCode();
@@ -85,6 +86,8 @@ export struct ExamPage {
       this.showCacheBanner = false;
       if (items.length > 0) {
         PreferenceUtil.putString('exam_schedule_cache', raw);
+        console.error('ExamPage', '[DIAG-SAVE] items.length=' + items.length + ' rawLen=' + raw.length + ' calling saveSharedFile');
+        PreferenceUtil.saveSharedFile('exam_schedule', raw);
         console.info('ExamPage', 'Cached exam data, raw.length=' + raw.length);
       } else {
         console.warn('ExamPage', 'Server returned 0 exams, keeping old cache if any');
@@ -105,6 +108,26 @@ export struct ExamPage {
         } catch (_parseErr) { console.warn('ExamPage', 'cache parse failed'); }
       }
     } finally { this.loading = false; }
+  }
+
+  private async doRefresh(): Promise<void> {
+    // Clear cache to force server re-fetch
+    PreferenceUtil.putString('exam_schedule_cache', '');
+    try {
+      const raw: string = await ExamService.getInstance().getExamSchedule(this.selectedSemester);
+      const items: ExamItemModel[] = ExamService.parseExamSchedule(raw);
+      this.arranged = items.filter(i => i.ksrq && i.ksrq.length > 0);
+      this.notArranged = items.filter(i => !i.ksrq || i.ksrq.length === 0);
+      this.showCacheBanner = false;
+      if (items.length > 0) {
+        PreferenceUtil.putString('exam_schedule_cache', raw);
+        PreferenceUtil.saveSharedFile('exam_schedule', raw);
+      }
+    } catch (e) {
+      // 保持现有数据显示，不覆盖
+    } finally {
+      this.isRefreshing = false;
+    }
   }
 
   build() {
@@ -135,6 +158,7 @@ export struct ExamPage {
           Column() { Text('🎉').fontSize(48); Text('暂无考试安排').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); Text('本学期暂未发布考试信息').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 }); }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else {
+          Refresh({ refreshing: $$this.isRefreshing }) {
           List({ space: 12 }) {
             ForEach(this.arranged, (exam: ExamItemModel, idx?: number) => {
               ListItem() {
@@ -176,6 +200,11 @@ export struct ExamPage {
               }
             }
           }.padding({ left: 16, right: 16, top: 12 }).layoutWeight(1)
+          }
+          .onRefreshing(() => {
+            this.isRefreshing = true;
+            this.doRefresh();
+          })
         }
       }
       .width('100%')
