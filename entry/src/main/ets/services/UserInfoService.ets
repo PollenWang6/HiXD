@@ -14,7 +14,7 @@ const EHALL_HEADERS: Record<string, string> = {
   'Accept': 'application/json, text/javascript, */*; q=0.01',
 };
 
-class UserInfo {
+export class UserInfo {
   name: string = '';
   uid: string = '';
   avatar: string = '';
@@ -61,6 +61,26 @@ export class UserInfoService {
     return info;
   }
 
+  // fetchAll 同步版 — fetchFromEhall 成功后直接读缓存，不加 async
+  fetchAllSync(): UserInfo {
+    const info: UserInfo = new UserInfo();
+    info.name = PreferenceUtil.getString('user_name');
+    info.uid = PreferenceUtil.getString('cx_uid');
+    if (info.uid.length > 0) {
+      info.avatar = 'https://photo.chaoxing.com/p/' + info.uid + '_80';
+    } else {
+      info.avatar = PreferenceUtil.getString('user_avatar');
+    }
+    info.major = PreferenceUtil.getString('user_major');
+    info.college = PreferenceUtil.getString('user_college');
+    info.grade = PreferenceUtil.getString('user_grade');
+    info.gender = PreferenceUtil.getString('user_gender');
+    info.dormitory = PreferenceUtil.getString('user_dormitory');
+    info.studentType = PreferenceUtil.getString('user_student_type');
+    info.className = PreferenceUtil.getString('user_class');
+    return info;
+  }
+
   // xgxt 个人信息拉取（CAS SSO → xgxt → getAppConfig → getStuBaseInfo）
   async fetchFromEhall(xh: string): Promise<boolean> {
     console.info(TAG, 'fetchFromEhall: start, xh=' + xh);
@@ -73,26 +93,17 @@ export class UserInfoService {
         return false;
       }
 
-      // ──── Step 1: 先 GET xgxt，让它自己触发 CAS 302 ────
+      // ──── Step 1: GET xgxt 索引页，带着 TGC 自然跟随 CAS 302 链（不用 getNoRedirect）────
       const xgxtIndex: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
-      let currentUrl: string = xgxtIndex;
-      let resp: HttpResponse = await this.http.getNoRedirect(xgxtIndex);
-      let loop: number = 0;
-      while (resp.isRedirect && resp.location && loop < 10) {
-        let location: string = resp.location;
-        const baseCk: RegExpMatchArray | null = currentUrl.match(/^(https?:\/\/[^\/]+)/);
-        if (baseCk) {
-          const base: string = baseCk[1];
-          if (!location.startsWith('http://') && !location.startsWith('https://')) {
-            location = base + (location.startsWith('/') ? location : '/' + location);
-          }
-        }
-        currentUrl = location;
-        resp = await this.http.getNoRedirect(location);
-        loop++;
+      let resp: HttpResponse = await this.http.get(xgxtIndex);
+      console.info(TAG, 'fetchFromEhall: SSO done, status=' + String(resp.statusCode) +
+        ' body=' + resp.body.substring(0, 150));
+
+      // 确认拿到了页面而非登录页
+      if (resp.body.indexOf('id="loginForm"') >= 0 || resp.body.indexOf('passport') >= 0) {
+        console.warn(TAG, 'fetchFromEhall: xgxt SSO returned login page');
+        return false;
       }
-      console.info(TAG, 'fetchFromEhall: SSO done, final status=' + String(resp.statusCode) +
-        ' url=' + currentUrl.substring(0, 80));
 
       const xgxtCookies: string = this.http.getCookiesForDomain('xgxt.xidian.edu.cn');
       console.info(TAG, 'fetchFromEhall: xgxt cookies=' + xgxtCookies.substring(0, 200));
@@ -101,6 +112,7 @@ export class UserInfoService {
       const xgxtHeaders: Record<string, string> = {
         'Referer': 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do',
         'Host': 'xgxt.xidian.edu.cn',
+        'X-Requested-With': 'XMLHttpRequest',
       };
       const configUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/swpubapp/indexmenu/getAppConfig.do?appId=4585275700341858&appName=jbxxapp';
       resp = await this.http.postEmpty(configUrl, xgxtHeaders);
@@ -161,8 +173,8 @@ export class UserInfoService {
       console.info(TAG, 'fetchFromEhall: OK name=' + name + ' college=' + college +
         ' major=' + major + ' grade=' + grade + ' gender=' + gender);
 
-      // 顺便拉取超星 UID（异步，不阻塞返回）
-      this.fetchChaoxingUid();
+      // 拉取超星 UID（await 确保写完 Preference 后再返回）
+      await this.fetchChaoxingUid();
 
       return name.length > 0;
     } catch (e) {

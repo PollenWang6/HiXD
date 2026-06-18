@@ -1,4 +1,4 @@
-// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
+﻿// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
 import { ThemeColors } from '../../utils/ThemeColors';
 import { webview } from '@kit.ArkWeb';
 import web_webview from '@ohos.web.webview';
@@ -345,7 +345,9 @@ export struct ElectricityPage {
 
       // ── 写入缓存 ──
       const cache: ElecCache = { remain: remain, metID: metID, nodeID: nodeID, date: readDate, daily: daily, error: '', waterRemain: waterRemain, waterMetID: waterMetID, waterDate: waterDate, waterDaily: waterDaily };
-      AppStorage.SetOrCreate('electricity_cache', JSON.stringify(cache));
+      AppStorage.setOrCreate('electricity_cache', JSON.stringify(cache));
+      PreferenceUtil.putString('electricity_cache_v2', JSON.stringify(cache)); // 跨 NavDestination 用 Preference
+      console.error('ElectricityPage', 'wrote electricity_cache remain=' + remain + ' date=' + readDate);
 
       // 直接更新本组件状态（@Watch 可能不触发）
       this.balance = remain;
@@ -385,7 +387,7 @@ export struct ElectricityPage {
     this.readDate = '';
     this.dailyItems = [];
     this.ssoDone = false;
-    AppStorage.SetOrCreate('electricity_cache', '');
+    AppStorage.setOrCreate('electricity_cache', '');
     // WebView SSO 入口已通过 src 加载，这里只需确保重新加载
     this.webController.loadUrl(SSO_ENTRY);
   }
@@ -440,6 +442,27 @@ export struct ElectricityPage {
       .layoutWeight(1)
     }
     .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
+  }
+
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
   }
 
   build() {
@@ -622,33 +645,31 @@ export struct ElectricityPage {
               .onClick(() => { this.showMore = false; })
               .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseIn }))
 
-            Flex({ justifyContent: FlexAlign.Center, alignItems: ItemAlign.Center }) {
-              Column() {
-                Row().width('100%').height(4)
-                  .backgroundColor('#FF6D00')
-                  .borderRadius({ topLeft: 16, topRight: 16 })
+            Column() {
+              Row().width('100%').height(4)
+                .backgroundColor('#FF6D00')
+                .borderRadius({ topLeft: 16, topRight: 16 })
 
-                this.fullReadingsBuilder()
-              }
-              .width('88%')
-              .height('70%')
-              .backgroundColor(ThemeColors.bgCard)
-              .borderRadius(16)
-              .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetY: 10 })
-              .zIndex(2)
-              .transition(TransitionEffect.scale({ x: 0.9, y: 0.9 })
-                .combine(TransitionEffect.OPACITY)
-                .animation({ duration: 300, curve: Curve.EaseOut }))
+              this.fullReadingsBuilder()
             }
-            .width('100%').height('100%')
+            .width('88%')
+            .height('70%')
+            .backgroundColor(ThemeColors.bgCard)
+            .borderRadius(16)
+            .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetY: 10 })
+            .onClick(() => {})
+            .transition(TransitionEffect.scale({ x: 0.9, y: 0.9 })
+              .combine(TransitionEffect.OPACITY)
+              .animation({ duration: 300, curve: Curve.EaseOut }))
           }
           .width('100%').height('100%')
+          .alignContent(Alignment.Center)
         }
       }
       .width('100%').height('100%')
     }
-    .title('水电查询', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('水电查询'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .onBackPressed(() => {
       if (this.showMore) { this.showMore = false; return true; }
       if (this.showMoreWater) { this.showMoreWater = false; return true; }

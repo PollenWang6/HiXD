@@ -1,4 +1,4 @@
-// SchoolNetLoginPage.ets — 校园网 WebView 登录
+﻿// SchoolNetLoginPage.ets — 校园网 WebView 登录
 import web from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { HttpUtil } from '../../utils/HttpUtil';
@@ -23,6 +23,28 @@ export struct SchoolNetLoginPage {
 
   private readonly LOGIN_URL: string = 'https://zfw.xidian.edu.cn/';
   private readonly SUCCESS_PATTERN: RegExp = /srun_portal|index\.html|\/user\/|selfservice/;
+
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
 
   aboutToAppear(): void {
     if (HttpUtil.getInstance().hasCookies('zfw.xidian.edu.cn')) {
@@ -104,8 +126,8 @@ export struct SchoolNetLoginPage {
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
     }
-    .title('校园网登录', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('校园网登录'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onBackPressed(() => { this.pageInfo.pop(); return true; })
   }

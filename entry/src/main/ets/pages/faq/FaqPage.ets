@@ -1,4 +1,4 @@
-// FaqPage.ets — 常见问题
+﻿// FaqPage.ets — 常见问题
 import { ThemeColors } from '../../utils/ThemeColors';
 
 @Component
@@ -81,7 +81,7 @@ export struct FaqPage {
         Image($r('app.media.close')).height(22)
           .fillColor(ThemeColors.textPrimary).draggable(false)
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text('常见问题').fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1)
+      Text('常见问题').fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.height(56).width('100%').padding({ left: 12, right: 12 })
   }

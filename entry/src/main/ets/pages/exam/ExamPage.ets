@@ -29,17 +29,54 @@ export struct ExamPage {
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @State isRefreshing: boolean = false;
 
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
+
   aboutToAppear(): void {
     this.selectedSemester = SemesterUtil.getCurrentSemesterCode();
     this.loadExams();
   }
 
-  // 判断考试是否已结束
-  private isExamFinished(ksrq: string): boolean {
-    if (!ksrq || ksrq.length < 10) return false;
+  // 考试状态：-1=已结束，0=未开始，1=进行中，-2=非今天
+  private getExamStatus(ksrq: string, kssjms: string): number {
+    if (!ksrq || ksrq.length < 10) return -2;
     const examDate: string = ksrq.substring(0, 10);
-    const today: string = new Date().toISOString().substring(0, 10);
-    return examDate < today;
+    const now: Date = new Date();
+    const today: string = now.getFullYear() + '-'
+      + String(now.getMonth() + 1).padStart(2, '0') + '-'
+      + String(now.getDate()).padStart(2, '0');
+    if (examDate < today) return -1;
+    if (examDate > today) return -2;
+    // 今天：按时间段判断
+    const timeMatch: RegExpMatchArray | null = (kssjms || '').match(/(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/);
+    if (!timeMatch) return -2;
+    const startParts: string[] = timeMatch[1].split(':');
+    const endParts: string[] = timeMatch[2].split(':');
+    const startMin: number = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+    const endMin: number = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+    const nowMin: number = now.getHours() * 60 + now.getMinutes();
+    if (nowMin >= startMin && nowMin < endMin) return 1;
+    if (nowMin >= endMin) return -1;
+    return 0;
   }
 
   // 从日期字符串获取周几
@@ -171,8 +208,12 @@ export struct ExamPage {
                   Column() {
                     Row() {
                       Text(exam.kcm).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-                      // 已完成标识
-                      if (this.isExamFinished(exam.ksrq)) {
+                      // 考试状态标识
+                      if (this.getExamStatus(exam.ksrq, exam.kssjms) === 1) {
+                        Text('进行中').fontSize(11).fontColor('#FFFFFF').backgroundColor('#4CAF50').borderRadius(4).padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                      } else if (this.getExamStatus(exam.ksrq, exam.kssjms) === 0) {
+                        Text('未开始').fontSize(11).fontColor('#FFFFFF').backgroundColor('#FF9800').borderRadius(4).padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                      } else if (this.getExamStatus(exam.ksrq, exam.kssjms) === -1) {
                         Text('已结束').fontSize(11).fontColor('#FFFFFF').backgroundColor('#9E9E9E').borderRadius(4).padding({ left: 6, right: 6, top: 2, bottom: 2 })
                       }
                     }.width('100%')
@@ -211,8 +252,8 @@ export struct ExamPage {
       .height('100%')
       .backgroundColor(ThemeColors.bgPage)
     }
-    .title('考试安排', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('考试安排'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {
       // NavDestination 初始化完成

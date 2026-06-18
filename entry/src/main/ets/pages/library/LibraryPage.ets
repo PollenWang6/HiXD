@@ -48,6 +48,9 @@ export struct LibraryPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
   @State searchWord: string = '';
+  @State searchField: string = 'keyWord';
+  @State searchPage: number = 1;
+  @State hasMore: boolean = false;
   @State books: BookItem[] = [];
   @State borrowList: BorrowItem[] = [];
   @State errorMsg: string = '';
@@ -235,6 +238,10 @@ export struct LibraryPage {
         result.push(this.makeBorrowItem(rawList[i]));
       }
       this.borrowList = result;
+      // 保存借阅概况给主页卡片用
+      let overdue = 0;
+      for (const b of result) { if (b.lendDay < 0) overdue++; }
+      PreferenceUtil.putString('lib_summary', result.length + '|' + overdue);
       this.fetchBorrowCovers(result);
     } catch (e) {
       console.error('LibraryPage', 'loadBorrowList failed: ' + String(e));
@@ -291,14 +298,16 @@ export struct LibraryPage {
     this.books = updated;
   }
 
-  async searchBooks(): Promise<void> {
+  async searchBooks(page?: number): Promise<void> {
     if (!this.searchWord.trim()) return;
+    const p: number = page ?? 1;
+    if (p === 1) { this.books = []; this.searchPage = 1; }
     this.isSearching = true;
     try {
       await this.http.loadCookies();
       const body = this.buildFormBody(
         'libraryId', '5', 'searchWord', this.searchWord.trim(),
-        'searchFiled', 'keyWord', 'page', '1', 'searchLocationStatus', '1'
+        'searchFiled', this.searchField, 'page', String(p), 'searchLocationStatus', '1'
       );
       const resp = await this.http.postRaw(
         'https://shuwo.xidian.edu.cn/xidian_book/api/search/list.html',
@@ -310,25 +319,63 @@ export struct LibraryPage {
       const raw: Record<string, object> = resp.json<Record<string, object>>();
       const listData = raw['data'] as Record<string, object>;
       const rawList: Record<string, Object>[] = (listData?.['list'] as Record<string, Object>[]) || [];
-      const result: BookItem[] = [];
+      const newBooks: BookItem[] = [];
       for (let i = 0; i < rawList.length; i++) {
-        result.push(this.makeBookItem(rawList[i]));
+        newBooks.push(this.makeBookItem(rawList[i]));
       }
-      this.books = result;
-      this.fetchAllCovers(result);
+      if (p === 1) {
+        this.books = newBooks;
+      } else {
+        const merged: BookItem[] = [];
+        for (let j = 0; j < this.books.length; j++) { merged.push(this.books[j]); }
+        for (let k = 0; k < newBooks.length; k++) { merged.push(newBooks[k]); }
+        this.books = merged;
+      }
+      this.searchPage = p;
+      this.hasMore = rawList.length >= 20;
+      this.fetchAllCovers(newBooks);
     } catch (e) {
       console.error('LibraryPage', 'searchBooks failed: ' + String(e));
-      this.books = [];
+      if (p === 1) { this.books = []; }
       this.errorMsg = '搜索失败，请检查网络后重试';
     } finally { this.isSearching = false; }
+  }
+
+  private getSearchFieldIndex(): number {
+    if (this.searchField === 'title') return 1;
+    if (this.searchField === 'author') return 2;
+    if (this.searchField === 'isbn') return 3;
+    if (this.searchField === 'barcode') return 4;
+    if (this.searchField === 'callNo') return 5;
+    return 0;
+  }
+
+  private indexToField(idx: number): string {
+    const fields: string[] = ['keyWord', 'title', 'author', 'isbn', 'barcode', 'callNo'];
+    return idx >= 0 && idx < fields.length ? fields[idx] : 'keyWord';
+  }
+
+  private fieldLabel(): string {
+    if (this.searchField === 'title') return '书名';
+    if (this.searchField === 'author') return '作者';
+    if (this.searchField === 'isbn') return 'ISBN';
+    if (this.searchField === 'barcode') return '条码';
+    if (this.searchField === 'callNo') return '索书号';
+    return '关键词';
   }
 
   build() {
     NavDestination() {
       Stack({ alignContent: Alignment.Bottom }) {
         Column() {
-          Row({ space: 8 }) {
-        TextInput({ placeholder: '搜索图书...', text: this.searchWord })
+          Row({ space: 6 }) {
+            Select([{ value: '关键词' }, { value: '书名' }, { value: '作者' },
+              { value: 'ISBN' }, { value: '条码' }, { value: '索书号' }])
+              .selected(this.getSearchFieldIndex())
+              .value(this.fieldLabel())
+              .onSelect((idx: number) => { this.searchField = this.indexToField(idx); })
+              .width(100)
+            TextInput({ placeholder: '搜索图书...', text: this.searchWord })
           .layoutWeight(1).height(40).borderRadius(20).backgroundColor(ThemeColors.bgInput).padding({ left: 16, right: 16 })
           .onChange((v: string) => { this.searchWord = v; })
           .onSubmit(() => { this.searchBooks(); })
@@ -396,6 +443,15 @@ export struct LibraryPage {
                 })
               }.padding({ left: 12, right: 12 })
             }, (book: BookItem, idx?: number) => `book_${idx}_${book.imageUrl.length > 0 ? '1' : '0'}`)
+
+            if (this.hasMore && !this.isSearching) {
+              ListItem() {
+                Text('加载更多').fontSize(13).fontColor('#8E24AA')
+                  .width('100%').height(40).textAlign(TextAlign.Center)
+                  .borderRadius(8).backgroundColor(ThemeColors.bgCard)
+                  .onClick(() => { this.searchBooks(this.searchPage + 1); })
+              }.padding({ left: 12, right: 12 })
+            }
           }.layoutWeight(1)
         } else {
           Column() {

@@ -110,7 +110,8 @@ function calcCurrentWeek(): number {
   const START: number = new Date(2026, 2, 2).getTime();
   const now: number = Date.now();
   const diff: number = Math.floor((now - START) / (1000 * 60 * 60 * 24));
-  return Math.max(1, Math.min(25, Math.floor(diff / 7) + 1));
+  // 不再硬编码上限，由实际数据动态确定
+  return Math.max(1, Math.floor(diff / 7) + 1);
 }
 
 function sortEntries(names: string[], times: string[], rooms: string[], teachers: string[], starts: number[]): void {
@@ -557,7 +558,7 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
       const wd: number = parseInt(String(rd['SKXQ'] || rd['skxq'] || '0')) || 0;
       if (wd === todayWkDay) {
         const skzc_raw: string = String(rd['SKZC'] || '');
-        const wl: boolean[] = parseWeekStr(skzc_raw, 25);
+        const wl: boolean[] = parseWeekStr(skzc_raw, skzc_raw.length);
         hilog.info(DOMAIN, TAG, 'MONDAY diag[' + di + ']: KCM=' + String(rd['KCM'] || '') +
           ' SKZC=' + skzc_raw + ' SKZC_len=' + skzc_raw.length +
           ' weekList[' + currentWeek + ']=' + wl[currentWeek]);
@@ -585,7 +586,7 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
         hilog.info(DOMAIN, TAG, 'row[' + i + '] SKXQ=' + weekday + ' SKZC=' + skzc + ' KCM=' + name);
       }
       // 诊断：所有今天的行
-      const weekList: boolean[] = parseWeekStr(skzc, 25);
+      const weekList: boolean[] = parseWeekStr(skzc, skzc.length);
       if (weekday === localDay) {
         hilog.info(DOMAIN, TAG, 'MAIN_LOOP_TODAY[' + i + '] KCM=' + name + ' SKZC=' + skzc + ' weekList[13]=' + weekList[currentWeek]);
       }

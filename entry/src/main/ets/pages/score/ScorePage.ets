@@ -1,4 +1,4 @@
-// ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
+﻿// ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
 import { SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
 import { ScoreService } from '../../services/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -12,6 +12,10 @@ export struct ScorePage {
   @State selectedSemester: string = '';
   @State semesterCodes: string[] = [];
   @State currentScores: ScoreItemModel[] = [];
+  @State searchWord: string = '';
+  @State totalGPA: string = '';
+  @State totalAvg: string = '';
+  @State totalCredits: string = '';
 
   // 成绩构成详情弹窗状态
   @State selectedCell: ScoreItemModel | null = null;
@@ -24,6 +28,28 @@ export struct ScorePage {
 
   private allScores: ScoreItemModel[] = [];
   private detailCache: Map<string, ComposeDetail[]> = new Map();
+
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
 
   aboutToAppear(): void {
     this.waitAndLoad();
@@ -64,7 +90,7 @@ export struct ScorePage {
 
       if (semSet.length > 0) {
         this.selectedSemester = semSet[0];
-        this.currentScores = this.allScores.filter((it: ScoreItemModel) => it.xnxqdm === semSet[0]);
+        this.applyFilter();
       }
     } catch (e) {
       const msg = (e as Error).message || '';
@@ -241,6 +267,80 @@ export struct ScorePage {
     });
   }
 
+  // ===== GPA 计算 =====
+  private ignoreCourse(name: string, type: string): boolean {
+    const kw: string[] = ['军事', '形势与政策', '创业基础', '新生', '写作与沟通', '学科导论', '心理', '物理实验'];
+    for (const k of kw) { if (name.indexOf(k) >= 0) return true; }
+    const tp: string[] = ['通识教育选修课', '集中实践环节', '拓展提高', '通识教育核心课', '专业选修课'];
+    for (const t of tp) { if (type.indexOf(t) >= 0) return true; }
+    if (name.indexOf('国家英语四级') >= 0 || name.indexOf('国家英语六级') >= 0) return true;
+    return false;
+  }
+
+  private scoreToGPANum(zcj: string, typeDisplay: string): number {
+    const num = parseFloat(zcj);
+    if (isNaN(num)) return -1;
+    if (typeDisplay === '五级成绩') {
+      if (num >= 90) return 4.0;
+      if (num >= 80) return 3.8;
+      if (num >= 70) return 3.2;
+      if (num >= 60) return 2.4;
+      return 0;
+    }
+    if (typeDisplay === '二级成绩') {
+      return num >= 60 ? 3.2 : 0;
+    }
+    if (num >= 95) return 4.0;
+    if (num >= 90) return 3.9;
+    if (num >= 84) return 3.8;
+    if (num >= 80) return 3.6;
+    if (num >= 76) return 3.4;
+    if (num >= 73) return 3.2;
+    if (num >= 70) return 3.0;
+    if (num >= 67) return 2.7;
+    if (num >= 64) return 2.4;
+    if (num >= 62) return 2.2;
+    if (num >= 60) return 2.0;
+    return 0;
+  }
+
+  private calcGPA(): void {
+    let totalCredits = 0;
+    let weightedSum = 0;
+    let totalScore = 0;
+    let count = 0;
+    for (const item of this.currentScores) {
+      if (!item.zcj || item.zcj.length === 0) continue;
+      if (this.ignoreCourse(item.xskcm, item.xgxklbdmDisplay)) continue;
+      const gpa = this.scoreToGPANum(item.zcj, item.djcjlxdmDisplay);
+      if (gpa < 0) continue;
+      const credit = parseFloat(item.xf) || 0;
+      totalCredits += credit;
+      weightedSum += gpa * credit;
+      const sc = parseFloat(item.zcj);
+      if (!isNaN(sc)) { totalScore += sc; count++; }
+    }
+    this.totalGPA = totalCredits > 0 ? (weightedSum / totalCredits).toFixed(3) : '--';
+    this.totalAvg = count > 0 ? (totalScore / count).toFixed(1) : '--';
+    this.totalCredits = totalCredits.toFixed(1);
+  }
+
+  private applyFilter(): void {
+    let list = this.allScores.filter((it: ScoreItemModel) =>
+      this.selectedSemester === '__all__' || it.xnxqdm === this.selectedSemester
+    );
+    if (this.searchWord.length > 0) {
+      const q = this.searchWord;
+      const filtered: ScoreItemModel[] = [];
+      for (const item of list) {
+        if (item.xskcm.indexOf(q) >= 0) filtered.push(item);
+      }
+      list = filtered;
+    }
+    this.currentScores = list;
+    this.calcGPA();
+  }
+
   build() {
     NavDestination() {
       Stack() {
@@ -249,6 +349,12 @@ export struct ScorePage {
 
           Scroll() {
             Row({ space: 8 }) {
+              Button('全部')
+                .fontSize(12)
+                .fontColor(this.selectedSemester === '__all__' ? '#FFFFFF' : '#333333')
+                .backgroundColor(this.selectedSemester === '__all__' ? '#4CAF50' : '#F0F0F0')
+                .borderRadius(16).height(32)
+                .onClick(() => { this.selectedSemester = '__all__'; this.applyFilter(); })
               ForEach(this.semesterCodes, (code: string) => {
                 Button(SemesterUtil.formatSemester(code))
                   .fontSize(12)
@@ -256,10 +362,7 @@ export struct ScorePage {
                   .backgroundColor(code === this.selectedSemester ? '#4CAF50' : '#F0F0F0')
                   .borderRadius(16)
                   .height(32)
-                  .onClick(() => {
-                    this.selectedSemester = code;
-                    this.currentScores = this.allScores.filter((it: ScoreItemModel) => it.xnxqdm === code);
-                  })
+                  .onClick(() => { this.selectedSemester = code; this.applyFilter(); })
               }, (code: string) => 'sem_' + code)
             }
             .padding({ left: 16, right: 16 })
@@ -270,6 +373,29 @@ export struct ScorePage {
           .backgroundColor(ThemeColors.bgCard)
 
           Divider().color('#F0F0F0')
+
+          // 搜索框 + GPA 汇总
+          Row() {
+            Row() {
+              Text('\ud83d\udd0d').fontSize(14).margin({ right: 4 })
+              TextInput({ placeholder: '搜索课程名...', text: this.searchWord })
+                .fontSize(13).layoutWeight(1).height(32).backgroundColor('#00000000')
+                .onChange((v: string) => { this.searchWord = v; this.applyFilter(); })
+            }.layoutWeight(1).height(32).padding({ left: 8, right: 8 })
+            .backgroundColor(ThemeColors.bgInput).borderRadius(16)
+
+            if (this.currentScores.length > 0) {
+              Text('GPA ' + this.totalGPA).fontSize(12).fontWeight(FontWeight.Bold).fontColor('#4CAF50')
+                .padding({ left: 4, right: 4 })
+              Text('|').fontSize(12).fontColor(ThemeColors.textHint)
+              Text(this.totalAvg + '分').fontSize(12).fontColor('#1976D2')
+                .padding({ left: 4, right: 4 })
+              Text('|').fontSize(12).fontColor(ThemeColors.textHint)
+              Text(this.totalCredits + '学分').fontSize(12).fontColor('#FF9800')
+                .padding({ left: 4, right: 4 })
+            }
+          }.width('100%').padding({ left: 16, right: 16, top: 6, bottom: 6 })
+          .backgroundColor(ThemeColors.bgCard)
 
           if (this.loading) {
             Column() {
@@ -442,8 +568,8 @@ export struct ScorePage {
       .width('100%')
       .height('100%')
     }
-    .title('成绩查询', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('成绩查询'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
     .onBackPressed(() => {

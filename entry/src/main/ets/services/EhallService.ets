@@ -88,6 +88,30 @@ export class SemesterUtil {
     const termName: string = term === '1' ? '秋季学期' : term === '2' ? '春季学期' : '短学期';
     return parts[0] + '-' + parts[1] + ' ' + termName;
   }
+
+  // 根据当前学期代码计算下学期代码
+  // e.g. '2025-2026-2' → '2026-2027-1'  or  '2025-2026-1' → '2025-2026-2'
+  static getNextSemesterCode(current: string): string {
+    const parts: string[] = current.split('-');
+    if (parts.length !== 3) return current;
+    const y1: number = parseInt(parts[0]);
+    const y2: number = parseInt(parts[1]);
+    const term: number = parseInt(parts[2]);
+    if (term === 1) {
+      return y1 + '-' + y2 + '-2';
+    } else {
+      return y2 + '-' + (y2 + 1) + '-1';
+    }
+  }
+
+  // 判断当前日期是否在学期有效范围内（学期开始日 ~ 学期开始日 + maxWeeks*7天）
+  static isDateInSemester(code: string, maxWeeks: number): boolean {
+    const now: Date = new Date();
+    const start: Date = SemesterUtil.getSemesterStartDate(code);
+    if (now < start) return false;
+    const diffDays: number = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays < maxWeeks * 7;
+  }
 }
 
 export class EhallService {

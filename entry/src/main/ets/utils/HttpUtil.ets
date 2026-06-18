@@ -333,7 +333,7 @@ export class HttpUtil {
           method: http.RequestMethod.GET,
           header: reqHeaders,
           expectDataType: http.HttpDataType.STRING,
-          readTimeout: 20000,
+          readTimeout: 30000,
           connectTimeout: 15000,
         },
         async (err: BusinessError | undefined, data: http.HttpResponse) => {
@@ -439,7 +439,7 @@ export class HttpUtil {
           header: reqHeaders,
           extraData: bodyStr,
           expectDataType: http.HttpDataType.STRING,
-          readTimeout: 20000,
+          readTimeout: 30000,
           connectTimeout: 15000,
         },
         async (err: BusinessError | undefined, data: http.HttpResponse) => {
@@ -530,7 +530,7 @@ export class HttpUtil {
             method: httpMethod,
             header: reqHeaders,
             expectDataType: http.HttpDataType.STRING,
-            readTimeout: 20000,
+            readTimeout: 30000,
             connectTimeout: 15000,
           },
           async (err: BusinessError | undefined, data: http.HttpResponse) => {
@@ -573,7 +573,7 @@ export class HttpUtil {
             header: reqHeaders,
             extraData: body as string,
             expectDataType: http.HttpDataType.STRING,
-            readTimeout: 20000,
+            readTimeout: 30000,
             connectTimeout: 15000,
           },
           async (err: BusinessError | undefined, data: http.HttpResponse) => {

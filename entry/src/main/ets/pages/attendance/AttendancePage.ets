@@ -1,4 +1,4 @@
-// AttendancePage.ets — 考勤查询页面
+﻿// AttendancePage.ets — 考勤查询页面
 import { AttendanceService } from '../../services/AttendanceService';
 import { ClassAttendance, ClassAttendanceDetail, AttendanceStatus } from '../../services/AttendanceModels';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -29,6 +29,28 @@ export struct AttendancePage {
   @State unknown: ClassAttendance[] = [];
 
   private service: AttendanceService = AttendanceService.getInstance();
+
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
 
   aboutToAppear(): void {
     this.loadData();
@@ -418,8 +440,9 @@ export struct AttendancePage {
         }
       }
     }
-    .title('考勤查询', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('考勤查询'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    
     .backgroundColor(ThemeColors.bgPage)
     .onBackPressed(() => {
       if (this.showDetail) {

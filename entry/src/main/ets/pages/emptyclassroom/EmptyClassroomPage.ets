@@ -1,8 +1,8 @@
-// EmptyClassroomPage.ets
-// 空闲教室页面：直接按日期查询，自动定位到今天
+// EmptyClassroomPage.ets — 空闲教室搜索
 import { ThemeColors } from '../../utils/ThemeColors';
 import { EmptyClassroomItem, BuildingInfo } from '../../services/Models';
 import { EmptyClassroomService } from '../../services/EmptyClassroomService';
+import { PreferenceUtil } from '../../utils/PreferenceUtil';
 
 @Component
 export struct EmptyClassroomPage {
@@ -11,40 +11,69 @@ export struct EmptyClassroomPage {
   @State loading: boolean = false;
   @State loadingBuildings: boolean = false;
   @State rooms: EmptyClassroomItem[] = [];
+  @State filteredRooms: EmptyClassroomItem[] = [];
+  @State searchText: string = '';
   @State buildings: BuildingInfo[] = [];
   @State selectedBuilding: string = '';
-  @State selectedDate: Date = new Date();  // 当前查询日期
+  @State selectedDate: Date = new Date();
   @State errorMsg: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   private ehallsvc: EmptyClassroomService = EmptyClassroomService.getInstance();
 
-  // 日期加减天数
   private addDays(d: Date, n: number): Date {
     return new Date(d.getTime() + n * 24 * 60 * 60 * 1000);
   }
 
-  // 格式化日期 YYYY-MM-DD
   private fmtDate(d: Date): string {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
+  private applyFilter(): void {
+    if (this.searchText.length === 0) {
+      this.filteredRooms = this.rooms;
+      return;
+    }
+    const s = this.searchText;
+    const list: EmptyClassroomItem[] = [];
+    for (let i = 0; i < this.rooms.length; i++) {
+      const name = this.rooms[i].roomName;
+      if (typeof name === 'string' && name.indexOf(s) >= 0) {
+        list.push(this.rooms[i]);
+      }
+    }
+    this.filteredRooms = list;
+  }
+
+  @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
+      }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      Text(t).fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+    }.width('100%').height(56).padding({ left: 12, right: 16 })
+  }
+
   aboutToAppear(): void {
-    // 自动定位到今天
     this.selectedDate = new Date();
     this.loadBuildings();
   }
 
   async loadBuildings(): Promise<void> {
-    this.loadingBuildings = true;
-    this.errorMsg = '';
+    this.loadingBuildings = true; this.errorMsg = '';
     try {
       this.buildings = await this.ehallsvc.getEmptyClassroomBuildings();
-      console.info('EmptyClassroomPage', 'Loaded buildings: ' + this.buildings.length);
       if (this.buildings.length > 0) {
-        // 默认选南校区的楼（如果能找到的话）
-        const south = this.buildings.find(b => b.name.includes('A') || b.name.includes('B') || b.name.includes('C'));
-        this.selectedBuilding = south?.code || this.buildings[0].code;
+        // 恢复上次选择的楼栋
+        const lastBld = PreferenceUtil.getString('empty_classroom_last_building');
+        if (lastBld.length > 0) {
+          const found = this.buildings.find(b => b.code === lastBld);
+          if (found) { this.selectedBuilding = found.code; }
+        }
+        if (!this.selectedBuilding) {
+          const south = this.buildings.find(b => b.name.indexOf('A') >= 0 || b.name.indexOf('B') >= 0 || b.name.indexOf('C') >= 0);
+          this.selectedBuilding = south?.code || this.buildings[0].code;
+        }
         this.search();
       } else {
         this.errorMsg = '未获取到楼栋列表';
@@ -58,123 +87,148 @@ export struct EmptyClassroomPage {
 
   async search(): Promise<void> {
     if (!this.selectedBuilding) return;
-    this.loading = true;
-    this.errorMsg = '';
+    this.loading = true; this.errorMsg = '';
     try {
-      const rawBody: string = await this.ehallsvc.searchEmptyClassroomsByDate(this.selectedBuilding, this.selectedDate);
-      console.info('EmptyClassroomPage', 'search response length: ' + rawBody.length);
+      const rawBody = await this.ehallsvc.searchEmptyClassroomsByDate(this.selectedBuilding, this.selectedDate);
       this.rooms = EmptyClassroomService.extractEmptyClassrooms(rawBody);
-      console.info('EmptyClassroomPage', 'Parsed rooms: ' + this.rooms.length);
+      this.applyFilter();
     } catch (e) {
       this.errorMsg = '加载失败: ' + (e as Error).message;
-      console.error('EmptyClassroomPage', 'search error: ' + JSON.stringify(e));
       this.rooms = [];
+      this.filteredRooms = [];
     } finally {
       this.loading = false;
     }
   }
 
+  selectBuilding(code: string): void {
+    this.selectedBuilding = code;
+    PreferenceUtil.putString('empty_classroom_last_building', code);
+    this.search();
+  }
+
   build() {
     NavDestination() {
       Column() {
-      // 顶部导航
-      // 楼栋选择
-      if (this.loadingBuildings) {
-        Row() { Text('加载楼栋...').fontSize(13).fontColor(ThemeColors.textSecondary); LoadingProgress().width(16).height(16).color(this.accentColor).margin({ left: 8 }); }
-          .width('100%').padding({ left: 16, right: 16, top: 8 })
-      } else if (this.buildings.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            ForEach(this.buildings, (b: BuildingInfo) => {
-              Button(b.name).fontSize(13).height(32).borderRadius(16)
-                .fontColor(b.code === this.selectedBuilding ? '#FFFFFF' : ThemeColors.textPrimary)
-                .backgroundColor(b.code === this.selectedBuilding ? '#F4511E' : ThemeColors.bgInput)
-                .onClick(() => { this.selectedBuilding = b.code; this.search(); })
-            }, (b: BuildingInfo) => 'bld_' + b.code)
-          }.padding({ left: 16, right: 16 })
-        }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).height(48)
-      }
-
-      // 日期选择器
-      Row({ space: 8 }) {
-        Button('前一天').fontSize(12).height(30).borderRadius(15)
-          .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
-          .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, -1); this.search(); })
-
-        Text(this.fmtDate(this.selectedDate)).fontSize(17).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-          .width(130).textAlign(TextAlign.Center)
-
-        Button('后一天').fontSize(12).height(30).borderRadius(15)
-          .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
-          .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, 1); this.search(); })
-
-        Button('今天').fontSize(12).height(30).borderRadius(15)
-          .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
-          .onClick(() => { this.selectedDate = new Date(); this.search(); })
-      }.width('100%').padding({ left: 16, right: 16, top: 8 })
-
-      Divider().color('#F0F0F0').margin({ top: 8 })
-
-      // 图例
-      Row({ space: 4 }) {
-        Text('图例: ').fontSize(10).fontColor(ThemeColors.textSecondary)
-        Row({ space: 2 }) {
-          Rect().width(12).height(12).fill('#E8F5E9').radius(2)
-          Text('空闲').fontSize(10).fontColor('#2E7D32').margin({ left: 2 })
+        // 楼栋选择
+        if (this.loadingBuildings) {
+          Row() {
+            Text('加载楼栋...').fontSize(13).fontColor(ThemeColors.textSecondary);
+            LoadingProgress().width(16).height(16).color(this.accentColor).margin({ left: 8 });
+          }.width('100%').padding({ left: 16, right: 16, top: 8 })
+        } else if (this.buildings.length > 0) {
+          Scroll() {
+            Row({ space: 8 }) {
+              ForEach(this.buildings, (b: BuildingInfo) => {
+                Button(b.name).fontSize(13).height(32).borderRadius(16)
+                  .fontColor(b.code === this.selectedBuilding ? '#FFFFFF' : ThemeColors.textPrimary)
+                  .backgroundColor(b.code === this.selectedBuilding ? '#F4511E' : ThemeColors.bgInput)
+                  .onClick(() => { this.selectBuilding(b.code); })
+              }, (b: BuildingInfo) => 'bld_' + b.code)
+            }.padding({ left: 16, right: 16 })
+          }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).height(48)
         }
-        Row({ space: 2 }) {
-          Rect().width(12).height(12).fill('#FFEBEE').radius(2)
-          Text('占用').fontSize(10).fontColor('#C62828').margin({ left: 2 })
-        }
-      }.width('100%').padding({ left: 16, right: 16, top: 6 }).margin({ bottom: 4 })
 
-      // 内容区
-      if (this.loading) {
-        Column() {
-          LoadingProgress().width(40).height(40).color(this.accentColor)
-          Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-      } else if (this.errorMsg) {
-        Column() {
-          Text('⚠️').fontSize(40)
-          Text(this.errorMsg).fontSize(14).fontColor('#C62828').margin({ top: 8 })
-          Button('重试').margin({ top: 12 }).onClick(() => { this.search(); })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-      } else if (this.rooms.length === 0) {
-        Column() {
-          Text('🏫').fontSize(48)
-          Text('暂无数据').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-          Text('请选择其他楼栋或日期').fontSize(12).fontColor('#BBBBBB').margin({ top: 4 })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-      } else {
-        List() {
-          ForEach(this.rooms, (room: EmptyClassroomItem) => {
-            ListItem() {
-              Column() {
-                Row() {
-                  Column() {
+        // 日期选择器
+        Row({ space: 8 }) {
+          Button('前一天').fontSize(12).height(30).borderRadius(15)
+            .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
+            .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, -1); this.search(); })
+          Text(this.fmtDate(this.selectedDate)).fontSize(17).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+            .width(130).textAlign(TextAlign.Center)
+          Button('后一天').fontSize(12).height(30).borderRadius(15)
+            .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
+            .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, 1); this.search(); })
+          Button('今天').fontSize(12).height(30).borderRadius(15)
+            .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
+            .onClick(() => { this.selectedDate = new Date(); this.search(); })
+        }.width('100%').padding({ left: 16, right: 16, top: 8 })
+
+        // 搜索框
+        Row() {
+          Text('\ud83d\udd0d').fontSize(14).margin({ right: 6 })
+          TextInput({ placeholder: '搜索教室名...', text: this.searchText })
+            .fontSize(14).layoutWeight(1).height(36).backgroundColor('#00000000')
+            .onChange((v: string) => { this.searchText = v; this.applyFilter(); })
+          if (this.searchText.length > 0) {
+            Text('✕').fontSize(14).fontColor(ThemeColors.textSecondary)
+              .onClick(() => { this.searchText = ''; this.applyFilter(); })
+          }
+        }.width('100%').padding({ left: 16, right: 16, top: 6, bottom: 4 })
+        .backgroundColor(ThemeColors.bgCard).borderRadius(8).margin({ left: 16, right: 16, top: 6 })
+
+        Divider().color('#F0F0F0').margin({ top: 6 })
+
+        // 图例
+        Row({ space: 4 }) {
+          Text('图例: ').fontSize(10).fontColor(ThemeColors.textSecondary)
+          Row({ space: 2 }) {
+            Rect().width(12).height(12).fill('#E8F5E9').radius(2)
+            Text('空闲').fontSize(10).fontColor('#2E7D32').margin({ left: 2 })
+          }
+          Row({ space: 2 }) {
+            Rect().width(12).height(12).fill('#FFEBEE').radius(2)
+            Text('占用').fontSize(10).fontColor('#C62828').margin({ left: 2 })
+          }
+          Blank()
+          if (!this.loading && this.filteredRooms.length > 0) {
+            Text('共 ' + this.filteredRooms.length + ' 间').fontSize(10).fontColor(ThemeColors.textSecondary)
+          }
+        }.width('100%').padding({ left: 16, right: 16, top: 6 }).margin({ bottom: 4 })
+
+        // 内容
+        if (this.loading) {
+          Column() {
+            LoadingProgress().width(40).height(40).color(this.accentColor)
+            Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else if (this.errorMsg) {
+          Column() {
+            Text('\u26a0\ufe0f').fontSize(40)
+            Text(this.errorMsg).fontSize(14).fontColor('#C62828').margin({ top: 8 })
+            Button('重试').margin({ top: 12 }).onClick(() => { this.search(); })
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else if (this.filteredRooms.length === 0 && this.searchText.length > 0) {
+          Column() {
+            Text('\ud83d\udd0d').fontSize(48)
+            Text('未找到匹配的教室').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else if (this.filteredRooms.length === 0) {
+          Column() {
+            Text('\ud83c\udfeb').fontSize(48)
+            Text('暂无数据').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+            Text('请选择其他楼栋或日期').fontSize(12).fontColor('#BBBBBB').margin({ top: 4 })
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else {
+          List() {
+            ForEach(this.filteredRooms, (room: EmptyClassroomItem) => {
+              ListItem() {
+                Column() {
+                  Row() {
                     Text(room.roomName).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                    Text(room.floor ? '楼层 ' + room.floor : '').fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  Row({ space: 2 }) {
-                    ForEach(room.isUsed, (free: boolean, idx: number) => {
-                      Text(free ? '空' : '占').fontSize(9)
-                        .fontColor(free ? '#2E7D32' : '#C62828')
-                        .backgroundColor(free ? '#E8F5E9' : '#FFEBEE')
-                        .borderRadius(3).padding({ left: 3, right: 3, top: 1, bottom: 1 })
-                    }, (free: boolean, idx: number) => 'sec_' + String(idx))
-                  }
-                }.width('100%')
-              }.width('100%').padding(14).borderRadius(12).backgroundColor(ThemeColors.bgCard).margin({ bottom: 8 })
-            }
-          }, (room: EmptyClassroomItem) => 'rm_' + room.roomName + '_' + room.floor)
-        }.width('100%').layoutWeight(1).padding({ left: 16, right: 16, top: 8, bottom: 16 })
-      }
-    }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
-  }
-    .title('空闲教室', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+                    if (room.floor) {
+                      Text('  ' + room.floor + '层').fontSize(11).fontColor(ThemeColors.textSecondary)
+                    }
+                    Blank()
+                    // 节次状态标签
+                    Row({ space: 2 }) {
+                      ForEach(room.isUsed, (free: boolean, idx: number) => {
+                        Text(free ? '空' : '占').fontSize(11)
+                          .fontColor(free ? '#2E7D32' : '#C62828')
+                          .backgroundColor(free ? '#E8F5E9' : '#FFEBEE')
+                          .borderRadius(4).padding({ left: 5, right: 5, top: 2, bottom: 2 })
+                      }, (free: boolean, idx: number) => 'sec_' + String(idx))
+                    }
+                  }.width('100%')
+                }.width('100%').padding(10).borderRadius(12).backgroundColor(ThemeColors.bgCard).margin({ bottom: 8 })
+              }
+            }, (room: EmptyClassroomItem) => 'rm_' + room.roomName + '_' + room.floor)
+          }.width('100%').layoutWeight(1).padding({ left: 16, right: 16, top: 8, bottom: 16 })
+        }
+      }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
+    }
+    .title({ builder: this.buildWhiteTitle('空闲教室'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
-    .onReady((ctx: NavDestinationContext) => {})
   }
 }

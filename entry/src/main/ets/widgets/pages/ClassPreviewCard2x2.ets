@@ -51,6 +51,7 @@ struct ClassPreviewCard2x2 {
   private roomAt(idx: number): string { return idx < this.curRooms().length ? this.curRooms()[idx] : ''; }
   private teacherAt(idx: number): string { return idx < this.curTeachers().length ? this.curTeachers()[idx] : ''; }
   private seatAt(idx: number): string { return idx < this.curSeats().length ? this.curSeats()[idx] : ''; }
+  @State refreshSpin: number = 0;
   private colorAt(idx: number): string { return this.isExamIdx(idx) ? '#FF9800' : COLORS_2X2[idx % COLORS_2X2.length]; }
 
   @Builder
@@ -82,10 +83,28 @@ struct ClassPreviewCard2x2 {
         Text(' ' + this.curCount()).fontSize(10).fontColor('#FFFFFF').backgroundColor('#42A5F5')
           .height(14).borderRadius(7).textAlign(TextAlign.Center).padding({ left: 3, right: 3 })
         Blank()
-        Text(this.showTomorrow ? '←' : '→').fontSize(14).fontWeight(FontWeight.Medium).margin({ right: 8 })
-          .onClick(() => { postCardAction(this, { action: 'message', params: { msgTest: 'toggle' } }); })
-        Image($r('app.media.ic_public_refresh')).width(14).height(14)
-          .onClick(() => { postCardAction(this, { action: 'message', params: { msgTest: 'schedule' } }); })
+        // 切换按钮 — 加大触控区域
+        Row() {
+          Text(this.showTomorrow ? '←' : '→').fontSize(14).fontWeight(FontWeight.Medium)
+        }
+        .width(24).height(24).borderRadius(12)
+        .backgroundColor('rgba(66,165,245,0.12)')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => { postCardAction(this, { action: 'message', params: { msgTest: 'toggle' } }); })
+        // 刷新按钮 — 加大触控区域 + 旋转动画
+        Row() {
+          Image($r('app.media.ic_public_refresh'))
+            .width(14).height(14)
+            .rotate({ angle: this.refreshSpin })
+            .animation({ duration: 500, curve: Curve.EaseInOut })
+        }
+        .width(24).height(24).borderRadius(12)
+        .backgroundColor('rgba(66,165,245,0.12)')
+        .justifyContent(FlexAlign.Center).margin({ left: 10 })
+        .onClick(() => {
+          this.refreshSpin += 360;
+          postCardAction(this, { action: 'message', params: { msgTest: 'schedule' } });
+        })
       }.width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 2 })
 
       Row() {

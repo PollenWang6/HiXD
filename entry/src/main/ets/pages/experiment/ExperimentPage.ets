@@ -1,4 +1,4 @@
-// ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
+﻿// ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { ExperimentData, ExperimentType, TimeRange } from '../../services/Models';
@@ -46,6 +46,27 @@ export struct ExperimentPage {
   @State fetchProgress: string = '';
   @State private isRefreshing: boolean = false;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
 
   async aboutToAppear(): Promise<void> {
     this.pageState = PageState.LOADING;
@@ -397,7 +418,17 @@ export struct ExperimentPage {
     return items;
   }
 
-  onError(msg: string) { this.errorMsg=msg; this.pageState=PageState.ERROR; }
+  onError(msg: string) {
+    // 有缓存数据时只显示横幅，不切换全页错误（对齐 Flutter）
+    if (this.cards.length > 0) {
+      this.errorMsg = msg;
+      this.showCacheBanner = true;
+      this.pageState = PageState.SUCCESS;
+    } else {
+      this.errorMsg = msg;
+      this.pageState = PageState.ERROR;
+    }
+  }
 
   build() {
     NavDestination() {
@@ -427,13 +458,19 @@ export struct ExperimentPage {
         } else if (this.pageState===PageState.SUCCESS) {
           if (this.showCacheBanner) {
             Row() {
-              Text('📦 当前显示缓存数据').fontSize(12).fontColor('#E65100')
-              Text('  刷新').fontSize(12).fontColor(this.accentColor)
-                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                .border({ width: 1, color: this.accentColor, radius: 4 })
-                .margin({ left: 10 })
-                .onClick(() => { this.doHttpSSOAndFetch(); })
-            }.width('100%').height(32).justifyContent(FlexAlign.Center)
+              Text(this.errorMsg.length > 0 ? '⚠ ' + this.errorMsg : '📦 当前显示缓存数据').fontSize(12).fontColor('#E65100')
+                .layoutWeight(1).maxLines(2)
+              if (this.errorMsg.length > 0) {
+                Button('重试').fontSize(12).height(26).backgroundColor(this.accentColor).fontColor('#FFFFFF')
+                  .borderRadius(4).padding({ left: 8, right: 8 }).onClick(() => { this.doHttpSSOAndFetch(); })
+              } else {
+                Text('  刷新').fontSize(12).fontColor(this.accentColor)
+                  .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                  .border({ width: 1, color: this.accentColor, radius: 4 })
+                  .margin({ left: 10 })
+                  .onClick(() => { this.doHttpSSOAndFetch(); })
+              }
+            }.width('100%').padding({ left: 16, right: 8, top: 6, bottom: 6 })
             .backgroundColor(this.themeIsDark ? '#3E2723' : '#FFF3E0')
           }
           if(this.cards.length===0) {
@@ -453,8 +490,9 @@ export struct ExperimentPage {
           }
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
-    }.title('\u5b9e\u9a8c\u4fe1\u606f', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    }.title({ builder: this.buildWhiteTitle('\u5b9e\u9a8c\u4fe1\u606f'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    
     .backgroundColor(ThemeColors.bgPage)
   }
 

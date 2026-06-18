@@ -1,4 +1,4 @@
-// DormWaterPage.ets — 宿舍水机控制页面
+﻿// DormWaterPage.ets — 宿舍水机控制页面
 import { DormWaterService, DormWaterDevice, CaptchaData } from '../../services/DormWaterService';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
@@ -38,6 +38,28 @@ export struct DormWaterPage {
   @State manualDeviceId: string = '';
 
   private svc: DormWaterService = DormWaterService.getInstance();
+
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
 
   aboutToAppear(): void {
     // 检查是否已登录
@@ -287,8 +309,8 @@ export struct DormWaterPage {
         }
       }
     }
-    .title('宿舍水机', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('宿舍水机'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .onBackPressed(() => { this.pageInfo.pop(); return true; })
     .backgroundColor(ThemeColors.bgPage)
   }

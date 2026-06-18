@@ -1,4 +1,4 @@
-// PortalWebPage.ets — 门户通用 WebView 页面
+﻿// PortalWebPage.ets — 门户通用 WebView 页面
 // 通过 title + url 参数复用，避免为每个服务单独建文件
 import web_webview from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -49,7 +49,17 @@ export struct PortalWebPage {
   async aboutToAppear(): Promise<void> {
     this.context = getContext(this) as common.UIAbilityContext;
     console.info(TAG, 'aboutToAppear: url=' + this.url.substring(0, 80));
-    if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('ignypt') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
+    if (this.useWeChatUA) {
+      // 移动门户：清除旧脏 cookie + 只同步 CASTGC，避免 route/JSESSIONID/MOD_AUTH_CAS
+      // 污染 xxcapp OpenResty 路由 → 子页面显示随机 hash（如 250bb948bd643d8b18f4c0fdd72a059d）
+      console.info(TAG, 'portal: clear stale xxcapp cookies');
+      CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
+      const t0 = Date.now();
+      const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
+      console.info(TAG, 'checkAndAutoLogin: result=' + loginOk + ' cost=' + (Date.now() - t0) + 'ms');
+      await CasLoginService.getInstance().syncCasCookieOnly();
+      console.info(TAG, 'syncCasCookieOnly done for portal, ready to load WebView');
+    } else if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('ignypt') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
       const t0 = Date.now();
       const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
       console.info(TAG, 'checkAndAutoLogin: result=' + loginOk + ' cost=' + (Date.now() - t0) + 'ms');
@@ -67,6 +77,11 @@ export struct PortalWebPage {
     } else {
       console.info(TAG, 'syncCookies skip (non-CAS domain)');
     }
+    // ===== 诊断：看 WebView CookieJar 里 xxcapp 实际有什么 =====
+    const wcmDiag = web_webview.WebCookieManager;
+    for (const d of ['xxcapp.xidian.edu.cn', 'ids.xidian.edu.cn']) {
+      console.error(TAG, 'DIAG: cookies on ' + d + ' = [' + wcmDiag.fetchCookieSync('https://' + d).substring(0, 500) + ']');
+    }
     this.webUrl = this.url;  // cookie 就绪，触发 WebView 加载
   }
 
@@ -78,7 +93,7 @@ export struct PortalWebPage {
           // WebView 区域（等 cookie 就绪 webUrl 非空后才创建，避免空 src 加载）
           Stack() {
             if (this.webUrl.length > 0) {
-            Web({ src: this.webUrl, controller: this.webController, incognitoMode: this.url.includes('zfw') })
+            Web({ src: this.webUrl, controller: this.webController })
               .onControllerAttached(() => {
                 console.info(TAG, 'onControllerAttached: webUrl loaded');
                 if (this.useWeChatUA) {
@@ -93,14 +108,18 @@ export struct PortalWebPage {
               .javaScriptAccess(true)
               .domStorageAccess(true)
               .cacheMode(CacheMode.Default)
-              .onPageBegin(() => {
+              .onPageBegin((event) => {
                 this.isLoading = true;
                 this.loadError = '';
-                console.info(TAG, 'onPageBegin: url=' + this.url.substring(0, 80));
+                const pageUrl: string = event ? event.url : this.url;
+                console.error(TAG, 'DIAG onPageBegin: url=' + pageUrl);
               })
-              .onPageEnd(() => {
+              .onPageEnd((event) => {
                 this.isLoading = false;
-                console.info(TAG, 'onPageEnd OK: ' + this.url.substring(0, 80));
+                const pageUrl: string = event ? event.url : this.url;
+                console.error(TAG, 'DIAG onPageEnd: url=' + pageUrl);
+                // 诊断：加载后看 xxcapp cookie 变了没
+                console.error(TAG, 'DIAG onPageEnd cookies: ' + web_webview.WebCookieManager.fetchCookieSync('https://xxcapp.xidian.edu.cn').substring(0, 500));
                 if (this.useWeChatUA && !this.keepWeChatUA) {
                   this.webController.setCustomUserAgent('');
                 } else if (!this.useWeChatUA) {
@@ -121,11 +140,19 @@ export struct PortalWebPage {
                 }
                 return false;
               })
+              .onHttpErrorReceive((event) => {
+                if (event) {
+                  const errUrl: string = event.request.getRequestUrl();
+                  const errCode: number = event.response.getResponseCode();
+                  console.error(TAG, 'DIAG onHttpError: url=' + errUrl + ' code=' + errCode);
+                }
+              })
               .onErrorReceive((event) => {
                 if (event) {
                   const errInfo: string = event.error.getErrorInfo();
                   const errCode: number = event.error.getErrorCode();
-                  console.error(TAG, 'onErrorReceive: code=' + errCode + ' info=' + errInfo + ' url=' + this.url.substring(0, 80));
+                  const errUrl: string = event.request ? event.request.getRequestUrl() : '?';
+                  console.error(TAG, 'DIAG onErrorReceive: code=' + errCode + ' info=' + errInfo + ' url=' + errUrl);
                   this.loadError = '加载失败: ' + errInfo;
                   this.isLoading = false;
                 }
@@ -191,6 +218,7 @@ export struct PortalWebPage {
 
       Text(this.title)
         .fontSize(20)
+        .fontColor(Color.White)
         .fontWeight(FontWeight.Bold)
         .layoutWeight(1)
         .maxLines(1)

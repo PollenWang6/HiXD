@@ -1,4 +1,4 @@
-// SchoolCardPage.ets — 校园卡原生页面（纯 HTTP，对标 Flutter）
+﻿// SchoolCardPage.ets — 校园卡原生页面（纯 HTTP，对标 Flutter）
 // 余额、付款码、消费记录
 import { promptAction } from '@kit.ArkUI';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -22,6 +22,28 @@ export struct SchoolCardPage {
   @State endDate: string = '';
   // Service
   private cardSvc: SchoolCardService = SchoolCardService.getInstance();
+
+    @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
 
   aboutToAppear(): void {
     const now = new Date();
@@ -52,6 +74,8 @@ export struct SchoolCardPage {
         this.cardSvc.getPaidRecords(this.beginDate, this.endDate),
       ]);
       this.balance = results[0] as string;
+      AppStorage.setOrCreate('card_balance', this.balance);
+      PreferenceUtil.putString('card_balance_cached', this.balance);
       this.records = results[1] as PaidRecord[];
       console.info('SchoolCardPage', 'initData: bal=' + (results[0] as string) + ' recs=' + (results[1] as PaidRecord[]).length);
       this.loading = false;
@@ -60,6 +84,8 @@ export struct SchoolCardPage {
       try {
         const bal = await this.cardSvc.getBalance();
         this.balance = bal;
+        AppStorage.setOrCreate('card_balance', bal);
+        PreferenceUtil.putString('card_balance_cached', bal);
         this.loading = false;
       } catch (_e2) {
         this.error = '校园卡加载失败';
@@ -141,6 +167,12 @@ export struct SchoolCardPage {
     });
   }
 
+  totalAmount(): string {
+    let sum = 0;
+    for (const r of this.records) sum += parseFloat(r.money) || 0;
+    return Math.abs(sum).toFixed(2);
+  }
+
   build() {
     NavDestination() {
       Column() {
@@ -160,6 +192,7 @@ export struct SchoolCardPage {
               if (this.showBarcode) {
                 this.showBarcode = false;
               } else {
+                this.showBarcode = true;
                 this.fetchQRCode();
               }
             })
@@ -186,7 +219,7 @@ export struct SchoolCardPage {
             }.width('100%').padding({ left: 18, right: 18, top: 14 })
 
             if (this.qrLoading) {
-              LoadingProgress().width(24).height(24).margin({ top: 24, bottom: 24 })
+              LoadingProgress().width(24).height(24).color(ThemeColors.accent).margin({ top: 24, bottom: 24 })
             } else if (this.qrBase64) {
               Divider().color('#EEEEEE').strokeWidth(0.5).margin({ left: 18, right: 18 })
               Row() {
@@ -248,6 +281,15 @@ export struct SchoolCardPage {
 
           Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 18, right: 18 })
 
+          if (this.records.length > 0 && !this.loading) {
+            Row() {
+              Text('合计 ¥' + this.totalAmount()).fontSize(13).fontWeight(FontWeight.Medium)
+                .fontColor('#FF5722')
+              Text(' · ').fontSize(13).fontColor(ThemeColors.textHint)
+              Text(this.records.length + ' 笔').fontSize(13).fontColor(ThemeColors.textSecondary)
+            }.width('100%').padding({ left: 18, right: 18, top: 8, bottom: 4 })
+          }
+
           if (this.records.length === 0) {
             Text(this.loading ? '加载中...' : '暂无消费记录')
               .fontSize(14).fontColor(ThemeColors.textSecondary)
@@ -296,8 +338,8 @@ export struct SchoolCardPage {
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
     }
-    .title('校园卡', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('校园卡'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder dateTag(label: string, days: number) {
