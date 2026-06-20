@@ -71,7 +71,7 @@ export struct LibraryPage {
 
   @State searchWord: string = '';
   @State searchField: string = 'keyWord';
-  @State searchPage: number = 1;
+  @State searchPage: number = 0;
   @State hasMore: boolean = false;
   @State books: BookItem[] = [];
   @State borrowList: BorrowItem[] = [];
@@ -301,9 +301,9 @@ export struct LibraryPage {
     };
   }
 
-  private async fetchAllCovers(books: BookItem[]): Promise<void> {
-    for (let i: number = 0; i < books.length; i += 5) {
-      const batch: BookItem[] = books.slice(i, i + 5);
+  private async fetchAllCovers(newBooks: BookItem[]): Promise<void> {
+    for (let i: number = 0; i < newBooks.length; i += 5) {
+      const batch: BookItem[] = newBooks.slice(i, i + 5);
       const tasks: Promise<string>[] = batch.map((b: BookItem) =>
         this.fetchBookCover(b.bookName, b.isbn, b.docNumber)
       );
@@ -312,10 +312,10 @@ export struct LibraryPage {
         batch[j].imageUrl = urls[j];
       }
     }
-    // 创建全新对象引用，触发 ForEach 重渲染
+    // 基于当前 this.books 重建数组，触发 ForEach 重渲染（保留所有页的数据）
     const updated: BookItem[] = [];
-    for (let k: number = 0; k < books.length; k++) {
-      updated.push(this.cloneBookItem(books[k]));
+    for (let k: number = 0; k < this.books.length; k++) {
+      updated.push(this.cloneBookItem(this.books[k]));
     }
     this.books = updated;
   }
@@ -420,12 +420,14 @@ export struct LibraryPage {
       Divider().color('#F0F0F0')
 
       if (this.currentTab === 0) {
-        if (this.isSearching) {
+        if (this.isSearching && this.books.length === 0) {
+          // 首次搜索：全屏加载
           Column() {
             LoadingProgress().width(40).height(40).color(this.accentColor)
             Text('搜索中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.books.length > 0) {
+          // 有数据：显示列表（翻页时列表保留，底部追加 loading）
           List({ space: 4 }) {
             ForEach(this.books, (book: BookItem, idx?: number) => {
               ListItem() {
@@ -466,15 +468,25 @@ export struct LibraryPage {
               }.padding({ left: 12, right: 12 })
             }, (book: BookItem, idx?: number) => `book_${idx}_${book.imageUrl.length > 0 ? '1' : '0'}`)
 
-            if (this.hasMore && !this.isSearching) {
+            if (this.isSearching) {
               ListItem() {
-                Text('加载更多').fontSize(13).fontColor('#8E24AA')
+                Row() {
+                  LoadingProgress().width(20).height(20).color(this.accentColor)
+                  Text('加载中...').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ left: 8 })
+                }.width('100%').height(48).justifyContent(FlexAlign.Center)
+              }.padding({ left: 12, right: 12 })
+            } else if (!this.hasMore && this.searchPage > 0) {
+              ListItem() {
+                Text('— 已经到底了 —').fontSize(12).fontColor('#BBBBBB')
                   .width('100%').height(40).textAlign(TextAlign.Center)
-                  .borderRadius(8).backgroundColor(ThemeColors.bgCard)
-                  .onClick(() => { this.searchBooks(this.searchPage + 1); })
               }.padding({ left: 12, right: 12 })
             }
           }.layoutWeight(1)
+          .onReachEnd(() => {
+            if (this.hasMore && !this.isSearching) {
+              this.searchBooks(this.searchPage + 1);
+            }
+          })
         } else {
           Column() {
             Text('📚').fontSize(48)
