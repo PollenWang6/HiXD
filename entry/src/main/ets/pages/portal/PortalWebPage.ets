@@ -36,6 +36,7 @@ export struct PortalWebPage {
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @State message: string = '';
   @Prop isTablet: boolean = false;
+  @Prop useIncognito: boolean = false;  // 隐私模式，cookie 不持久化
   @State uaMode: number = UA_AUTO;  // 当前 UA 模式
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
@@ -93,7 +94,7 @@ export struct PortalWebPage {
           // WebView 区域（等 cookie 就绪 webUrl 非空后才创建，避免空 src 加载）
           Stack() {
             if (this.webUrl.length > 0) {
-            Web({ src: this.webUrl, controller: this.webController })
+            Web({ src: this.webUrl, controller: this.webController, incognitoMode: this.useIncognito })
               .onControllerAttached(() => {
                 console.info(TAG, 'onControllerAttached: webUrl loaded');
                 if (this.useWeChatUA) {

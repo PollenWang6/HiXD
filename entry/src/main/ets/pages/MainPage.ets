@@ -96,6 +96,7 @@ struct MainPage {
     if (this.showColorPicker) { this.closeColorPickerDialog(); return true; }
     if (this.showThemeDialog) { this.closeThemeDialog(); return true; }
     if (this.showPhyPwdDialog) { this.closePhyPwdDialog(); return true; }
+    if (this.showSchoolnetPwdDialog) { this.closeSchoolnetPwdDialog(); return true; }
     if (this.showLogoutDialog) { this.closeLogoutDialog(); return true; }
     if (this.showBgDialog) { this.closeBgDialog(); return true; }
     if (this.showUpdateDialog) { this.showUpdateDialog = false; return true; }
@@ -107,6 +108,10 @@ struct MainPage {
   closePhyPwdDialog(): void {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.phyOpacity = 0; this.phyTranslate = 30; });
     setTimeout(() => { this.showPhyPwdDialog = false; }, 200);
+  }
+  closeSchoolnetPwdDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.schoolnetPwdOpacity = 0; this.schoolnetPwdTranslate = 30; });
+    setTimeout(() => { this.showSchoolnetPwdDialog = false; }, 200);
   }
   closeThemeDialog(): void {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.themeOpacity = 0; this.themeTranslate = 30; });
@@ -251,6 +256,11 @@ struct MainPage {
   @State phyTranslate: number = 30;
   @State phyPwdInput: string = '';
   @State phyPwdStatus: string = '未设置';
+  @State schoolnetPwdStatus: string = '未设置';
+  @State showSchoolnetPwdDialog: boolean = false;
+  @State schoolnetPwdOpacity: number = 0;
+  @State schoolnetPwdTranslate: number = 30;
+  @State schoolnetPwdInput: string = '';
   @State showThemeDialog: boolean = false;
   @State themeOpacity: number = 0;
   @State themeTranslate: number = 30;
@@ -430,6 +440,7 @@ struct MainPage {
     // 基于 ids_account 判断登录状态（无 is_logged_in 标记）
     this.isLoggedIn = this.username.length > 0;
     this.phyPwdStatus = PreferenceUtil.getString('physics_pwd').length > 0 ? '已设置' : '未设置';
+    this.schoolnetPwdStatus = PreferenceUtil.getString('schoolnet_password').length > 0 ? '已设置' : '未设置';
     const savedMode: number = PreferenceUtil.getNumber('theme_color_mode',
       ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     ThemeColors.init(savedMode, getContext());
@@ -1296,7 +1307,7 @@ struct MainPage {
 
   // 从classGrid中提取接下来2节课（今天+明天）
   private getNextClasses(grid: PreviewCell[][][]): PreviewCell[] {
-    const result: PreviewCell[] = [];
+    const candidates: PreviewCell[] = [];
     const now = new Date();
     const currentWeek: number = SemesterUtil.calcCurrentWeekFromNow();
     const dayOfWeek: number = now.getDay(); // 0=Sun, 1=Mon...
@@ -1317,7 +1328,7 @@ struct MainPage {
     console.error('Preview', 'week=' + currentWeek + ' todayDay=' + todayDay + ' currentSection=' + currentSection);
 
     // 搜索范围：今天 + 明天（最多2天）
-    for (let offset = 0; offset < 2 && result.length < 2; offset++) {
+    for (let offset = 0; offset < 2; offset++) {
       let searchDay: number = todayDay + offset;
       let searchWeek: number = currentWeek;
       if (searchDay > 7) {
@@ -1328,50 +1339,73 @@ struct MainPage {
 
       console.error('Preview', 'offset=' + offset + ' searchDay=' + searchDay + ' searchWeek=' + searchWeek);
 
-      // 先检查考试（存储在 section 0）
+      // 考试（存储在 section 0）
       const examCells: PreviewCell[] = grid[searchDay][0];
       for (let ci = 0; ci < examCells.length; ci++) {
         const cell: PreviewCell = examCells[ci];
         if (cell.isExam && cell.weekNum === searchWeek) {
-          result.push(cell);
-          if (result.length >= 2) break;
+          cell.day = searchDay;
+          candidates.push(cell);
         }
       }
 
       // 遍历该天所有节次
-      for (let s = 1; s <= 11 && result.length < 2; s++) {
+      for (let s = 1; s <= 11; s++) {
         const cells: PreviewCell[] = grid[searchDay][s];
         for (let ci = 0; ci < cells.length; ci++) {
           const cell: PreviewCell = cells[ci];
-          // 今天：跳过已全部结束的课程（endSection < currentSection）
+          // 今天：跳过已全部结束的课程
           if (offset === 0 && cell.endSection < currentSection) continue;
-          // 实验课程：weekNum匹配当前周
           if (cell.isExperiment || cell.isExam) {
             if (cell.weekNum === searchWeek) {
-              result.push(cell);
-              if (result.length >= 2) break;
+              cell.day = searchDay;
+              candidates.push(cell);
             }
           } else if (cell.isCustom) {
-            // 自定义课程：检查weekList
             const matchWeek = cell.weekList.length > searchWeek && cell.weekList[searchWeek];
-            console.error('Preview', 'getNext custom: name=' + cell.name + ' s=' + s + ' endSec=' + cell.endSection + ' curSec=' + currentSection + ' searchWeek=' + searchWeek + ' wlLen=' + cell.weekList.length + ' matchWeek=' + matchWeek + ' offset=' + offset + ' resultLen=' + result.length);
             if (matchWeek) {
-              result.push(cell);
-              if (result.length >= 2) break;
+              cell.day = searchDay;
+              candidates.push(cell);
             }
           } else {
-            // 普通课程：检查weekList是否包含搜索周
             if (cell.weekList.length > searchWeek && cell.weekList[searchWeek]) {
-              result.push(cell);
-            } else {
-              console.error('Preview', 'skip: ' + cell.name + ' day=' + cell.day + ' s=' + s + ' weekLen=' + cell.weekList.length + ' searchWeek=' + searchWeek);
+              cell.day = searchDay;
+              candidates.push(cell);
             }
-            if (result.length >= 2) break;
           }
         }
       }
     }
-    return result;
+
+    // 按时间排序：先按天，再按开始节次/考试时间
+    candidates.sort((a: PreviewCell, b: PreviewCell): number => {
+      if (a.day !== b.day) return a.day - b.day;
+      // 同一天：比较开始时间
+      const aMin: number = a.isExam ? this.examTimeToMinutes(a.examTimeDesc) : this.sectionToMinutes(a.startSection);
+      const bMin: number = b.isExam ? this.examTimeToMinutes(b.examTimeDesc) : this.sectionToMinutes(b.startSection);
+      return aMin - bMin;
+    });
+
+    console.error('Preview', 'candidates=' + candidates.length + ' top2: ' +
+      (candidates.length > 0 ? candidates[0].name : 'none') +
+      (candidates.length > 1 ? ', ' + candidates[1].name : ''));
+
+    return candidates.slice(0, 2);
+  }
+
+  // 考试时间描述转分钟数（如 "13:00-15:00" → 780）
+  private examTimeToMinutes(desc: string): number {
+    if (!desc || desc.length < 5) return 9999;
+    const m = desc.match(/(\d{1,2}):(\d{2})/);
+    if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
+    return 9999;
+  }
+
+  // 节次转开始分钟数
+  private sectionToMinutes(section: number): number {
+    if (section < 1 || section > 11) return 9999;
+    const startTime: string = SECTION_TIMES[section - 1][0];
+    return parseInt(startTime.substring(0, 2)) * 60 + parseInt(startTime.substring(3, 5));
   }
   private openUrl(url: string) {
     try {
@@ -1576,7 +1610,7 @@ struct MainPage {
     } else if (name === 'PortalWeb_Ruisi') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '睿思导航', url: 'https://nav.xdruisi.cn/', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Net') {
-      PortalWebPage({ pageInfo: this.pageInfo, title: '校园网登录', url: 'https://zfw.xidian.edu.cn/', isTablet: this.isTablet })
+      PortalWebPage({ pageInfo: this.pageInfo, title: '校园网登录', url: 'https://zfw.xidian.edu.cn/', isTablet: this.isTablet, useIncognito: true })
     } else if (name === 'PortalWeb_SchoolCard') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '校园卡服务', url: 'https://v8scan.xidian.edu.cn/home/openXDOAuth2Page', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Mail') {
@@ -1781,6 +1815,7 @@ struct MainPage {
       .shadow({ radius: 20, color: '#30000000' })
       .opacity(this.phyOpacity)
       .translate({ y: this.phyTranslate })
+      .onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -1788,6 +1823,53 @@ struct MainPage {
     .opacity(this.phyOpacity)
     .hitTestBehavior(this.showPhyPwdDialog ? HitTestMode.Default : HitTestMode.None)
     .onClick(() => { this.closePhyPwdDialog(); })
+    }
+    // 校园网密码弹窗
+    if (this.showSchoolnetPwdDialog || this.schoolnetPwdOpacity > 0) {
+    Column() {
+      Column() {
+        Row() {
+          Text('校园网密码').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Row() { Text('\u2715').fontSize(18).fontColor('#999999') }
+            .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => { this.closeSchoolnetPwdDialog(); })
+        }.width('100%').margin({ bottom: 16 })
+        Text('用于查询自服务平台(zfw)的详细流量数据').fontSize(12).fontColor(ThemeColors.textSecondary)
+          .width('100%').margin({ bottom: 12 })
+        TextInput({ placeholder: '输入校园网密码', text: this.schoolnetPwdInput })
+          .type(InputType.Password)
+          .width('100%').height(44).fontSize(15)
+          .backgroundColor(ThemeColors.bgInput).borderRadius(8)
+          .onChange((v: string) => { this.schoolnetPwdInput = v; })
+        Row() {
+          Button('取消').layoutWeight(1).height(40)
+            .backgroundColor(ThemeColors.bgInput)
+            .onClick(() => { this.closeSchoolnetPwdDialog(); })
+          Button('保存').layoutWeight(1).height(40).margin({ left: 12 })
+            .backgroundColor(this.accentColor).fontColor(this.accentTextColor())
+            .onClick(() => {
+              if (this.schoolnetPwdInput.length > 0) {
+                PreferenceUtil.putString('schoolnet_password', this.schoolnetPwdInput).catch(() => {});
+                this.schoolnetPwdStatus = '已设置';
+                this.closeSchoolnetPwdDialog();
+              }
+            })
+        }.width('100%').margin({ top: 16 })
+      }
+      .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.schoolnetPwdOpacity)
+      .translate({ y: this.schoolnetPwdTranslate })
+      .onClick(() => {})
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(ThemeColors.overlay)
+    .opacity(this.schoolnetPwdOpacity)
+    .hitTestBehavior(this.showSchoolnetPwdDialog ? HitTestMode.Default : HitTestMode.None)
+    .onClick(() => { this.closeSchoolnetPwdDialog(); })
     }
     // 深色模式选择弹窗
     if (this.showThemeDialog || this.themeOpacity > 0) {
@@ -1818,6 +1900,7 @@ struct MainPage {
       .shadow({ radius: 20, color: '#30000000' })
       .opacity(this.themeOpacity)
       .translate({ y: this.themeTranslate })
+      .onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -1886,6 +1969,7 @@ struct MainPage {
       .shadow({ radius: 20, color: '#30000000' })
       .opacity(this.colorOpacity)
       .translate({ y: this.colorTranslate })
+      .onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -2065,6 +2149,7 @@ struct MainPage {
       .shadow({ radius: 20, color: '#30000000' })
       .opacity(this.logoutOpacity)
       .translate({ y: this.logoutTranslate })
+      .onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -2147,6 +2232,7 @@ struct MainPage {
       .shadow({ radius: 20, color: '#30000000' })
       .opacity(this.bgOpacity)
       .translate({ y: this.bgTranslate })
+      .onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -2207,6 +2293,7 @@ struct MainPage {
       }
       .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
+      .onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -2809,6 +2896,25 @@ struct MainPage {
               this.phyPwdInput = PreferenceUtil.getString('physics_pwd');
               this.showPhyPwdDialog = true;
               animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.phyOpacity = 1; this.phyTranslate = 0; });
+            })
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            // 校园网密码设置
+            Row() {
+              Stack({ alignContent: Alignment.Center }) {
+                Circle().width(44).height(44).fill('#00ACC122')
+                Text('🌐').fontSize(22)
+              }.margin({ right: 16 })
+              Column() {
+                Text('校园网密码').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text(this.schoolnetPwdStatus).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .onClick(() => {
+              this.schoolnetPwdInput = PreferenceUtil.getString('schoolnet_password');
+              this.showSchoolnetPwdDialog = true;
+              animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.schoolnetPwdOpacity = 1; this.schoolnetPwdTranslate = 0; });
             })
           }
           .borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)

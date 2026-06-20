@@ -160,6 +160,56 @@ export class HttpUtil {
     return this.request(url, 'POST', undefined, headers);
   }
 
+  // 浜岃繘鍒?GET 锛堢敤浜庨獙璇佺爜鍥剧墖绛夛級锛岃繑鍥?ArrayBuffer
+  async getArrayBuffer(url: string, headers?: Record<string, string>): Promise<ArrayBuffer> {
+    await this.loadCookies();
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const req = http.createHttp();
+      const reqHeaders: Record<string, string> = {};
+      if (headers) {
+        for (const key of Object.keys(headers)) {
+          reqHeaders[key] = headers[key];
+        }
+      }
+      const domain = this.getDomain(url);
+      const cookieStr = this.getCookiesForDomain(domain);
+      if (cookieStr.length > 0) {
+        reqHeaders['Cookie'] = cookieStr;
+      }
+      req.on('headersReceive', (header: Object) => {
+        const hdr = header as Record<string, string | number | string[]>;
+        const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
+        if (sc) {
+          this.saveResponseCookies(domain, typeof sc === 'string' ? sc : String(sc));
+          this.saveCookies().catch(() => { console.warn(TAG, 'saveCookies failed in getArrayBuffer'); });
+        }
+      });
+      req.request(
+        url,
+        {
+          method: http.RequestMethod.GET,
+          header: reqHeaders,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER,
+          readTimeout: 120000,
+          connectTimeout: 30000,
+        },
+        (err: BusinessError | undefined, data: http.HttpResponse) => {
+          if (err !== undefined && err.code !== 0) {
+            req.destroy();
+            reject(new Error('HTTP ' + err.code + ': ' + err.message));
+            return;
+          }
+          req.destroy();
+          if (data.result instanceof ArrayBuffer) {
+            resolve(data.result as ArrayBuffer);
+          } else {
+            reject(new Error('getArrayBuffer: unexpected result type'));
+          }
+        }
+      );
+    });
+  }
+
   getCookiesForDomain(domain: string): string {
     const domMap = this.cookieStore[domain];
     const parts: string[] = [];
@@ -243,7 +293,7 @@ export class HttpUtil {
     if (!this.cookieStore[domain]) {
       this.cookieStore[domain] = {};
     }
-    const cookies = setCookieHeader.split(/,(?=\s*\w+=)/);
+    const cookies = setCookieHeader.split(/,(?=\s*[^,;=]+=)/);
     for (const cookie of cookies) {
       const first = cookie.split(';')[0].trim();
       const eq = first.indexOf('=');
@@ -333,8 +383,8 @@ export class HttpUtil {
           method: http.RequestMethod.GET,
           header: reqHeaders,
           expectDataType: http.HttpDataType.STRING,
-          readTimeout: 30000,
-          connectTimeout: 15000,
+          readTimeout: 120000,
+          connectTimeout: 30000,
         },
         async (err: BusinessError | undefined, data: http.HttpResponse) => {
           if (resolved) {
@@ -439,8 +489,8 @@ export class HttpUtil {
           header: reqHeaders,
           extraData: bodyStr,
           expectDataType: http.HttpDataType.STRING,
-          readTimeout: 30000,
-          connectTimeout: 15000,
+          readTimeout: 120000,
+          connectTimeout: 30000,
         },
         async (err: BusinessError | undefined, data: http.HttpResponse) => {
           if (resolved) {
@@ -530,8 +580,8 @@ export class HttpUtil {
             method: httpMethod,
             header: reqHeaders,
             expectDataType: http.HttpDataType.STRING,
-            readTimeout: 30000,
-            connectTimeout: 15000,
+            readTimeout: 120000,
+            connectTimeout: 30000,
           },
           async (err: BusinessError | undefined, data: http.HttpResponse) => {
             if (err !== undefined && err.code !== 0) {
@@ -556,6 +606,7 @@ export class HttpUtil {
             resp.location = respHeaders['location'] || respHeaders['Location'];
 
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
+            console.error('HttpUtil GET response set-cookie=' + (sc ? sc.substring(0, 300) : 'NONE'));
             if (sc) {
               this.saveResponseCookies(domain, sc);
               this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
@@ -573,8 +624,8 @@ export class HttpUtil {
             header: reqHeaders,
             extraData: body as string,
             expectDataType: http.HttpDataType.STRING,
-            readTimeout: 30000,
-            connectTimeout: 15000,
+            readTimeout: 120000,
+            connectTimeout: 30000,
           },
           async (err: BusinessError | undefined, data: http.HttpResponse) => {
             if (err !== undefined && err.code !== 0) {
@@ -599,6 +650,7 @@ export class HttpUtil {
             resp.location = respHeaders['location'] || respHeaders['Location'];
 
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
+            console.error('HttpUtil POST response set-cookie=' + (sc ? sc.substring(0, 300) : 'NONE'));
             if (sc) {
               this.saveResponseCookies(domain, sc);
               this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });

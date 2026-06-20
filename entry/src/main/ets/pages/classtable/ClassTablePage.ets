@@ -1268,6 +1268,7 @@ export struct ClassTablePage {
           .shadow({ radius: 20, color: '#30000000' })
           .opacity(this.unscheduledOpacity)
           .translate({ y: this.unscheduledTranslate })
+          .onClick(() => {})
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -1344,6 +1345,7 @@ export struct ClassTablePage {
           .shadow({ radius: 20, color: '#30000000' })
           .opacity(this.classChangesOpacity)
           .translate({ y: this.classChangesTranslate })
+          .onClick(() => {})
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
@@ -1356,7 +1358,7 @@ export struct ClassTablePage {
     }
     .hideBackButton(true)
     .title({ builder: this.customTitle(), height: 56 }, { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady(() => {})
     .onShown(() => {
@@ -1407,13 +1409,14 @@ export struct ClassTablePage {
       Text('课程表')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
         .layoutWeight(1)
 
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.ic_public_more'))
           .height(22)
           .width(22)
-          .fillColor(ThemeColors.textPrimary)
+          .fillColor(Color.White)
           .draggable(false)
       }
       .height(40)

@@ -13,6 +13,27 @@ export struct MobilePortalPage {
   @State loadError: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
+  @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
 
   build() {
@@ -64,7 +85,8 @@ export struct MobilePortalPage {
       .width('100%')
       .layoutWeight(1)
     }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
-    .title(移动门户)
+    .title({ builder: this.buildWhiteTitle('移动门户'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true)
   }
 }
 }

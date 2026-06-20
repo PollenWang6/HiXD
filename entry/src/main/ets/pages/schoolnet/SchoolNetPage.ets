@@ -1,63 +1,258 @@
-// SchoolNetPage.ets — 校园网页面
+// SchoolNetPage.ets — 校园网页面（流量概览 + 在线设备 + ZFW详细账单）
+// 对齐 Flutter: NetworkCardWindow (两个Tab: 自服务平台 + 认证系统)
 import { ThemeColors } from '../../utils/ThemeColors';
-import { SchoolnetService } from '../../services/SchoolnetService';
+import { PreferenceUtil } from '../../utils/PreferenceUtil';
+import { SchoolnetService, ZfwIpEntry, ZfwUsageData } from '../../services/SchoolnetService';
 
 @Component
 export struct SchoolNetPage {
-  @StorageProp('accent_color') accentColor: string = '#2979FF';
   pageInfo: NavPathStack = new NavPathStack();
-  @State loading: boolean = false;
-  @State errorMsg: string = '';
-  @State isOnline: boolean = false;
-  // 流量概览
-  @State username: string = '';
-  @State usedFlow: string = '';
-  @State remainFlow: string = '';
-  @State productName: string = '在校学生20G/月';
-  // 在线设备信息
-  @State deviceIp: string = '';
-  @State sessionFlow: string = '';    // V4入流量
-  @State onlineTime: string = '';     // 上线时间
+  @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+
+  @Builder buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close'))
+          .height(22)
+          .fillColor(ThemeColors.textPrimary)
+          .draggable(false)
+      }
+      .height(40).width(40)
+      .onClick(() => { this.pageInfo.pop(); })
+      Text(t)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 12, right: 16 })
+  }
+
+  // Tab 切换
+  @State currentTab: number = 0;
+
+  // === 认证系统 Tab (w.xidian.edu.cn) ===
+  @State authLoading: boolean = false;
+  @State authOnline: boolean = false;
+  @State authErrorMsg: string = '';
+  @State authUsername: string = '';
+  @State authUsedFlow: string = '';
+  @State authRemainFlow: string = '';
+  @State authTotalFlow: string = '';
+  @State authUsedPercent: number = 0;
+  @State authDeviceIp: string = '';
+  @State authOnlineTime: string = '';
+  @State authProductName: string = '';
+  @State authUserBalance: string = '';
+  @State authBytesIn: string = '';
+  @State authBytesOut: string = '';
+  @State authOnlineSeconds: string = '';
+  @State authUserMac: string = '';
+  @State authCheckoutDate: string = '';
+
+  // === 自服务平台 Tab (ZFW) ===
+  @State zfwLoading: boolean = false;
+  @State zfwState: string = 'idle'; // idle | needs_captcha | logging_in | logged_in | error
+  @State zfwCaptchaInput: string = '';
+  @State zfwCaptchaBase64: string = '';
+  @State zfwCsrf: string = '';
+  @State zfwRsaKey: string = '';
+  @State zfwErrorMsg: string = '';
+  @State zfwUsedFlow: string = '';
+  @State zfwRemainFlow: string = '';
+  @State zfwSettleDate: string = '';
+  @State zfwIpList: ZfwIpEntry[] = [];
+
+  // 校园网密码弹窗
+  @State showPwdDialog: boolean = false;
+  @State pwdInput: string = '';
+  @State pwdOpacity: number = 0;
+  @State pwdTranslate: number = 30;
 
   private schoolnet = SchoolnetService.getInstance();
 
-  aboutToAppear(): void { this.loadData(); }
-
-  async loadData(): Promise<void> {
-    this.loading = true; this.errorMsg = '';
-    try {
-      const info = await this.schoolnet.getCurrentOnlineInfo();
-      this.isOnline = true;
-      this.username = String(info['user_name'] || '');
-      this.usedFlow = this.formatFlow(String(info['sum_flow'] || 0));
-      this.remainFlow = this.formatFlow(String(info['remain_flow'] || 0));
-      this.deviceIp = String(info['user_ip'] || '');
-      // V4入流量
-      this.sessionFlow = this.formatFlow(String(info['v4_bytes_in'] || info['bytes_in'] || 0));
-      // 上线时间：从 add_time_ts 时间戳转为 YYYY-MM-DD HH:mm:ss
-      const addTimeTs = parseInt(String(info['add_time_ts'] || info['add_time'] || 0)) || 0;
-      if (addTimeTs > 0) {
-        this.onlineTime = this.formatTimestamp(addTimeTs);
-      }
-    } catch {
-      this.isOnline = false; this.errorMsg = '无法获取校园网信息（请确认已连接校园网）';
-    } finally { this.loading = false; }
+  aboutToAppear(): void {
+    this.loadAuthData();
+    this.loadZfwIfNeeded();
   }
 
-  private formatFlow(flow: string): string {
-    const num = parseFloat(flow) || 0;
-    if (num >= 1024 * 1024 * 1024) return (num / (1024 * 1024 * 1024)).toFixed(3) + 'G';
+  /** 切到自服务平台时自动加载 */
+  loadZfwIfNeeded(): void {
+    if (this.zfwState === 'idle' && PreferenceUtil.getString('schoolnet_password').length > 0) {
+      this.startZfwFlow();
+    }
+  }
+
+  // ===== 认证系统数据 =====
+
+  async loadAuthData(): Promise<void> {
+    this.authLoading = true;
+    this.authErrorMsg = '';
+    try {
+      const info = await this.schoolnet.getCurrentOnlineInfo();
+      this.authOnline = true;
+      this.authUsername = String(info['user_name'] || '');
+
+      const sumFlow: number = parseFloat(String(info['sum_flow'] || 0));
+      const remainFlow: number = parseFloat(String(info['remain_flow'] || 0));
+      const totalFlow: number = sumFlow + remainFlow;
+
+      this.authUsedFlow = this.formatFlowNum(sumFlow);
+      this.authRemainFlow = this.formatFlowNum(remainFlow);
+      this.authTotalFlow = this.formatFlowNum(totalFlow);
+      this.authUsedPercent = totalFlow > 0 ? sumFlow / totalFlow : 0;
+
+      this.authDeviceIp = String(info['user_ip'] || '');
+      const addTimeTs = parseInt(String(info['add_time_ts'] || info['add_time'] || 0)) || 0;
+      if (addTimeTs > 0) {
+        this.authOnlineTime = this.formatTimestamp(addTimeTs);
+      }
+      this.authProductName = String(info['products_name'] || '');
+      const balance: number = parseFloat(String(info['user_balance'] || 0));
+      this.authUserBalance = '¥' + balance.toFixed(2);
+
+      // 扩展字段
+      const bytesIn: number = parseFloat(String(info['bytes_in'] || 0));
+      const bytesOut: number = parseFloat(String(info['bytes_out'] || 0));
+      this.authBytesIn = this.formatFlowNum(bytesIn);
+      this.authBytesOut = this.formatFlowNum(bytesOut);
+      const sumSeconds: number = parseInt(String(info['sum_seconds'] || 0)) || 0;
+      this.authOnlineSeconds = this.formatDuration(sumSeconds);
+      this.authUserMac = String(info['user_mac'] || '');
+      const checkoutDate: number = parseInt(String(info['checkout_date'] || 0)) || 0;
+      if (checkoutDate > 0) {
+        // checkout_date 可能是 20260701 格式的数字
+        const cdStr: string = String(checkoutDate);
+        if (cdStr.length === 8) {
+          this.authCheckoutDate = cdStr.substring(0, 4) + '-' + cdStr.substring(4, 6) + '-' + cdStr.substring(6, 8);
+        } else {
+          this.authCheckoutDate = cdStr;
+        }
+      }
+    } catch (_e) {
+      this.authOnline = false;
+      this.authErrorMsg = '无法获取校园网信息（请确认已连接校园网）';
+    } finally {
+      this.authLoading = false;
+    }
+  }
+
+  // ===== ZFW 自服务平台 =====
+
+  async startZfwFlow(): Promise<void> {
+    const savedPwd: string = PreferenceUtil.getString('schoolnet_password');
+    if (savedPwd.length === 0) {
+      this.zfwState = 'error';
+      this.zfwErrorMsg = '请先设置校园网密码';
+      return;
+    }
+
+    this.zfwLoading = true;
+    this.zfwErrorMsg = '';
+    try {
+      // 先尝试复用已有 session，避免每次都输验证码
+      const existingData = await this.schoolnet.tryFetchZfwHome();
+      if (existingData !== null) {
+        this.applyZfwHomeData(existingData);
+        this.zfwState = 'logged_in';
+        return;
+      }
+      // 无有效 session → 走登录流程
+      const loginData = await this.schoolnet.startZfwLogin();
+      this.zfwCsrf = loginData.csrf;
+      this.zfwRsaKey = loginData.rsaKey;
+      this.zfwCaptchaBase64 = await this.schoolnet.getZfwCaptcha();
+      this.zfwCaptchaInput = '';
+      this.zfwState = 'needs_captcha';
+    } catch (e) {
+      this.zfwState = 'error';
+      this.zfwErrorMsg = '连接自服务平台失败';
+    } finally {
+      this.zfwLoading = false;
+    }
+  }
+
+  async submitCaptcha(): Promise<void> {
+    if (this.zfwCaptchaInput.length === 0) return;
+    this.zfwLoading = true;
+    this.zfwErrorMsg = '';
+    const savedPwd: string = PreferenceUtil.getString('schoolnet_password');
+    const username: string = PreferenceUtil.getString('ids_account');
+    try {
+      const encryptedPwd = await this.schoolnet.encryptPasswordRSA(savedPwd, this.zfwRsaKey);
+
+      // Step 1: validate-user
+      const validateResult = await this.schoolnet.validateZfwUser(
+        username, encryptedPwd, this.zfwCaptchaInput, this.zfwCsrf
+      );
+      if (!validateResult.success) {
+        this.zfwState = 'needs_captcha';
+        this.zfwErrorMsg = validateResult.message || '验证失败';
+        this.zfwCaptchaBase64 = await this.schoolnet.getZfwCaptcha();
+        this.zfwCaptchaInput = '';
+        this.zfwLoading = false;
+        return;
+      }
+
+      // Step 2: complete login
+      const loginOk = await this.schoolnet.completeZfwLogin(
+        username, encryptedPwd, this.zfwCaptchaInput, this.zfwCsrf
+      );
+      if (!loginOk) {
+        this.zfwState = 'needs_captcha';
+        this.zfwErrorMsg = '登录失败，请重试';
+        this.zfwCaptchaBase64 = await this.schoolnet.getZfwCaptcha();
+        this.zfwCaptchaInput = '';
+        this.zfwLoading = false;
+        return;
+      }
+
+      // Step 3: 获取数据
+      const usage = await this.schoolnet.getZfwUsage();
+      this.applyZfwHomeData(usage);
+      this.zfwState = 'logged_in';
+    } catch (e) {
+      this.zfwState = 'error';
+      this.zfwErrorMsg = '登录失败，请重试';
+    } finally {
+      this.zfwLoading = false;
+    }
+  }
+
+  private applyZfwHomeData(data: ZfwUsageData): void {
+    this.zfwUsedFlow = data.usedFlow;
+    this.zfwRemainFlow = data.remainFlow;
+    this.zfwSettleDate = data.settleDate;
+    this.zfwIpList = data.ipList;
+  }
+
+  // ===== 密码弹窗 =====
+
+  openPwdDialog(): void {
+    this.pwdInput = PreferenceUtil.getString('schoolnet_password');
+    this.showPwdDialog = true;
+    animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.pwdOpacity = 1; this.pwdTranslate = 0; });
+  }
+
+  closePwdDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.pwdOpacity = 0; this.pwdTranslate = 30; });
+    setTimeout(() => { this.showPwdDialog = false; }, 200);
+  }
+
+  // ===== 工具方法 =====
+
+  private formatFlowNum(num: number): string {
+    if (num >= 1024 * 1024 * 1024) return (num / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     if (num >= 1024 * 1024) return (num / (1024 * 1024)).toFixed(2) + ' MB';
     if (num >= 1024) return (num / 1024).toFixed(2) + ' KB';
     return num.toFixed(2) + ' B';
   }
 
-  // Unix 时间戳（秒）转为 "YYYY-MM-DD HH:mm:ss" (UTC+8)
   private formatTimestamp(ts: number): string {
-    // js 原生 Date 在 ArkTS 中可用
     const d = new Date(ts * 1000);
-    // UTC+8 = UTC + 8h = 480min
     const offsetMs = 8 * 60 * 60 * 1000;
     const local = new Date(d.getTime() + offsetMs + d.getTimezoneOffset() * 60 * 1000);
     const pad = (n: number): string => n < 10 ? '0' + n : '' + n;
@@ -65,78 +260,448 @@ export struct SchoolNetPage {
       + ' ' + pad(local.getUTCHours()) + ':' + pad(local.getUTCMinutes()) + ':' + pad(local.getUTCSeconds());
   }
 
+  private formatDuration(seconds: number): string {
+    const h: number = Math.floor(seconds / 3600);
+    const m: number = Math.floor((seconds % 3600) / 60);
+    const s: number = seconds % 60;
+    if (h > 0) return h + '时' + m + '分' + s + '秒';
+    if (m > 0) return m + '分' + s + '秒';
+    return s + '秒';
+  }
+
+  // ===== 认证系统 Tab UI =====
+
+  @Builder
+  AuthTab(): void {
+    if (this.authLoading) {
+      Column() {
+        LoadingProgress().width(40).height(40).color(this.accentColor)
+        Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+      }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+    } else if (this.authOnline) {
+      Scroll() {
+        Column() {
+          // 提示
+          Row() {
+            Text('⚠️').fontSize(14).margin({ right: 8 })
+            Text('数据来自校园网认证系统，仅供参考').fontSize(12).fontColor('#E65100')
+          }.width('100%').padding(12).borderRadius(10)
+            .backgroundColor('#FFF3E0').margin({ bottom: 12 })
+
+          // 用户信息卡片
+          Column() {
+            Text('概览').fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              .width('100%').margin({ bottom: 12 })
+
+            Row() {
+              Text('👤').fontSize(16).margin({ right: 8 })
+              Text('账号').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+              Text(this.authUsername).fontSize(13).fontWeight(FontWeight.Medium)
+                .fontColor(ThemeColors.textPrimary).layoutWeight(1)
+            }.width('100%').margin({ bottom: 8 })
+
+            Row() {
+              Text('📋').fontSize(16).margin({ right: 8 })
+              Text('套餐').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+              Text(this.authProductName).fontSize(13).fontWeight(FontWeight.Medium)
+                .fontColor('#43A047').layoutWeight(1)
+            }.width('100%').margin({ bottom: 8 })
+
+            Row() {
+              Text('💰').fontSize(16).margin({ right: 8 })
+              Text('余额').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+              Text(this.authUserBalance).fontSize(13).fontWeight(FontWeight.Medium)
+                .fontColor('#43A047').layoutWeight(1)
+            }.width('100%')
+          }.width('100%').padding(16).borderRadius(12)
+            .backgroundColor(ThemeColors.bgCard)
+            .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+
+          // 流量使用卡片
+          Column() {
+            Text('流量使用').fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              .width('100%').margin({ bottom: 12 })
+
+            // 进度条
+            Progress({ value: this.authUsedPercent * 100, total: 100, type: ProgressType.Linear })
+              .width('100%').color(this.authUsedPercent > 0.9 ? '#FF5252' : this.accentColor)
+              .margin({ bottom: 6 })
+            Text('已使用 ' + (this.authUsedPercent * 100).toFixed(1) + '%')
+              .fontSize(11).fontColor(ThemeColors.textSecondary)
+              .width('100%').textAlign(TextAlign.End).margin({ bottom: 12 })
+
+            Row() {
+              Text('🔴').fontSize(14).margin({ right: 8 })
+              Text('已用').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+              Text(this.authUsedFlow).fontSize(13).fontWeight(FontWeight.Bold)
+                .fontColor('#FF5252').layoutWeight(1)
+            }.width('100%').margin({ bottom: 8 })
+
+            Row() {
+              Text('🟢').fontSize(14).margin({ right: 8 })
+              Text('剩余').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+              Text(this.authRemainFlow).fontSize(13).fontWeight(FontWeight.Bold)
+                .fontColor('#43A047').layoutWeight(1)
+            }.width('100%').margin({ bottom: 8 })
+
+            Row() {
+              Text('🔵').fontSize(14).margin({ right: 8 })
+              Text('总量').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+              Text(this.authTotalFlow).fontSize(13).fontWeight(FontWeight.Bold)
+                .fontColor('#2196F3').layoutWeight(1)
+            }.width('100%')
+          }.width('100%').padding(16).borderRadius(12).margin({ top: 12 })
+            .backgroundColor(ThemeColors.bgCard)
+            .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+
+          // 在线设备
+          if (this.authDeviceIp.length > 0) {
+            Column() {
+              Text('当前设备').fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                .width('100%').margin({ bottom: 12 })
+
+              Row() {
+                Text('🌐').fontSize(14).margin({ right: 8 })
+                Text('IP').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+                Text(this.authDeviceIp).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
+              }.width('100%').margin({ bottom: 8 })
+
+              Row() {
+                Text('🕐').fontSize(14).margin({ right: 8 })
+                Text('上线').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+                Text(this.authOnlineTime).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
+              }.width('100%').margin({ bottom: 8 })
+
+              if (this.authOnlineSeconds.length > 0) {
+                Row() {
+                  Text('⏱').fontSize(14).margin({ right: 8 })
+                  Text('时长').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+                  Text(this.authOnlineSeconds).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
+                }.width('100%').margin({ bottom: 8 })
+              }
+
+              if (this.authBytesIn.length > 0) {
+                Row() {
+                  Text('⬇️').fontSize(14).margin({ right: 8 })
+                  Text('下行').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+                  Text(this.authBytesIn).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
+                }.width('100%').margin({ bottom: 8 })
+              }
+
+              if (this.authBytesOut.length > 0) {
+                Row() {
+                  Text('⬆️').fontSize(14).margin({ right: 8 })
+                  Text('上行').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+                  Text(this.authBytesOut).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
+                }.width('100%').margin({ bottom: 8 })
+              }
+
+              if (this.authUserMac.length > 0) {
+                Row() {
+                  Text('📟').fontSize(14).margin({ right: 8 })
+                  Text('MAC').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+                  Text(this.authUserMac).fontSize(12).fontColor(ThemeColors.textSecondary).layoutWeight(1)
+                }.width('100%')
+              }
+            }.width('100%').padding(16).borderRadius(12).margin({ top: 12 })
+              .backgroundColor(ThemeColors.bgCard)
+              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+          }
+
+          // 结算日期
+          if (this.authCheckoutDate.length > 0) {
+            Row() {
+              Text('📅').fontSize(14).margin({ right: 8 })
+              Text('结算日期').fontSize(13).fontColor(ThemeColors.textSecondary).width('25%')
+              Text(this.authCheckoutDate).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
+            }.width('100%').padding(16).borderRadius(12).margin({ top: 12 })
+              .backgroundColor(ThemeColors.bgCard)
+              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+          }
+
+          // 刷新按钮
+          Button('刷新').fontSize(14).width('100%').height(42)
+            .backgroundColor(this.accentColor).borderRadius(10)
+            .margin({ top: 20, bottom: 20 })
+            .onClick(() => { this.loadAuthData(); })
+        }.width('100%').padding({ left: 16, right: 16, top: 8 })
+      }
+    } else {
+      Column() {
+        Text('🌐').fontSize(48)
+        Text('未连接校园网').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+        Text('请确认已连接到校园WiFi或有线网络').fontSize(13).fontColor(ThemeColors.textHint).margin({ top: 4 })
+        Button('重试').margin({ top: 16 }).onClick(() => { this.loadAuthData(); })
+      }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+    }
+  }
+
+  // ===== ZFW 自服务平台 Tab UI =====
+
+  @Builder
+  ZfwTab(): void {
+    if (this.zfwLoading) {
+      Column() {
+        LoadingProgress().width(40).height(40).color(this.accentColor)
+        Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+      }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+    } else if (this.zfwState === 'idle') {
+      Column() {
+        Text('🔑').fontSize(40)
+        Text('自服务平台').fontSize(16).fontWeight(FontWeight.Medium)
+          .fontColor(ThemeColors.textPrimary).margin({ top: 12 })
+        Text('查看详细流量和在线设备信息').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
+
+        if (PreferenceUtil.getString('schoolnet_password').length === 0) {
+          Text('未设置校园网密码，点击设置').fontSize(13).fontColor(this.accentColor).margin({ top: 12 })
+            .onClick(() => { this.openPwdDialog(); })
+        } else {
+          LoadingProgress().width(24).height(24).color(this.accentColor).margin({ top: 16 })
+        }
+      }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+    } else if (this.zfwState === 'needs_captcha') {
+      Scroll() {
+        Column() {
+          Text('请输入验证码').fontSize(14).fontWeight(FontWeight.Medium)
+            .fontColor(ThemeColors.textPrimary).width('100%').margin({ bottom: 12 })
+
+          if (this.zfwCaptchaBase64.length > 0) {
+            Image(this.zfwCaptchaBase64).width(140).height(50).objectFit(ImageFit.Contain)
+              .borderRadius(6).border({ width: 1, color: '#E0E0E0' })
+              .onClick(() => {
+                this.schoolnet.getZfwCaptcha().then((b64: string) => {
+                  this.zfwCaptchaBase64 = b64;
+                });
+              })
+            Text('点击图片刷新').fontSize(10).fontColor(ThemeColors.textHint).margin({ top: 4, bottom: 8 })
+          }
+
+          if (this.zfwErrorMsg.length > 0) {
+            Text(this.zfwErrorMsg).fontSize(12).fontColor('#FF5252').margin({ bottom: 8 })
+          }
+
+          TextInput({ placeholder: '请输入验证码', text: this.zfwCaptchaInput })
+            .width('100%').height(42).fontSize(15).margin({ bottom: 12 })
+            .onChange((value: string) => { this.zfwCaptchaInput = value; })
+
+          Row() {
+            Button('登录').fontSize(14).layoutWeight(1).height(42)
+              .backgroundColor(this.accentColor).borderRadius(10)
+              .onClick(() => { this.submitCaptcha(); })
+              .enabled(this.zfwCaptchaInput.length > 0)
+            Button('取消').fontSize(14).layoutWeight(1).height(42).margin({ left: 12 })
+              .backgroundColor(ThemeColors.bgCard).fontColor(ThemeColors.textSecondary)
+              .borderRadius(10).border({ width: 1, color: '#E0E0E0' })
+              .onClick(() => { this.zfwState = 'idle'; this.zfwCaptchaInput = ''; })
+          }.width('100%')
+        }.width('100%').padding(20).borderRadius(12)
+          .backgroundColor(ThemeColors.bgCard)
+          .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+          .margin({ top: 20, left: 16, right: 16 })
+      }
+    } else if (this.zfwState === 'logged_in') {
+      Scroll() {
+        Column() {
+          // 提示
+          Row() {
+            Text('⚠️').fontSize(14).margin({ right: 8 })
+            Text('数据来自自服务平台(zfw)，仅供参考').fontSize(12).fontColor('#E65100')
+          }.width('100%').padding(12).borderRadius(10)
+            .backgroundColor('#FFF3E0').margin({ bottom: 12 })
+
+          // 流量概览
+          Column() {
+            Row() {
+              Text('流量概览').fontSize(14).fontWeight(FontWeight.Bold)
+                .fontColor(ThemeColors.textPrimary).layoutWeight(1)
+              Text('🔄 刷新').fontSize(12).fontColor(this.accentColor)
+                .onClick(() => { this.startZfwFlow(); })
+            }.width('100%').margin({ bottom: 12 })
+
+            Row() {
+              Column() {
+                Text(this.zfwUsedFlow || '—').fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FF5252')
+                Text('已用流量').fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
+              }.layoutWeight(1)
+
+              Column() {
+                Text(this.zfwRemainFlow || '—').fontSize(18).fontWeight(FontWeight.Bold).fontColor('#43A047')
+                Text('剩余流量').fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
+              }.layoutWeight(1)
+
+              Column() {
+                Text(this.zfwSettleDate || '—').fontSize(14).fontWeight(FontWeight.Bold).fontColor('#FF9800')
+                Text('结算日期').fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
+              }.layoutWeight(1)
+            }.width('100%')
+          }.width('100%').padding(16).borderRadius(12)
+            .backgroundColor(ThemeColors.bgCard)
+            .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+
+          // 在线设备列表
+          if (this.zfwIpList.length > 0) {
+            Column() {
+              Text('在线设备').fontSize(14).fontWeight(FontWeight.Bold)
+                .fontColor(ThemeColors.textPrimary).width('100%').margin({ bottom: 12 })
+
+              // 表头
+              Row() {
+                Text('IP地址').fontSize(11).fontColor(ThemeColors.textSecondary).layoutWeight(3)
+                Text('上线时间').fontSize(11).fontColor(ThemeColors.textSecondary).layoutWeight(4)
+                Text('使用流量').fontSize(11).fontColor(ThemeColors.textSecondary).layoutWeight(3)
+              }.width('100%').padding({ bottom: 8 })
+                .border({ width: { bottom: 0.5 }, color: '#E0E0E0' })
+
+              ForEach(this.zfwIpList, (item: ZfwIpEntry, index: number) => {
+                Row() {
+                  Text(item.ip).fontSize(12).fontColor(ThemeColors.textPrimary)
+                    .layoutWeight(3).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(item.onlineTime).fontSize(11).fontColor(ThemeColors.textSecondary)
+                    .layoutWeight(4).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(item.usedFlow).fontSize(12).fontColor('#00ACC1')
+                    .layoutWeight(3).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                }.width('100%').padding({ top: 10, bottom: 10 })
+                  .border({ width: { bottom: 0.5 }, color: '#F0F0F0' })
+              }, (item: ZfwIpEntry, index: number): string => index.toString())
+            }.width('100%').padding(16).borderRadius(12).margin({ top: 12 })
+              .backgroundColor(ThemeColors.bgCard)
+              .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+          }
+
+          // 退出登录按钮
+          Button('退出登录').fontSize(13).width('100%').height(38)
+            .backgroundColor(ThemeColors.bgCard).fontColor('#FF5252')
+            .borderRadius(10).border({ width: 1, color: '#FFCDD2' })
+            .margin({ top: 20, bottom: 20 })
+            .onClick(() => {
+              this.zfwState = 'idle';
+              this.zfwIpList = [];
+              this.zfwUsedFlow = '';
+              this.zfwRemainFlow = '';
+              this.zfwSettleDate = '';
+            })
+        }.width('100%').padding({ left: 16, right: 16, top: 8 })
+      }
+    } else if (this.zfwState === 'error') {
+      Column() {
+        Text('⚠️').fontSize(40)
+        Text(this.zfwErrorMsg || '加载失败').fontSize(14).fontColor('#FF5252').margin({ top: 8 })
+        Row() {
+          Button('重试').fontSize(13).height(36)
+            .onClick(() => { this.startZfwFlow(); })
+          if (this.zfwErrorMsg.includes('密码')) {
+            Button('设置密码').fontSize(13).height(36).margin({ left: 12 })
+              .backgroundColor(this.accentColor)
+              .onClick(() => { this.openPwdDialog(); })
+          }
+          Button('取消').fontSize(13).height(36).margin({ left: 12 })
+            .backgroundColor(ThemeColors.bgCard).fontColor(ThemeColors.textSecondary)
+            .border({ width: 1, color: '#E0E0E0' })
+            .onClick(() => { this.zfwState = 'idle'; })
+        }.margin({ top: 16 })
+      }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+    }
+  }
+
+  private swiperController: SwiperController = new SwiperController();
+
   build() {
     NavDestination() {
       Column() {
-      // 导航栏
-      Row() {
-        Blank()
-        Circle().width(10).height(10).fill(this.isOnline ? '#4CAF50' : '#FF5252').margin({ right: 6 })
-        Text(this.isOnline ? '在线' : '离线').fontSize(12).fontColor(this.isOnline ? '#4CAF50' : '#FF5252')
-      }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 8 }).backgroundColor(ThemeColors.bgCard)
-      Divider().color('#F0F0F0')
+        // Tab 栏
+        Row() {
+          Column() {
+            Text('认证系统').fontSize(14)
+              .fontColor(this.currentTab === 0 ? this.accentColor : ThemeColors.textSecondary)
+              .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
+            if (this.currentTab === 0) {
+              Divider().strokeWidth(2).color(this.accentColor).width(24).margin({ top: 4 })
+            }
+          }.layoutWeight(1).onClick(() => { this.currentTab = 0; this.swiperController.changeIndex(0); })
 
-      if (this.loading) {
+          Column() {
+            Text('自服务平台').fontSize(14)
+              .fontColor(this.currentTab === 1 ? this.accentColor : ThemeColors.textSecondary)
+              .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
+            if (this.currentTab === 1) {
+              Divider().strokeWidth(2).color(this.accentColor).width(24).margin({ top: 4 })
+            }
+          }.layoutWeight(1).onClick(() => { this.currentTab = 1; this.swiperController.changeIndex(1); })
+        }.width('100%').height(44).padding({ left: 16, right: 16 })
+          .border({ width: { bottom: 0.5 }, color: '#E0E0E0' })
+
+        // Swiper 支持左右滑动切换
+        Swiper(this.swiperController) {
+          // Tab 0: 认证系统
+          Column() { this.AuthTab() }.width('100%').layoutWeight(1)
+          // Tab 1: 自服务平台
+          Column() { this.ZfwTab() }.width('100%').layoutWeight(1)
+        }
+        .index(this.currentTab)
+        .indicator(false)
+        .loop(false)
+        .duration(250)
+        .curve(Curve.EaseInOut)
+        .onChange((index: number) => {
+          this.currentTab = index;
+          if (index === 1) {
+            this.loadZfwIfNeeded();
+          }
+        })
+        .layoutWeight(1)
+
+        // 校园网密码弹窗
+        if (this.showPwdDialog || this.pwdOpacity > 0) {
         Column() {
-          LoadingProgress().width(40).height(40).color(this.accentColor)
-          Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-      } else if (this.isOnline) {
-        Column() {
-          // === 流量概览 ===
-          Text('流量概览').fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-            .width('100%').margin({ bottom: 12 })
-          Row() {
-            Text('账号').fontSize(12).fontColor(ThemeColors.textSecondary).width('25%')
-            Text('已用流量').fontSize(12).fontColor(ThemeColors.textSecondary).width('25%')
-            Text('剩余流量').fontSize(12).fontColor(ThemeColors.textSecondary).width('25%')
-            Text('套餐').fontSize(12).fontColor(ThemeColors.textSecondary).width('25%')
-          }.width('100%')
-          Row() {
-            Text(this.username).fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-              .width('25%').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.usedFlow).fontSize(13).fontWeight(FontWeight.Bold).fontColor('#00ACC1').width('25%')
-            Text(this.remainFlow).fontSize(13).fontWeight(FontWeight.Bold).fontColor(ThemeColors.success).width('25%')
-            Text(this.productName).fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.warning)
-              .width('25%').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          }.width('100%').margin({ top: 4 })
-
-          Divider().color('#F0F0F0').margin({ top: 16, bottom: 16 })
-
-          // === 在线设备（对齐 zfw 网页的"在线信息"区域）===
-          Text('在线设备').fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-            .width('100%').margin({ bottom: 12 })
-          Row() {
-            Text('IP地址').fontSize(12).fontColor(ThemeColors.textSecondary).width('33%')
-            Text('使用流量').fontSize(12).fontColor(ThemeColors.textSecondary).width('34%')
-            Text('上线时间').fontSize(12).fontColor(ThemeColors.textSecondary).width('33%')
-          }.width('100%')
-          Row() {
-            Text(this.deviceIp).fontSize(12).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary).width('33%')
-            Text(this.sessionFlow).fontSize(12).fontWeight(FontWeight.Bold).fontColor('#00ACC1').width('34%')
-            Text(this.onlineTime).fontSize(12).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary).width('33%')
-          }.width('100%').margin({ top: 4 })
-
-          Divider().color('#F0F0F0').margin({ top: 16, bottom: 8 })
-
-          // 底部提示
-          Text('流量数据来自校园网认证系统，仅供参考').fontSize(11).fontColor('#BBBBBB')
-            .width('100%').textAlign(TextAlign.Center)
-        }.width('100%').padding(20).borderRadius(16).backgroundColor(ThemeColors.bgCard)
-          .margin({ left: 16, right: 16, top: 16 }).shadow({ radius: 4, color: '#00000008', offsetY: 2 })
-      } else {
-        Column() {
-          Text('\u{1f310}').fontSize(48)
-          Text('未连接校园网').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-          Text('请确认已连接到校园WiFi或有线网络').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
-          Button('重试').margin({ top: 16 }).onClick(() => { this.loadData(); })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-      }
-    }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
-  }
-    .title('校园网', { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+          Column() {
+            Row() {
+              Text('校园网密码').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+              Blank()
+              Row() { Text('\u2715').fontSize(18).fontColor('#999999') }
+                .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+                .justifyContent(FlexAlign.Center)
+                .onClick(() => { this.closePwdDialog(); })
+            }.width('100%').margin({ bottom: 16 })
+            Text('用于查询自服务平台的详细流量数据').fontSize(12).fontColor(ThemeColors.textSecondary)
+              .width('100%').margin({ bottom: 12 })
+            TextInput({ placeholder: '输入校园网密码', text: this.pwdInput })
+              .type(InputType.Password)
+              .width('100%').height(44).fontSize(15)
+              .backgroundColor(ThemeColors.bgInput).borderRadius(8)
+              .onChange((v: string) => { this.pwdInput = v; })
+            Row() {
+              Button('取消').layoutWeight(1).height(40)
+                .backgroundColor(ThemeColors.bgInput)
+                .onClick(() => { this.closePwdDialog(); })
+              Button('保存').layoutWeight(1).height(40).margin({ left: 12 })
+                .backgroundColor(this.accentColor).fontColor('#FFFFFF')
+                .onClick(() => {
+                  if (this.pwdInput.length > 0) {
+                    PreferenceUtil.putString('schoolnet_password', this.pwdInput).catch(() => {});
+                    this.closePwdDialog();
+                    // 保存后自动开始查询
+                    this.startZfwFlow();
+                  }
+                })
+            }.width('100%').margin({ top: 16 })
+          }
+          .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+          .shadow({ radius: 20, color: '#30000000' })
+          .opacity(this.pwdOpacity)
+          .translate({ y: this.pwdTranslate })
+          .onClick(() => {})
+        }
+        .width('100%').height('100%')
+        .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+        .backgroundColor(ThemeColors.overlay)
+        .opacity(this.pwdOpacity)
+        .hitTestBehavior(this.showPwdDialog ? HitTestMode.Default : HitTestMode.None)
+        .onClick(() => { this.closePwdDialog(); })
+        }
+      }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+    }
+    .title({ builder: this.buildWhiteTitle('校园网'), height: 56 }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
-    .onReady((ctx: NavDestinationContext) => {})
   }
 }

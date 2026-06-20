@@ -440,6 +440,7 @@ export struct DormWaterPage {
       }
       .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
+      .onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
