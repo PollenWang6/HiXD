@@ -26,6 +26,7 @@ import { CourseReminderPage } from './course_reminder/CourseReminderPage';
 import { AttendancePage } from './attendance/AttendancePage';
 import { SchoolCardService } from '../services/SchoolCardService';
 import { DormWaterPage } from './dormwater/DormWaterPage';
+import { SportPage } from './sport/SportPage';
 import { UserInfoService } from '../services/UserInfoService';
 import { AttendanceService } from '../services/AttendanceService';
 import { CourseReminderService } from '../services/CourseReminderService';
@@ -101,6 +102,7 @@ struct MainPage {
     if (this.showThemeDialog) { this.closeThemeDialog(); return true; }
     if (this.showPhyPwdDialog) { this.closePhyPwdDialog(); return true; }
     if (this.showSchoolnetPwdDialog) { this.closeSchoolnetPwdDialog(); return true; }
+    if (this.showSportPwdDialog) { this.closeSportPwdDialog(); return true; }
     if (this.showLogoutDialog) { this.closeLogoutDialog(); return true; }
     if (this.showBgDialog) { this.closeBgDialog(); return true; }
     if (this.showUpdateDialog) { this.showUpdateDialog = false; return true; }
@@ -116,6 +118,10 @@ struct MainPage {
   closeSchoolnetPwdDialog(): void {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.schoolnetPwdOpacity = 0; this.schoolnetPwdTranslate = 30; });
     setTimeout(() => { this.showSchoolnetPwdDialog = false; }, 200);
+  }
+  closeSportPwdDialog(): void {
+    animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.sportPwdOpacity = 0; this.sportPwdTranslate = 30; });
+    setTimeout(() => { this.showSportPwdDialog = false; }, 200);
   }
   closeThemeDialog(): void {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.themeOpacity = 0; this.themeTranslate = 30; });
@@ -261,10 +267,15 @@ struct MainPage {
   @State phyPwdInput: string = '';
   @State phyPwdStatus: string = '未设置';
   @State schoolnetPwdStatus: string = '未设置';
+  @State sportPwdStatus: string = '未设置';
   @State showSchoolnetPwdDialog: boolean = false;
   @State schoolnetPwdOpacity: number = 0;
   @State schoolnetPwdTranslate: number = 30;
   @State schoolnetPwdInput: string = '';
+  @State showSportPwdDialog: boolean = false;
+  @State sportPwdOpacity: number = 0;
+  @State sportPwdTranslate: number = 30;
+  @State sportPwdInput: string = '';
   @State showThemeDialog: boolean = false;
   @State themeOpacity: number = 0;
   @State themeTranslate: number = 30;
@@ -342,7 +353,7 @@ struct MainPage {
   // ==================== 菜单排序 ====================
   @State homeSortOn: boolean = false;
   @State homeMenuOrder: string[] =
-    ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity'];
+    ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity', 'Sport'];
   @State portalSortOn: boolean = false;
   @State portalMenuOrder: string[] =
     ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb'];
@@ -353,7 +364,7 @@ struct MainPage {
       'SchoolNet': 'SchoolNetPage', 'EmptyClass': 'EmptyClassroomPage',
       'SchoolCard': 'SchoolCardPage', 'Attendance': 'AttendancePage',
       'Water': 'DormWaterPage', 'Experiment': 'ExperimentPage',
-      'Electricity': 'ElectricityPage'
+      'Electricity': 'ElectricityPage', 'Sport': 'SportPage'
     };
     const route = names[name];
     if (route) { this.pageInfo.clear(); this.pageInfo.pushPath({ name: route }); }
@@ -383,7 +394,7 @@ struct MainPage {
     const saved = PreferenceUtil.getString('home_menu_order');
     if (saved.length > 0) {
       const arr = saved.split(',');
-      if (arr.length === 10) { this.homeMenuOrder = arr; }
+      if (arr.length === 11) { this.homeMenuOrder = arr; }
     }
   }
 
@@ -451,6 +462,7 @@ struct MainPage {
     this.isLoggedIn = this.username.length > 0;
     this.phyPwdStatus = PreferenceUtil.getString('physics_pwd').length > 0 ? '已设置' : '未设置';
     this.schoolnetPwdStatus = PreferenceUtil.getString('schoolnet_password').length > 0 ? '已设置' : '未设置';
+    this.sportPwdStatus = PreferenceUtil.getString('sport_password').length > 0 ? '已设置' : '未设置';
     const savedMode: number = PreferenceUtil.getNumber('theme_color_mode',
       ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     ThemeColors.init(savedMode, getContext());
@@ -1812,6 +1824,8 @@ struct MainPage {
       AttendancePage({ pageInfo: this.pageInfo })
     } else if (name === 'DormWaterPage') {
       DormWaterPage({ pageInfo: this.pageInfo })
+    } else if (name === 'SportPage') {
+      SportPage({ pageInfo: this.pageInfo })
     }
   }
 
@@ -2101,6 +2115,53 @@ struct MainPage {
     .opacity(this.schoolnetPwdOpacity)
     .hitTestBehavior(this.showSchoolnetPwdDialog ? HitTestMode.Default : HitTestMode.None)
     .onClick(() => { this.closeSchoolnetPwdDialog(); })
+    }
+    // 体育密码弹窗
+    if (this.showSportPwdDialog || this.sportPwdOpacity > 0) {
+    Column() {
+      Column() {
+        Row() {
+          Text('体育系统密码').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Row() { Text('\u2715').fontSize(18).fontColor('#999999') }
+            .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => { this.closeSportPwdDialog(); })
+        }.width('100%').margin({ bottom: 16 })
+        Text('用于登录体育体测系统（tybjxgl），与统一身份认证密码不同').fontSize(12).fontColor(ThemeColors.textSecondary)
+          .width('100%').margin({ bottom: 12 })
+        TextInput({ placeholder: '输入体育系统密码', text: this.sportPwdInput })
+          .type(InputType.Password)
+          .width('100%').height(44).fontSize(15)
+          .backgroundColor(ThemeColors.bgInput).borderRadius(8)
+          .onChange((v: string) => { this.sportPwdInput = v; })
+        Row() {
+          Button('取消').layoutWeight(1).height(40)
+            .backgroundColor(ThemeColors.bgInput)
+            .onClick(() => { this.closeSportPwdDialog(); })
+          Button('保存').layoutWeight(1).height(40).margin({ left: 12 })
+            .backgroundColor(this.accentColor).fontColor(this.accentTextColor())
+            .onClick(() => {
+              if (this.sportPwdInput.length > 0) {
+                PreferenceUtil.putString('sport_password', this.sportPwdInput).catch(() => {});
+                this.sportPwdStatus = '已设置';
+                this.closeSportPwdDialog();
+              }
+            })
+        }.width('100%').margin({ top: 16 })
+      }
+      .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 20, color: '#30000000' })
+      .opacity(this.sportPwdOpacity)
+      .translate({ y: this.sportPwdTranslate })
+      .onClick(() => {})
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(ThemeColors.overlay)
+    .opacity(this.sportPwdOpacity)
+    .hitTestBehavior(this.showSportPwdDialog ? HitTestMode.Default : HitTestMode.None)
+    .onClick(() => { this.closeSportPwdDialog(); })
     }
     // 深色模式选择弹窗
     if (this.showThemeDialog || this.themeOpacity > 0) {
@@ -3151,6 +3212,25 @@ struct MainPage {
               animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.schoolnetPwdOpacity = 1; this.schoolnetPwdTranslate = 0; });
             })
             Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            // 体育密码设置
+            Row() {
+              Stack({ alignContent: Alignment.Center }) {
+                Circle().width(44).height(44).fill('#2E7D3222')
+                Text('🏀').fontSize(22)
+              }.margin({ right: 16 })
+              Column() {
+                Text('体育系统密码').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text(this.sportPwdStatus).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .onClick(() => {
+              this.sportPwdInput = PreferenceUtil.getString('sport_password');
+              this.showSportPwdDialog = true;
+              animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.sportPwdOpacity = 1; this.sportPwdTranslate = 0; });
+            })
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
             // 上课通知
             Row() {
               Stack({ alignContent: Alignment.Center }) {
@@ -3255,6 +3335,9 @@ struct MainPage {
     } else if (name === 'Electricity') {
       this.MenuItemBuilder('\u26a1', '水电查询', '查看宿舍水费电费', '#FF6D00',
         () => { this.homeMenuItemClick('Electricity'); })
+    } else if (name === 'Sport') {
+      this.MenuItemBuilder('🏀', '体育信息', '体测成绩与课程安排', '#2E7D32',
+        () => { this.homeMenuItemClick('Sport'); })
     }
   }
 
