@@ -277,7 +277,8 @@ export struct LibraryPage {
         'https://findxidian.libsp.cn/find/unify/getPItemAndOnShelfCountAndDuxiuImageUrl',
         JSON.stringify({ title: title, isbn: isbn, recordId: parseInt(docNumber) || 0 }),
         'application/json',
-        { 'Referer': 'https://findxidian.libsp.cn/', 'groupCode': '200755' }
+        { 'Referer': 'https://findxidian.libsp.cn/', 'groupCode': '200755' },
+        true // skipCookies: 封面API不需要保存响应cookie
       );
       if (resp.statusCode === 200) {
         const raw: Record<string, Object> = resp.json<Record<string, Object>>();

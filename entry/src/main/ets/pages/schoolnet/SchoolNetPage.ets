@@ -48,7 +48,6 @@ export struct SchoolNetPage {
   @State authProductName: string = '';
   @State authUserBalance: string = '';
   @State authBytesIn: string = '';
-  @State authBytesOut: string = '';
   @State authOnlineSeconds: string = '';
   @State authUserMac: string = '';
   @State authCheckoutDate: string = '';
@@ -116,9 +115,7 @@ export struct SchoolNetPage {
 
       // 扩展字段
       const bytesIn: number = parseFloat(String(info['bytes_in'] || 0));
-      const bytesOut: number = parseFloat(String(info['bytes_out'] || 0));
       this.authBytesIn = this.formatFlowNum(bytesIn);
-      this.authBytesOut = this.formatFlowNum(bytesOut);
       const sumSeconds: number = parseInt(String(info['sum_seconds'] || 0)) || 0;
       this.authOnlineSeconds = this.formatDuration(sumSeconds);
       this.authUserMac = String(info['user_mac'] || '');
@@ -382,17 +379,9 @@ export struct SchoolNetPage {
 
               if (this.authBytesIn.length > 0) {
                 Row() {
-                  Text('⬇️').fontSize(14).margin({ right: 8 })
-                  Text('下行').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
+                  Text('📊').fontSize(14).margin({ right: 8 })
+                  Text('已用流量').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
                   Text(this.authBytesIn).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
-                }.width('100%').margin({ bottom: 8 })
-              }
-
-              if (this.authBytesOut.length > 0) {
-                Row() {
-                  Text('⬆️').fontSize(14).margin({ right: 8 })
-                  Text('上行').fontSize(13).fontColor(ThemeColors.textSecondary).width('20%')
-                  Text(this.authBytesOut).fontSize(13).fontColor(ThemeColors.textPrimary).layoutWeight(1)
                 }.width('100%').margin({ bottom: 8 })
               }
 

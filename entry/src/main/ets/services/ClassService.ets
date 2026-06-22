@@ -162,6 +162,11 @@ export class ClassService {
       if (!resp.isOk) {
         console.warn(TAG, 'getClassTable: unexpected response, bodyLen=' + resp.body.length);
       }
+      // 防止 HTML 错误页被缓存 — appPost 重试后仍返回 HTML 时直接抛异常
+      const trimmed = resp.body.trimStart();
+      if (trimmed.startsWith('<!') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+        throw new Error('getClassTable: received HTML instead of JSON (session expired?)');
+      }
       return resp.body;
     }, 7 * 24 * 60 * 60 * 1000, forceRefresh);
   }

@@ -625,6 +625,35 @@ export struct ClassTablePage {
     }
   }
 
+  // 获取考试卡片的时间状态：-1=已结束, 0=未开始, 1=进行中
+  private getExamStatus(cell: ClassCell): number {
+    if (!cell.isExam || !cell.examDate) return 0;
+    // examDate: "2026-04-22"  examTimeDesc: "13:00-15:00 星期三"
+    const dateStr: string = cell.examDate;
+    const timePart: string = cell.examTimeDesc.split(' ')[0] || '';  // "13:00-15:00"
+    if (!timePart.includes('-')) return 0;
+    const parts: string[] = timePart.split('-');
+    if (parts.length < 2) return 0;
+    const startTime: string = parts[0];
+    const endTime: string = parts[1];
+    const startParts: string[] = startTime.split(':');
+    const endParts: string[] = endTime.split(':');
+    if (startParts.length < 2 || endParts.length < 2) return 0;
+    const startMin: number = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+    const endMin: number = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+    // 比较日期
+    const now: Date = new Date();
+    const examDay: Date = new Date(dateStr + 'T00:00:00');
+    const todayStart: Date = new Date(now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + 'T00:00:00');
+    if (examDay.getTime() > todayStart.getTime()) return 0;  // 未来
+    if (examDay.getTime() < todayStart.getTime()) return -1; // 过去
+    // 同一天：比较时间
+    const nowMin: number = now.getHours() * 60 + now.getMinutes();
+    if (nowMin >= startMin && nowMin < endMin) return 1;  // 进行中
+    if (nowMin >= endMin) return -1;  // 已结束
+    return 0;  // 未开始
+  }
+
   private diagTodayGrid(grid: ClassCell[][][]): void {
     const cw: number = this.currentWeek;
     const today: number = 1; // 周一，硬编码用于诊断
@@ -1788,15 +1817,27 @@ export struct ClassTablePage {
                             .fontColor('#FFFFFFAA')
                             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 1 })
                         }
-                        if (cell.day === this._todayDay && !cell.isExam &&
+                        if (cell.day === this._todayDay &&
                             this.currentWeek === this.getRealCurrentWeek() &&
                             cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1]) {
-                          if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1) {
-                            Text('进行中').fontSize(7).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
-                              .backgroundColor('#4CAF50CC').borderRadius(3)
-                              .padding({ left: 4, right: 4, top: 1, bottom: 1 }).margin({ top: 2 })
-                          } else if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === -1) {
-                            Text('已结束').fontSize(7).fontColor('#FFFFFF88').margin({ top: 2 })
+                          if (cell.isExam) {
+                            // 考试卡片：用解析考试时间判断状态
+                            if (this.getExamStatus(cell) === 1) {
+                              Text('进行中').fontSize(7).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+                                .backgroundColor('#4CAF50CC').borderRadius(3)
+                                .padding({ left: 4, right: 4, top: 1, bottom: 1 }).margin({ top: 2 })
+                            } else if (this.getExamStatus(cell) === -1) {
+                              Text('已结束').fontSize(7).fontColor('#FFFFFF88').margin({ top: 2 })
+                            }
+                          } else {
+                            // 普通课程：用节次时间表判断
+                            if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1) {
+                              Text('进行中').fontSize(7).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+                                .backgroundColor('#4CAF50CC').borderRadius(3)
+                                .padding({ left: 4, right: 4, top: 1, bottom: 1 }).margin({ top: 2 })
+                            } else if ((this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === -1) {
+                              Text('已结束').fontSize(7).fontColor('#FFFFFF88').margin({ top: 2 })
+                            }
                           }
                         }
                         if (!cell.isExam && this.getCurrentWeekConflictCells(day, cell.startSection).length > 1) {
@@ -1804,10 +1845,11 @@ export struct ClassTablePage {
                         }
                       }.width('100%').height('100%').padding(4)
                       .backgroundColor(this.getCellColor(cell)).borderRadius(6)
-                      .opacity(cell.day === this._todayDay && !cell.isExam &&
+                      .opacity(cell.day === this._todayDay &&
                         this.currentWeek === this.getRealCurrentWeek() &&
                         cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
-                        this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1 ? 0.55 : 1)
+                        (cell.isExam ? this.getExamStatus(cell) === -1 :
+                          this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1) ? 0.55 : 1)
                       .alignItems(HorizontalAlign.Center).justifyContent(FlexAlign.Center)
                       .position({
                         x: cell.isExam && cell.examColumnSpan > 1 ?
@@ -1951,6 +1993,59 @@ export struct ClassTablePage {
     // 5. 将选中的课程加入最终渲染列表
     cells.push(...selectedCourses);
     return cells;
+  }
+
+  // 计算当前课表数据的快照签名（课表+实验+考试）
+  private computeCalendarSnapshot(): string {
+    const classCount: number = this.countClassGridCourses();
+    const rawLen: number = this.lastRenderedRaw ? this.lastRenderedRaw.length : 0;
+    let expCount: number = 0;
+    let examCount: number = 0;
+    for (let d = 1; d <= DAY_COUNT; d++) {
+      for (let s = 0; s <= SECTION_COUNT; s++) {
+        const cells = this.classGrid[d][s];
+        if (!cells) continue;
+        for (let ci = 0; ci < cells.length; ci++) {
+          if (cells[ci].isExperiment) expCount++;
+          if (cells[ci].isExam) examCount++;
+        }
+      }
+    }
+    return this.semesterCode + '|' + String(classCount) + '|' + String(rawLen) + '|' + String(expCount) + '|' + String(examCount);
+  }
+
+  // 自动同步日历：数据变化时静默更新，不弹权限框
+  private async autoSyncCalendar(): Promise<void> {
+    // 从未手动导入过 → 不自动同步
+    if (!PreferenceUtil.getBool('calendar_bound')) return;
+    // snapshot 没变 → 不需要同步
+    const currentSnapshot: string = this.computeCalendarSnapshot();
+    const savedSnapshot: string = PreferenceUtil.getString('calendar_snapshot');
+    if (currentSnapshot === savedSnapshot) return;
+    // 检查权限（不弹框）
+    const context = getContext(this) as common.UIAbilityContext;
+    const atManager = abilityAccessCtrl.createAtManager();
+    const permissions: Permissions[] = ['ohos.permission.READ_CALENDAR', 'ohos.permission.WRITE_CALENDAR'];
+    let hasPermission: boolean = false;
+    try {
+      for (const p of permissions) {
+        const result = await atManager.checkAccessToken(context.applicationInfo.accessTokenId, p);
+        if (result === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) {
+          hasPermission = true;
+          break;
+        }
+      }
+    } catch { return; }
+    if (!hasPermission) return;
+    // 执行同步
+    console.info('ClassTablePage', 'autoSyncCalendar: snapshot changed, syncing...');
+    try {
+      await this.importToCalendar();
+      PreferenceUtil.putString('calendar_snapshot', currentSnapshot);
+      console.info('ClassTablePage', 'autoSyncCalendar: done, snapshot=' + currentSnapshot);
+    } catch (e) {
+      console.warn('ClassTablePage', 'autoSyncCalendar failed: ' + String(e));
+    }
   }
 
   // 导入系统日历
@@ -2120,6 +2215,66 @@ export struct ClassTablePage {
         }
       }
 
+      // 6b. 遍历考试卡片（存储在 classGrid[day][0]）
+      for (let d = 1; d <= DAY_COUNT; d++) {
+        const examSlot = this.classGrid[d][0];
+        if (!examSlot || examSlot.length === 0) continue;
+        for (let ci = 0; ci < examSlot.length; ci++) {
+          const cell = examSlot[ci];
+          if (!cell.isExam) continue;
+          // examDate: "2026-04-22"
+          if (!cell.examDate) continue;
+          // 解析考试时间：examTimeDesc = "13:00-15:00 星期三"
+          const timePart: string = (cell.examTimeDesc.split(' ')[0]) || '';
+          if (!timePart.includes('-')) continue;
+          const tParts: string[] = timePart.split('-');
+          if (tParts.length < 2) continue;
+          const sp: string[] = tParts[0].split(':');
+          const ep: string[] = tParts[1].split(':');
+          if (sp.length < 2 || ep.length < 2) continue;
+          const dateParts: string[] = cell.examDate.split('-');
+          if (dateParts.length < 3) continue;
+          const examStart: Date = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1,
+            parseInt(dateParts[2]), parseInt(sp[0]), parseInt(sp[1]), 0);
+          const examEnd: Date = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1,
+            parseInt(dateParts[2]), parseInt(ep[0]), parseInt(ep[1]), 0);
+          const title: string = '📝 ' + cell.name;
+          const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
+            (cell.examSeat ? ' 座位: ' + cell.examSeat : '');
+          const sig: string = title + '|' + String(examStart.getTime());
+          neededSigs[sig] = true;
+          if (existingMap[sig] !== undefined) {
+            skipCount++;
+            continue;
+          }
+          let event: calendarManager.Event;
+          if (this.reminderMode === 2) {
+            event = {
+              type: calendarManager.EventType.NORMAL,
+              title: title,
+              startTime: examStart.getTime(),
+              endTime: examEnd.getTime(),
+              description: desc
+            };
+          } else {
+            event = {
+              type: calendarManager.EventType.NORMAL,
+              title: title,
+              startTime: examStart.getTime(),
+              endTime: examEnd.getTime(),
+              description: desc,
+              reminderTime: [this.reminderMinutes]
+            };
+          }
+          try {
+            await calendar.addEvent(event);
+            newCount++;
+          } catch (addErr) {
+            console.warn('ClassTablePage', 'addExamEvent failed: ' + String(addErr));
+          }
+        }
+      }
+
       // 7. 删除日历中不再需要的课程事件（课程被删除或时间变更）
       let delCount: number = 0;
       const existingSigs: string[] = Object.keys(existingMap);
@@ -2141,6 +2296,9 @@ export struct ClassTablePage {
       if (skipCount > 0) msg += (msg.length > 0 ? '，跳过 ' : '跳过 ') + skipCount + ' 条';
       if (msg.length === 0) msg = '课程无变化';
       this.calendarImportMsg = msg;
+      // 标记已绑定日历，保存当前 snapshot
+      PreferenceUtil.putBool('calendar_bound', true);
+      PreferenceUtil.putString('calendar_snapshot', this.computeCalendarSnapshot());
     } catch (e) {
       this.calendarImportMsg = '导入失败: ' + String(e);
     }

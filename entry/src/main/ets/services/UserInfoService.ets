@@ -93,17 +93,28 @@ export class UserInfoService {
         return false;
       }
 
-      // ──── Step 1: GET xgxt 索引页，带着 TGC 自然跟随 CAS 302 链（不用 getNoRedirect）────
+      // ──── Step 1: 先 GET xgxt，让它自己触发 CAS 302（service 参数由 xgxt 生成，CAS 才认） ────
       const xgxtIndex: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do';
-      let resp: HttpResponse = await this.http.get(xgxtIndex);
-      console.info(TAG, 'fetchFromEhall: SSO done, status=' + String(resp.statusCode) +
-        ' body=' + resp.body.substring(0, 150));
-
-      // 确认拿到了页面而非登录页
-      if (resp.body.indexOf('id="loginForm"') >= 0 || resp.body.indexOf('passport') >= 0) {
-        console.warn(TAG, 'fetchFromEhall: xgxt SSO returned login page');
-        return false;
+      let currentUrl: string = xgxtIndex;
+      let resp: HttpResponse = await this.http.getNoRedirect(xgxtIndex);
+      let loop: number = 0;
+      while (resp.isRedirect && resp.location && loop < 10) {
+        let location: string = resp.location;
+        const baseCk: RegExpMatchArray | null = currentUrl.match(/^(https?:\/\/[^\/]+)/);
+        if (baseCk) {
+          const base: string = baseCk[1];
+          if (!location.startsWith('http://') && !location.startsWith('https://')) {
+            location = base + (location.startsWith('/') ? location : '/' + location);
+          }
+        }
+        currentUrl = location;
+        resp = await this.http.getNoRedirect(location);
+        loop++;
       }
+      console.info(TAG, 'fetchFromEhall: SSO done, final status=' + String(resp.statusCode) +
+        ' url=' + currentUrl.substring(0, 80));
+
+      // 不要 copy ids → xgxt：ids 的 route/JSESSIONID/happyVoyage 与 xgxt 不同，会覆盖 xgxt SSO 拿到的正确 session
 
       const xgxtCookies: string = this.http.getCookiesForDomain('xgxt.xidian.edu.cn');
       console.info(TAG, 'fetchFromEhall: xgxt cookies=' + xgxtCookies.substring(0, 200));
@@ -112,7 +123,6 @@ export class UserInfoService {
       const xgxtHeaders: Record<string, string> = {
         'Referer': 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/*default/index.do',
         'Host': 'xgxt.xidian.edu.cn',
-        'X-Requested-With': 'XMLHttpRequest',
       };
       const configUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/swpubapp/indexmenu/getAppConfig.do?appId=4585275700341858&appName=jbxxapp';
       resp = await this.http.postEmpty(configUrl, xgxtHeaders);

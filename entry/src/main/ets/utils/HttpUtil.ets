@@ -115,43 +115,43 @@ export class HttpUtil {
 
   // ===== HTTP 方法 =====
 
-  async get(url: string, headers?: Record<string, string>): Promise<HttpResponse> {
+  async get(url: string, headers?: Record<string, string>, skipCookies?: boolean): Promise<HttpResponse> {
     await this.loadCookies();
-    return this.request(url, 'GET', undefined, headers);
+    return this.request(url, 'GET', undefined, headers, skipCookies);
   }
 
-  async getWithQuery(url: string, queryParams: Record<string, string>, headers?: Record<string, string>): Promise<HttpResponse> {
+  async getWithQuery(url: string, queryParams: Record<string, string>, headers?: Record<string, string>, skipCookies?: boolean): Promise<HttpResponse> {
     await this.loadCookies();
     const parts: string[] = [];
     for (const key of Object.keys(queryParams)) {
       parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(queryParams[key]));
     }
     const fullUrl = url + (url.includes('?') ? '&' : '?') + parts.join('&');
-    return this.request(fullUrl, 'GET', undefined, headers);
+    return this.request(fullUrl, 'GET', undefined, headers, skipCookies);
   }
 
-  async post(url: string, data: Object, headers?: Record<string, string>): Promise<HttpResponse> {
+  async post(url: string, data: Object, headers?: Record<string, string>, skipCookies?: boolean): Promise<HttpResponse> {
     await this.loadCookies();
-    return this.postRaw(url, JSON.stringify(data), 'application/json', headers);
+    return this.postRaw(url, JSON.stringify(data), 'application/json', headers, skipCookies);
   }
 
-  async postForm(url: string, data: Record<string, string>, headers?: Record<string, string>): Promise<HttpResponse> {
+  async postForm(url: string, data: Record<string, string>, headers?: Record<string, string>, skipCookies?: boolean): Promise<HttpResponse> {
     await this.loadCookies();
     const parts: string[] = [];
     for (const key of Object.keys(data)) {
       parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(data[key]));
     }
-    return this.postRaw(url, parts.join('&'), 'application/x-www-form-urlencoded; charset=UTF-8', headers);
+    return this.postRaw(url, parts.join('&'), 'application/x-www-form-urlencoded; charset=UTF-8', headers, skipCookies);
   }
 
-  async postRaw(url: string, bodyStr: string, contentType: string, headers?: Record<string, string>): Promise<HttpResponse> {
+  async postRaw(url: string, bodyStr: string, contentType: string, headers?: Record<string, string>, skipCookies?: boolean): Promise<HttpResponse> {
     const allHeaders: Record<string, string> = { 'Content-Type': contentType };
     if (headers) {
       for (const key of Object.keys(headers)) {
         allHeaders[key] = headers[key];
       }
     }
-    return this.request(url, 'POST', bodyStr, allHeaders);
+    return this.request(url, 'POST', bodyStr, allHeaders, skipCookies);
   }
 
   // POST 无 body、无 Content-Type（用于 xgxt getAppConfig.do 等仅需 query params 的 API）
@@ -533,7 +533,8 @@ export class HttpUtil {
     url: string,
     method: string,
     body: string | undefined,
-    extraHeaders: Record<string, string> | undefined
+    extraHeaders: Record<string, string> | undefined,
+    skipCookies?: boolean
   ): Promise<HttpResponse> {
     return new Promise<HttpResponse>((resolve, reject) => {
       const req = http.createHttp();
@@ -559,17 +560,19 @@ export class HttpUtil {
       const httpMethod = method === 'GET' ? http.RequestMethod.GET : http.RequestMethod.POST;
 
       // 捕获中间重定向的 Set-Cookie（不阻止重定向，只存 cookie）
-      req.on('headersReceive', (header: Object) => {
-        const hdr = header as Record<string, string | number | string[]>;
-        const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
-        if (sc) {
-          const loc = hdr['location'] || hdr['Location'] || '';
-          const locStr: string = typeof loc === 'string' ? loc : String(loc);
-          const redirectDomain: string = locStr.length > 0 ? this.getDomain(locStr) : this.getDomain(url);
-          this.saveResponseCookies(redirectDomain, typeof sc === 'string' ? sc : String(sc));
-          this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
-        }
-      });
+      if (!skipCookies) {
+        req.on('headersReceive', (header: Object) => {
+          const hdr = header as Record<string, string | number | string[]>;
+          const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
+          if (sc) {
+            const loc = hdr['location'] || hdr['Location'] || '';
+            const locStr: string = typeof loc === 'string' ? loc : String(loc);
+            const redirectDomain: string = locStr.length > 0 ? this.getDomain(locStr) : this.getDomain(url);
+            this.saveResponseCookies(redirectDomain, typeof sc === 'string' ? sc : String(sc));
+            this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
+          }
+        });
+      }
 
       // body 为 undefined 时不传 extraData（真正的空 POST）；为 '' 时仍需传（form 空串）
       const noBody: boolean = body === undefined;
@@ -606,8 +609,7 @@ export class HttpUtil {
             resp.location = respHeaders['location'] || respHeaders['Location'];
 
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
-            console.error('HttpUtil GET response set-cookie=' + (sc ? sc.substring(0, 300) : 'NONE'));
-            if (sc) {
+            if (!skipCookies && sc) {
               this.saveResponseCookies(domain, sc);
               this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
             }
@@ -650,8 +652,7 @@ export class HttpUtil {
             resp.location = respHeaders['location'] || respHeaders['Location'];
 
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
-            console.error('HttpUtil POST response set-cookie=' + (sc ? sc.substring(0, 300) : 'NONE'));
-            if (sc) {
+            if (!skipCookies && sc) {
               this.saveResponseCookies(domain, sc);
               this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
             }

@@ -1,5 +1,6 @@
 // CacheService.ets — 本地缓存服务
 import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 
 const CACHE_TAG = 'CacheService';
 
@@ -36,10 +37,13 @@ export class CacheService {
   }
 
   private filePath(key: string): string {
+    // 用 UTF-8 字节计算 hash，避免 charCodeAt 对多字节字符产生不一致结果
+    const encoder = new util.TextEncoder();
+    const bytes: Uint8Array = encoder.encodeInto(key);
     let hash = 0;
-    for (let i = 0; i < key.length; i++) {
-      hash = ((hash << 5) - hash) + key.charCodeAt(i);
-      hash = hash & hash;
+    for (let i = 0; i < bytes.length; i++) {
+      hash = ((hash << 5) - hash) + bytes[i];
+      hash = hash & hash; // 保持 32bit
     }
     const n = hash >= 0 ? hash : -hash;
     return this.baseDir + '/c_' + n.toString(16) + '.json';
@@ -52,7 +56,8 @@ export class CacheService {
       const content: string = fileIo.readTextSync(path);
       const entry: CacheEntry = JSON.parse(content);
       if (Date.now() > entry.expiresAt) {
-        try { fileIo.unlinkSync(path); } catch { /* ignore */ }
+        // 不删除过期文件，让 getStale() 仍可兜底（离线时过期缓存优于无数据）
+        // 文件会在 set() 时被覆盖，或 clear() 时统一清理
         return null;
       }
       return entry.data;
@@ -79,10 +84,10 @@ export class CacheService {
     try {
       const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.WRITE_ONLY);
       const content2 = JSON.stringify(entry);
-      const buf2 = new ArrayBuffer(content2.length * 2);
-      const view = new Uint8Array(buf2);
-      for (let i = 0; i < content2.length; i++) view[i] = content2.charCodeAt(i);
-      fileIo.writeSync(file.fd, buf2);
+      // 使用 TextEncoder 正确处理 UTF-8 多字节字符
+      const encoder = new util.TextEncoder();
+      const encoded = encoder.encodeInto(content2);
+      fileIo.writeSync(file.fd, encoded.buffer);
       fileIo.closeSync(file);
     } catch (e) {
       console.error(CACHE_TAG, 'Cache set failed');
