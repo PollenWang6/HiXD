@@ -22,11 +22,13 @@ import { ElectricityPage } from './electricity/ElectricityPage';
 import { PortalWebPage } from './portal/PortalWebPage';
 import { FaqPage } from './faq/FaqPage';
 import { AboutPage } from './about/AboutPage';
+import { CourseReminderPage } from './course_reminder/CourseReminderPage';
 import { AttendancePage } from './attendance/AttendancePage';
 import { SchoolCardService } from '../services/SchoolCardService';
 import { DormWaterPage } from './dormwater/DormWaterPage';
 import { UserInfoService } from '../services/UserInfoService';
 import { AttendanceService } from '../services/AttendanceService';
+import { CourseReminderService } from '../services/CourseReminderService';
 import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
@@ -37,6 +39,7 @@ import { image } from '@kit.ImageKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { VersionService, VersionInfo } from '../services/VersionService';
+import networkUtil from '../utils/NetworkUtil';
 
 
 // 每日用电数据模型
@@ -473,6 +476,29 @@ struct MainPage {
     if (cachedBal.length > 0) {
       AppStorage.setOrCreate('card_balance', cachedBal);
     }
+    // 注册网络状态监听：网络恢复时自动触发重登录
+    networkUtil.startListen(this.onNetworkChange.bind(this));
+  }
+
+  /**
+   * 网络状态变化回调
+   * @param available - 网络是否可用
+   */
+  private onNetworkChange(available: boolean): void {
+    console.info('MainPage', 'Network changed: ' + (available ? 'available' : 'unavailable'));
+    if (available) {
+      // 网络恢复 → 如果之前是离线状态，自动触发重登录
+      if (this.loginStatus === 'offline' || this.loginStatus === 'expired' || this.loginStatus === 'timeout') {
+        console.info('MainPage', 'Network restored, auto re-login');
+        this.checkLogin();
+      }
+    } else {
+      // 网络断开 → 更新状态（但不弹窗，避免打扰用户）
+      if (this.loginStatus === 'checking' || this.loginStatus === 'online') {
+        this.loginStatus = 'offline';
+        this.isLoggedIn = false;
+      }
+    }
   }
 
   // 异步获取应用级缓存目录（WebView 缓存存在这里，不在 HAP 级目录）
@@ -528,6 +554,10 @@ struct MainPage {
     if (current !== this._lastCtUpdated && current.length > 0) {
       this._lastCtUpdated = current;
       this.loadClassPreview();
+      // 课表数据变更 → 自动重排课程提醒（增量对比）
+      if (CourseReminderService.getInstance().isAnyEnabled()) {
+        CourseReminderService.getInstance().scheduleAllReminders(false);
+      }
     }
   }
 
@@ -588,7 +618,13 @@ struct MainPage {
         this.startRetryTimer();
       }
     } catch (e) {
-      this.loginStatus = 'offline';
+      // 区分断网和服务器超时
+      if (networkUtil.isNetworkAvailable) {
+        this.loginStatus = 'timeout';
+        console.warn('MainPage', 'Login timeout (network ok, server slow): ' + String(e));
+      } else {
+        this.loginStatus = 'offline';
+      }
       this.isLoggedIn = false;
       this.startRetryTimer();
     }
@@ -598,7 +634,7 @@ struct MainPage {
   private startRetryTimer(): void {
     this.stopRetryTimer();
     this.retryTimer = setInterval(() => {
-      if (this.loginStatus === 'offline') { this.checkLogin(); }
+      if (this.loginStatus === 'offline' || this.loginStatus === 'timeout') { this.checkLogin(); }
     }, 10000) as number;
   }
 
@@ -1766,6 +1802,8 @@ struct MainPage {
       FaqPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     } else if (name === 'AboutPage') {
       AboutPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
+    } else if (name === 'CourseReminderPage') {
+      CourseReminderPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Dianfei') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Physics') {
@@ -2812,6 +2850,8 @@ struct MainPage {
             Text('未登录').fontSize(11).fontColor(this.accentTextColor() + 'CC')
           } else if (this.loginStatus === 'offline') {
             Text('离线模式').fontSize(11).fontColor(this.accentBgIsLight() ? '#BF6A00' : '#FFCC80')
+          } else if (this.loginStatus === 'timeout') {
+            Text('登录超时').fontSize(11).fontColor(this.accentBgIsLight() ? '#C62828' : '#CC8080')
           } else if (this.loginStatus === 'checking') {
             Text('正在验证...').fontSize(11).fontColor(this.accentTextColor() + 'CC')
           }
@@ -2829,7 +2869,7 @@ struct MainPage {
           Text(this.userDisplayName || this.username || '已登录').fontSize(13)
             .fontColor(this.accentTextColor() + 'CC').margin({ left: 8 })
         } else {
-          Button(this.loginStatus === 'expired' ? '重新登录' : '登录')
+          Button(this.loginStatus === 'expired' || this.loginStatus === 'timeout' ? '重新登录' : '登录')
             .height(28).fontSize(12).fontColor('#FFFFFF')
             .backgroundColor('#FFFFFF33').borderRadius(14)
             .padding({ left: 12, right: 12 })
@@ -2933,6 +2973,7 @@ struct MainPage {
       }
       .padding({ left: 16, right: 16, top: 8 })
       .layoutWeight(1)
+
     }
     .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
   }
@@ -3109,6 +3150,21 @@ struct MainPage {
               this.showSchoolnetPwdDialog = true;
               animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.schoolnetPwdOpacity = 1; this.schoolnetPwdTranslate = 0; });
             })
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            // 上课通知
+            Row() {
+              Stack({ alignContent: Alignment.Center }) {
+                Circle().width(44).height(44).fill('#F57C0022')
+                Text('🔔').fontSize(22)
+              }.margin({ right: 16 })
+              Column() {
+                Text('上课通知').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text('上课前定时发送通知提醒').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .onClick(() => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'CourseReminderPage' }); })
           }
           .borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
           .shadow({ radius: 2, color: '#00000008', offsetY: 1 })

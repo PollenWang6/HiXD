@@ -3,6 +3,9 @@ import { ThemeColors } from '../../utils/ThemeColors';
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService, LibraryAuthResult } from '../../services/CasLoginService';
+import { common } from '@kit.AbilityKit';
+import promptAction from '@ohos.promptAction';
+import Want from '@ohos.app.ability.Want';
 
 interface BookLocation {
   locationName: string;
@@ -11,6 +14,16 @@ interface BookLocation {
   campus: string;
   processType: string;  // "在架" or others
   itemId: string;
+}
+
+interface EBookItem {
+  itemId: string;
+  packageId: string;
+  packageName: string;  // 数据库名称
+  collectionName: string;
+  dbVender: string;     // 数据库提供商
+  url: string;          // 电子书链接
+  elecResourceUrl: string;
 }
 
 interface BookItem {
@@ -24,6 +37,7 @@ interface BookItem {
   groupCode: string;    // 书籍编号
   subject: string;
   items: BookLocation[];
+  eitems: EBookItem[];  // 电子书资源
   totalCount: number;   // 馆藏总数
   availableCount: number; // 可借数
   imageUrl: string;
@@ -112,6 +126,20 @@ export struct LibraryPage {
         itemId: loc['itemId'] || ''
       });
     }
+    const ebooks: EBookItem[] = [];
+    const rawEItems: Object[] = (raw['eitems'] as Object[]) || [];
+    for (let i = 0; i < rawEItems.length; i++) {
+      const eb = rawEItems[i] as Record<string, string>;
+      ebooks.push({
+        itemId: eb['itemId'] || '',
+        packageId: eb['packageId'] || '',
+        packageName: eb['packageName'] || '',
+        collectionName: eb['collectionName'] || '',
+        dbVender: eb['dbVender'] || '',
+        url: eb['url'] || '',
+        elecResourceUrl: eb['elecResourceUrl'] || ''
+      });
+    }
     return {
       bookName: String(raw['bookName'] ?? ''),
       author: String(raw['author'] ?? ''),
@@ -123,6 +151,7 @@ export struct LibraryPage {
       groupCode: String(raw['groupCode'] ?? ''),
       subject: String(raw['subject'] ?? ''),
       items: locations,
+      eitems: ebooks,
       totalCount: locations.length,
       availableCount: available,
       imageUrl: ''
@@ -297,7 +326,7 @@ export struct LibraryPage {
       bookName: b.bookName, author: b.author, publisher: b.publisher,
       publishYear: b.publishYear, isbn: b.isbn, docNumber: b.docNumber,
       callNos: b.callNos, groupCode: b.groupCode, subject: b.subject,
-      items: b.items, totalCount: b.totalCount, availableCount: b.availableCount,
+      items: b.items, eitems: b.eitems, totalCount: b.totalCount, availableCount: b.availableCount,
       imageUrl: b.imageUrl
     };
   }
@@ -705,6 +734,36 @@ export struct LibraryPage {
               }.width('100%').padding({ top: 8, bottom: 8 })
             }, (loc: BookLocation, idx?: number) => `loc_${idx}`)
           }
+          // 电子书资源列表
+          if (this.selectedBook !== null && this.selectedBook.eitems.length > 0) {
+            Text('📱 电子书资源').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+              .margin({ top: 14, bottom: 6 }).width('100%')
+            ForEach(this.selectedBook.eitems, (eb: EBookItem) => {
+              Column() {
+                Row() {
+                  Column() {
+                    Text(eb.packageName || '电子书').fontSize(13).fontColor(ThemeColors.textPrimary)
+                    if (eb.collectionName && eb.collectionName.length > 0) {
+                      Text('📦 ' + eb.collectionName).fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                    }
+                    if (eb.dbVender && eb.dbVender.length > 0) {
+                      Text('🏛️ ' + eb.dbVender).fontSize(11).fontColor(ThemeColors.textSecondary)
+                    }
+                  }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+                  Text('↗').fontSize(18).fontColor('#1976D2')
+                }.width('100%').padding({ top: 8, bottom: 8 })
+                Divider().color('#F0F0F0')
+              }
+              .width('100%')
+              .onClick(() => {
+                if (eb.url && eb.url.length > 0) {
+                  this.openEBookUrl(eb.url);
+                } else if (eb.elecResourceUrl && eb.elecResourceUrl.length > 0) {
+                  this.openEBookUrl(eb.elecResourceUrl);
+                }
+              })
+            }, (eb: EBookItem, idx?: number) => `ebook_${idx}`)
+          }
         }
         .width('100%')
       }
@@ -715,6 +774,19 @@ export struct LibraryPage {
     .backgroundColor(ThemeColors.bgPage)
     .borderRadius({ topLeft: 20, topRight: 20 })
   }
+
+  private openEBookUrl(url: string): void {
+    if (url.length === 0) return;
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const want: Want = {
+      action: 'ohos.want.action.viewData',
+      uri: url
+    };
+    ctx.startAbility(want).catch(() => {
+      promptAction.showToast({ message: '无法打开链接', duration: 1500 });
+    });
+  }
+
   @Builder
   infoTag(label: string, value: string, color: string) {
     Column() {

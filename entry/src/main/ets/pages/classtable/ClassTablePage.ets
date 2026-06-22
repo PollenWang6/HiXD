@@ -184,6 +184,8 @@ export struct ClassTablePage {
   private _loginHandled: boolean = false;
   private _preloadDone: boolean = false;
   private _fetching: boolean = false;  // 防止并发 fetchAndSave
+  private retryCount: number = 0;     // 课表加载重试次数
+  private readonly MAX_RETRY: number = 3;
 
   onLoginDetected(): void {
     if (this.loginState.length > 0 && !this._loginHandled) {
@@ -235,6 +237,7 @@ export struct ClassTablePage {
   }
 
   private async waitAndLoad(): Promise<void> {
+    this.retryCount = 0; // 每次页面出现时重置重试计数器
     const context = getContext(this) as common.UIAbilityContext;
     this.localFilePath = context.filesDir + '/class_table_' + this.semesterCode + '.json';
 
@@ -253,8 +256,9 @@ export struct ClassTablePage {
     } catch (_) { console.warn("ClassTablePage", "waitAndLoad: sid fetch failed"); }
 
     // 首次登录后 cookie/session 可能还未就绪，课表为空时自动重试
-    if (this.isClassGridEmpty() && PreferenceUtil.getBool('is_logged_in')) {
-      console.info('ClassTablePage', 'First load empty, auto-retrying in 2s...');
+    if (this.isClassGridEmpty() && PreferenceUtil.getBool('is_logged_in') && this.retryCount < this.MAX_RETRY) {
+      this.retryCount++;
+      console.info('ClassTablePage', `First load empty, auto-retrying in 2s... (attempt ${this.retryCount}/${this.MAX_RETRY})`);
       setTimeout(() => {
         this.loadTable(true);
       }, 2000);

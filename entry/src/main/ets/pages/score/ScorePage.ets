@@ -2,6 +2,8 @@
 import { SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
 import { ScoreService } from '../../services/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
+import { motion } from '@kit.MultimodalAwarenessKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 @Component
 export struct ScorePage {
@@ -11,6 +13,8 @@ export struct ScorePage {
   @State errorMsg: string = '';
   @State selectedSemester: string = '';
   @State semesterCodes: string[] = [];
+  @State selectedType: string = '__all__';
+  @State typeOptions: string[] = [];
   @State currentScores: ScoreItemModel[] = [];
   @State searchWord: string = '';
   @State totalGPA: string = '';
@@ -25,6 +29,14 @@ export struct ScorePage {
   @State detailLoading: boolean = false;
   @State currentDetail: ComposeDetail[] = [];
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+
+  // ===== 选择成绩计算 =====
+  @State isSelectMode: boolean = false;
+  @State selectedIndexes: Set<number> = new Set();
+  @State isLeftHand: boolean = false;
+  @State selectedGPA: string = '--';
+  @State selectedAvg: string = '--';
+  @State selectedCredit: string = '0';
 
   private allScores: ScoreItemModel[] = [];
   private detailCache: Map<string, ComposeDetail[]> = new Map();
@@ -53,6 +65,29 @@ export struct ScorePage {
 
   aboutToAppear(): void {
     this.waitAndLoad();
+    this.startHoldingHandDetection();
+  }
+
+  aboutToDisappear(): void {
+    try {
+      motion.off('holdingHandChanged');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  private startHoldingHandDetection(): void {
+    try {
+      motion.on('holdingHandChanged', (data: number) => {
+        this.isLeftHand = (data === 1 || data === 3);
+      });
+    } catch (err) {
+      const e = err as BusinessError;
+      if (e.code === 801) {
+        console.info('[ScorePage] 智感握持不支持，使用默认右手模式');
+      }
+      this.isLeftHand = false;
+    }
   }
 
   private async waitAndLoad(): Promise<void> {
@@ -87,6 +122,18 @@ export struct ScorePage {
       }
       semSet.sort((a, b) => b.localeCompare(a));
       this.semesterCodes = semSet;
+
+      // 提取课程类型
+      const typeSet: string[] = [];
+      const seenType = new Set<string>();
+      for (let i = 0; i < items.length; i++) {
+        const label = this.getTagLabel(items[i]);
+        if (label && !seenType.has(label)) {
+          seenType.add(label);
+          typeSet.push(label);
+        }
+      }
+      this.typeOptions = typeSet;
 
       if (semSet.length > 0) {
         this.selectedSemester = semSet[0];
@@ -327,8 +374,15 @@ export struct ScorePage {
 
   private applyFilter(): void {
     let list = this.allScores.filter((it: ScoreItemModel) =>
-      this.selectedSemester === '__all__' || it.xnxqdm === this.selectedSemester
+      (this.selectedSemester === '__all__' || it.xnxqdm === this.selectedSemester)
     );
+    if (this.selectedType !== '__all__') {
+      const filtered: ScoreItemModel[] = [];
+      for (const item of list) {
+        if (this.getTagLabel(item) === this.selectedType) filtered.push(item);
+      }
+      list = filtered;
+    }
     if (this.searchWord.length > 0) {
       const q = this.searchWord;
       const filtered: ScoreItemModel[] = [];
@@ -341,35 +395,137 @@ export struct ScorePage {
     this.calcGPA();
   }
 
+  // ===== 选择模式计算 =====
+  private toggleSelectMode(): void {
+    this.isSelectMode = !this.isSelectMode;
+    if (this.isSelectMode) {
+      this.selectedIndexes.clear();
+      this.calcSelected();
+    } else {
+      this.selectedIndexes.clear();
+    }
+  }
+
+  private calcSelected(): void {
+    if (this.selectedIndexes.size === 0) {
+      this.selectedGPA = '--';
+      this.selectedAvg = '--';
+      this.selectedCredit = '0';
+      return;
+    }
+    let totalCredits = 0;
+    let weightedGPA = 0;
+    let weightedScore = 0;
+    let scoreCount = 0;
+    for (let i = 0; i < this.currentScores.length; i++) {
+      if (!this.selectedIndexes.has(i)) continue;
+      const item = this.currentScores[i];
+      if (!item.zcj || item.zcj.length === 0) continue;
+      if (!this.evalCount(item)) continue;
+      const gpa = this.scoreToGPANum(item.zcj, item.djcjlxdmDisplay);
+      if (gpa < 0) continue;
+      const credit = parseFloat(item.xf) || 0;
+      totalCredits += credit;
+      weightedGPA += gpa * credit;
+      const sc = parseFloat(item.zcj);
+      if (!isNaN(sc)) {
+        weightedScore += sc * credit;
+        scoreCount++;
+      }
+    }
+    this.selectedGPA = totalCredits > 0 ? (weightedGPA / totalCredits).toFixed(3) : '--';
+    this.selectedAvg = weightedScore > 0 && totalCredits > 0 ? (weightedScore / totalCredits).toFixed(1) : '--';
+    this.selectedCredit = totalCredits.toFixed(1);
+  }
+
+  // 参考 Flutter _evalCount：排除四六级、未完成、非初修挂科等
+  private evalCount(item: ScoreItemModel): boolean {
+    if (item.xskcm.indexOf('国家英语四级') >= 0 || item.xskcm.indexOf('国家英语六级') >= 0) return false;
+    if (!item.zcj || item.zcj.length === 0) return false;
+    if (item.sfjg && item.sfjg === '0' && item.cxckdmDisplay !== '初修' && item.cxckdmDisplay) return false;
+    return true;
+  }
+
+  // 统计当前视图下可通过 ignoreCourse 过滤的课程数量
+  private countFilterable(): number {
+    let count = 0;
+    for (let i = 0; i < this.currentScores.length; i++) {
+      if (!this.ignoreCourse(this.currentScores[i].xskcm, this.currentScores[i].xgxklbdmDisplay)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  @Builder
+  semesterMenuBuilder() {
+    Menu() {
+      MenuItem({ content: '全部学期' })
+        .selected(this.selectedSemester === '__all__')
+        .onClick(() => { this.selectedSemester = '__all__'; this.applyFilter(); })
+      ForEach(this.semesterCodes, (code: string) => {
+        MenuItem({ content: SemesterUtil.formatSemester(code) })
+          .selected(code === this.selectedSemester)
+          .onClick(() => { this.selectedSemester = code; this.applyFilter(); })
+      })
+    }
+  }
+
+  @Builder
+  typeMenuBuilder() {
+    Menu() {
+      MenuItem({ content: '全部类型' })
+        .selected(this.selectedType === '__all__')
+        .onClick(() => { this.selectedType = '__all__'; this.applyFilter(); })
+      ForEach(this.typeOptions, (t: string) => {
+        MenuItem({ content: t })
+          .selected(t === this.selectedType)
+          .onClick(() => { this.selectedType = t; this.applyFilter(); })
+      })
+    }
+  }
+
   build() {
     NavDestination() {
       Stack() {
         // 第一层：主页面内容（最底层）
         Column() {
 
-          Scroll() {
-            Row({ space: 8 }) {
-              Button('全部')
-                .fontSize(12)
-                .fontColor(this.selectedSemester === '__all__' ? '#FFFFFF' : '#333333')
-                .backgroundColor(this.selectedSemester === '__all__' ? '#4CAF50' : '#F0F0F0')
-                .borderRadius(16).height(32)
-                .onClick(() => { this.selectedSemester = '__all__'; this.applyFilter(); })
-              ForEach(this.semesterCodes, (code: string) => {
-                Button(SemesterUtil.formatSemester(code))
-                  .fontSize(12)
-                  .fontColor(code === this.selectedSemester ? '#FFFFFF' : '#333333')
-                  .backgroundColor(code === this.selectedSemester ? '#4CAF50' : '#F0F0F0')
-                  .borderRadius(16)
-                  .height(32)
-                  .onClick(() => { this.selectedSemester = code; this.applyFilter(); })
-              }, (code: string) => 'sem_' + code)
+          // 筛选栏：学期 + 类型 双下拉
+          Row({ space: 10 }) {
+            // 学期下拉
+            Button() {
+              Row() {
+                Text('学期 ').fontSize(12).fontColor(ThemeColors.textSecondary)
+                Text(this.selectedSemester === '__all__' ? '全部' : SemesterUtil.formatSemester(this.selectedSemester))
+                  .fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(' ▾').fontSize(10).fontColor(ThemeColors.textHint)
+              }
             }
-            .padding({ left: 16, right: 16 })
+            .height(36).layoutWeight(1).borderRadius(10)
+            .backgroundColor(ThemeColors.bgInput)
+            .border({ width: 0.5, color: '#E8E8E8' })
+            .bindMenu(this.semesterMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
+
+            // 类型下拉
+            Button() {
+              Row() {
+                Text('类型 ').fontSize(12).fontColor(ThemeColors.textSecondary)
+                Text(this.selectedType === '__all__' ? '全部' : this.selectedType)
+                  .fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .constraintSize({ maxWidth: 100 })
+                Text(' ▾').fontSize(10).fontColor(ThemeColors.textHint)
+              }
+            }
+            .height(36).layoutWeight(1).borderRadius(10)
+            .backgroundColor(ThemeColors.bgInput)
+            .border({ width: 0.5, color: '#E8E8E8' })
+            .bindMenu(this.typeMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
           }
-          .scrollable(ScrollDirection.Horizontal)
-          .scrollBar(BarState.Off)
-          .height(44)
+          .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+          .width('100%')
           .backgroundColor(ThemeColors.bgCard)
 
           Divider().color('#F0F0F0')
@@ -415,6 +571,16 @@ export struct ScorePage {
               ForEach(this.currentScores, (item: ScoreItemModel, idx?: number) => {
                 ListItem() {
                   Row() {
+                    // 选择模式下的勾选圈
+                    if (this.isSelectMode) {
+                      Column()
+                        .width(24).height(24).borderRadius(12)
+                        .border({ width: 2, color: this.selectedIndexes.has(idx!) ? '#3B82F6' : '#CCCCCC' })
+                        .backgroundColor(this.selectedIndexes.has(idx!) ? '#3B82F6' : '#00000000')
+                        .justifyContent(FlexAlign.Center)
+                        .margin({ right: 12 })
+                    }
+
                     Column() {
                       Text(item.xskcm)
                         .fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
@@ -454,27 +620,163 @@ export struct ScorePage {
                   .width('100%')
                   .padding({ left: 16, right: 16, top: 14, bottom: 14 })
                   .alignItems(VerticalAlign.Center)
+                  .backgroundColor(this.isSelectMode && this.selectedIndexes.has(idx!) ?
+                    (this.themeIsDark ? '#1A2A40' : '#F0F5FF') : Color.Transparent)
                   .onClick(() => {
-                    this.showScoreDetail(item);
+                    if (this.isSelectMode) {
+                      if (this.selectedIndexes.has(idx!)) {
+                        this.selectedIndexes.delete(idx!);
+                      } else {
+                        this.selectedIndexes.add(idx!);
+                      }
+                      this.calcSelected();
+                    } else {
+                      this.showScoreDetail(item);
+                    }
                   })
+                  .animation({ duration: 150, curve: Curve.EaseOut })
                 }
               }, (item: ScoreItemModel, idx?: number) => `score_${item.xnxqdm}_${item.xskcm}_${idx}`)
             }
             .divider({ strokeWidth: 0.5, color: '#F5F5F5' })
             .layoutWeight(1)
+            // 选择模式下底部留空给计算栏
+            .margin({ bottom: this.isSelectMode ? 64 : 0 })
           }
         }
         .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
         .zIndex(0) // 明确层级：主页面在最底层
 
-        // 第二层：半透明背景遮罩（中间层）
+        // 悬浮计算按钮
+        if (!this.detailLoading && this.selectedCell === null) {
+          Column() {
+            Blank()
+            Row() {
+              if (this.isLeftHand) {
+                // 左手模式：按钮靠左
+                Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+                  Image($r('app.media.calculator_1'))
+                    .width(26).height(26)
+                    .fillColor(this.themeIsDark ? '#FFFFFF' : '#333333')
+                }
+                .width(48).height(48)
+                .borderRadius(999)
+                .backdropBlur(18)
+                .backgroundColor(this.themeIsDark ? 'rgba(40,40,45,0.35)' : 'rgba(255,255,255,0.15)')
+                .border({ width: 1, color: 'rgba(255,255,255,0.30)' })
+                .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
+                .onClick(() => { this.toggleSelectMode(); })
+                .margin({ left: 16, bottom: 80 })
+
+                Blank()
+              } else {
+                // 右手模式：按钮靠右
+                Blank()
+
+                Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+                  Image($r('app.media.calculator_1'))
+                    .width(26).height(26)
+                    .fillColor(this.themeIsDark ? '#FFFFFF' : '#333333')
+                }
+                .width(48).height(48)
+                .borderRadius(999)
+                .backdropBlur(18)
+                .backgroundColor(this.themeIsDark ? 'rgba(40,40,45,0.35)' : 'rgba(255,255,255,0.15)')
+                .border({ width: 1, color: 'rgba(255,255,255,0.30)' })
+                .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
+                .onClick(() => { this.toggleSelectMode(); })
+                .margin({ right: 16, bottom: 80 })
+              }
+            }
+            .width('100%')
+          }
+          .width('100%').height('100%')
+          .hitTestBehavior(HitTestMode.Transparent)
+          .zIndex(1)
+        }
+
+        // 底部计算栏（选择模式下）
+        if (this.isSelectMode) {
+          Column() {
+            Blank()
+            Row() {
+              // 操作按钮区域
+              Row({ space: 8 }) {
+                Button() {
+                  Row({ space: 4 }) {
+                    Text('智能勾选')
+                      .fontSize(13).fontColor(this.accentColor)
+                    if (this.selectedIndexes.size === this.countFilterable() && this.selectedIndexes.size > 0) {
+                      Text('✓')
+                        .fontSize(12).fontColor(this.accentColor)
+                    }
+                  }
+                }
+                .backgroundColor(Color.Transparent)
+                .height(36).border({ width: 1, color: this.accentColor, radius: 18 })
+                .padding({ left: 14, right: 14 })
+                .onClick(() => {
+                  this.selectedIndexes.clear();
+                  for (let i = 0; i < this.currentScores.length; i++) {
+                    if (this.ignoreCourse(this.currentScores[i].xskcm, this.currentScores[i].xgxklbdmDisplay)) continue;
+                    this.selectedIndexes.add(i);
+                  }
+                  this.calcSelected();
+                })
+
+                Button('重置')
+                  .fontSize(13).fontColor(ThemeColors.textSecondary)
+                  .backgroundColor(Color.Transparent)
+                  .height(36).border({ width: 1, color: '#CCCCCC', radius: 18 })
+                  .padding({ left: 14, right: 14 })
+                  .onClick(() => {
+                    this.selectedIndexes.clear();
+                    this.calcSelected();
+                  })
+              }
+
+              Blank()
+
+              // 计算结果区域
+              Row({ space: 6 }) {
+                Text(this.selectedGPA)
+                  .fontSize(16).fontWeight(FontWeight.Bold).fontColor('#4CAF50')
+                Text('GPA')
+                  .fontSize(10).fontColor(ThemeColors.textHint)
+                  .margin({ right: 4 })
+                Text(this.selectedAvg)
+                  .fontSize(16).fontWeight(FontWeight.Bold).fontColor('#1976D2')
+                Text('均分')
+                  .fontSize(10).fontColor(ThemeColors.textHint)
+                  .margin({ right: 4 })
+                Text(this.selectedCredit)
+                  .fontSize(16).fontWeight(FontWeight.Bold).fontColor('#FF9800')
+                Text('学分')
+                  .fontSize(10).fontColor(ThemeColors.textHint)
+              }
+            }
+            .width('100%')
+            .height(60)
+            .padding({ left: 16, right: 16 })
+            .backgroundColor(ThemeColors.bgCard)
+            .backgroundBlurStyle(BlurStyle.COMPONENT_THICK)
+            .border({ width: { top: 0.5 }, color: '#E8E8E8' })
+            .shadow({ radius: 8, color: '#00000010', offsetX: 0, offsetY: -2 })
+          }
+          .width('100%').height('100%')
+          .zIndex(2)
+          .hitTestBehavior(HitTestMode.Transparent)
+          .animation({ duration: 250, curve: Curve.FastOutSlowIn })
+        }
+
+        // 第三层：半透明背景遮罩（中间层）
         if (this.selectedCell !== null) {
           Column()
             .width('100%').height('100%')
             .backgroundColor('rgba(0,0,0,0.7)') // 加深背景透明度，增强层次感
             .opacity(this.maskOpacity)
             .onClick(() => { this.hideScoreDetail(); })
-            .zIndex(1) // 遮罩在主页面之上
+            .zIndex(3) // 遮罩在主页面之上
         }
 
         // 第三层：成绩构成详情弹窗（最顶层）
@@ -557,12 +859,12 @@ export struct ScorePage {
           .borderRadius(12)
           .shadow({
             radius: 24,
-            color: 'rgba(0,0,0,0.25)', // 增强阴影，让弹窗更突出
+            color: 'rgba(0,0,0,0.25)',
             offsetY: 10
           })
           .scale({ x: this.cardScale, y: this.cardScale })
           .opacity(this.cardOpacity)
-          .zIndex(2) // 弹窗在最顶层
+          .zIndex(4) // 弹窗在最顶层
         }
       }
       .width('100%')
@@ -576,6 +878,11 @@ export struct ScorePage {
       if (this.selectedCell !== null) {
         this.selectedCell = null;
         this.cardScale = 0.85;
+        return true;
+      }
+      if (this.isSelectMode) {
+        this.isSelectMode = false;
+        this.selectedIndexes.clear();
         return true;
       }
       return false;

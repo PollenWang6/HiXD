@@ -31,6 +31,18 @@
     {
       "name": "class_preview_card_desc",
       "value": "显示今天和明天的课程安排"
+    },
+    {
+      "name": "detect_gesture_permission_reason",
+      "value": "用于检测握持手势以调整悬浮按钮位置"
+    },
+    {
+      "name": "activity_motion_permission_reason",
+      "value": "用于感知设备运动状态"
+    },
+    {
+      "name": "reminder_permission_reason",
+      "value": "用于设置课程上课前提醒通知"
     }
   ]
 }

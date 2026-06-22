@@ -41,7 +41,8 @@ export class HttpUtil {
   // ===== Cookie 持久化 =====
 
   async loadCookies(): Promise<void> {
-    if (this.cookiesLoaded) return;
+    // 只有已成功加载过 cookieStore 中有数据时才跳过
+    if (this.cookiesLoaded && Object.keys(this.cookieStore).length > 0) return;
     try {
       const raw: string = PreferenceUtil.getString('http_cookies');
       if (raw.length > 0) {
@@ -53,11 +54,15 @@ export class HttpUtil {
           this.cookieStore[entry.domain][entry.name] = entry.value;
         }
         console.info(TAG, `Loaded ${entries.length} cookies`);
+        this.cookiesLoaded = true; // 只有成功加载后才标记
+      } else {
+        // 没有缓存的 cookies，也算加载完成
+        this.cookiesLoaded = true;
       }
     } catch (e) {
       console.warn(TAG, 'Failed to load cookies: ' + JSON.stringify(e));
+      // 加载失败，不设置 cookiesLoaded = true，允许后续重试
     }
-    this.cookiesLoaded = true;
   }
 
   async saveCookies(): Promise<void> {
@@ -141,7 +146,7 @@ export class HttpUtil {
     for (const key of Object.keys(data)) {
       parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(data[key]));
     }
-    return this.postRaw(url, parts.join('&'), 'application/x-www-form-urlencoded; charset=UTF-8', headers, skipCookies);
+    return this.postRaw(url, parts.join('&'), 'application/x-www-form-urlencoded', headers, skipCookies);
   }
 
   async postRaw(url: string, bodyStr: string, contentType: string, headers?: Record<string, string>, skipCookies?: boolean): Promise<HttpResponse> {
@@ -313,14 +318,15 @@ export class HttpUtil {
   }
 
   /**
-   * 发送 GET 请求但不自动跟随重定向。
-   * HarmonyOS NETSTACK 不支持 followRedirects: false，
-   * 此方法通过 on('headersReceive') 拦截 302 响应头，
-   * 读取 Location 后立即 destroy 请求，避免自动跟随重定向。
-   * 返回的 HttpResponse 中 location 字段包含重定向地址。
+   * 发送请求但不自动跟随重定向（公共底层方法）
+   * getNoRedirect 和 postNoRedirect 都委托此方法
    */
-  async getNoRedirect(url: string, headers?: Record<string, string>): Promise<HttpResponse> {
-    await this.loadCookies();
+  private requestNoRedirect(
+    url: string,
+    method: http.RequestMethod,
+    bodyStr: string | undefined,
+    headers?: Record<string, string>
+  ): Promise<HttpResponse> {
     return new Promise<HttpResponse>((resolve, reject) => {
       const req = http.createHttp();
       const reqHeaders: Record<string, string> = {};
@@ -344,14 +350,13 @@ export class HttpUtil {
 
       let resolved = false;
       const resp = new HttpResponse();
-      const self = this; // 缓存 this 引用，避免闭包问题
+      const self = this;
 
       // 拦截响应头 — 如果是 302，读取 Location 后立即中止请求
       req.on('headersReceive', (header: Object) => {
         const hdr = header as Record<string, string | number | string[]>;
         const statusCode = Number(hdr['statusCode'] || 0);
         if (statusCode >= 300 && statusCode < 400) {
-          // 重定向响应 — 读取 Location
           const rawLocation = hdr['location'] || hdr['Location'] || '';
           const location: string = typeof rawLocation === 'string' ? rawLocation : String(rawLocation);
           resp.statusCode = statusCode;
@@ -370,30 +375,33 @@ export class HttpUtil {
             self.saveResponseCookies(domain, typeof sc === 'string' ? sc : String(sc));
             self.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
           }
-          // 中止请求，阻止自动重定向
           resolved = true;
           req.destroy();
           resolve(resp);
         }
       });
 
+      const requestOptions: http.HttpRequestOptions = {
+        method: method,
+        header: reqHeaders,
+        expectDataType: http.HttpDataType.STRING,
+        readTimeout: 120000,
+        connectTimeout: 30000,
+      };
+      if (bodyStr !== undefined) {
+        requestOptions.extraData = bodyStr;
+      }
+
       req.request(
         url,
-        {
-          method: http.RequestMethod.GET,
-          header: reqHeaders,
-          expectDataType: http.HttpDataType.STRING,
-          readTimeout: 120000,
-          connectTimeout: 30000,
-        },
-        async (err: BusinessError | undefined, data: http.HttpResponse) => {
+        requestOptions,
+        (err: BusinessError | undefined, data: http.HttpResponse) => {
           if (resolved) {
-            // 已经在 headersReceive 中 resolve 了，忽略
             return;
           }
           if (err !== undefined && err.code !== 0) {
-            reject(new Error('HTTP ' + err.code + ': ' + err.message));
             req.destroy();
+            reject(new Error('HTTP ' + err.code + ': ' + err.message));
             return;
           }
           resp.statusCode = data.responseCode;
@@ -425,108 +433,24 @@ export class HttpUtil {
   }
 
   /**
+   * 发送 GET 请求但不自动跟随重定向。
+   * HarmonyOS NETSTACK 不支持 followRedirects: false，
+   * 此方法通过 on('headersReceive') 拦截 302 响应头，
+   * 读取 Location 后立即 destroy 请求，避免自动跟随重定向。
+   * 返回的 HttpResponse 中 location 字段包含重定向地址。
+   */
+  async getNoRedirect(url: string, headers?: Record<string, string>): Promise<HttpResponse> {
+    await this.loadCookies();
+    return this.requestNoRedirect(url, http.RequestMethod.GET, undefined, headers);
+  }
+
+  /**
    * 发送 POST 请求但不自动跟随重定向。
    * 与 getNoRedirect 相同原理，但支持 POST body。
    */
   async postNoRedirect(url: string, bodyStr: string, headers?: Record<string, string>): Promise<HttpResponse> {
     await this.loadCookies();
-    return new Promise<HttpResponse>((resolve, reject) => {
-      const req = http.createHttp();
-      const reqHeaders: Record<string, string> = {};
-
-      if (headers) {
-        for (const key of Object.keys(headers)) {
-          reqHeaders[key] = headers[key];
-        }
-      }
-
-      if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
-        reqHeaders['User-Agent'] =
-          'Mozilla/5.0 (Linux; HarmonyOS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
-      }
-
-      const domain = this.getDomain(url);
-      const cookieStr = this.getCookiesForDomain(domain);
-      if (cookieStr.length > 0) {
-        reqHeaders['Cookie'] = cookieStr;
-      }
-
-      let resolved = false;
-      const resp = new HttpResponse();
-      const self = this;
-
-      req.on('headersReceive', (header: Object) => {
-        const hdr = header as Record<string, string | number | string[]>;
-        const statusCode = Number(hdr['statusCode'] || 0);
-        if (statusCode >= 300 && statusCode < 400) {
-          const rawLocation = hdr['location'] || hdr['Location'] || '';
-          const location: string = typeof rawLocation === 'string' ? rawLocation : String(rawLocation);
-          resp.statusCode = statusCode;
-          resp.isRedirect = true;
-          resp.location = location;
-          resp.headers = {};
-          const headerKeys = Object.keys(hdr);
-          for (let i = 0; i < headerKeys.length; i++) {
-            const key = headerKeys[i];
-            const v = hdr[key];
-            resp.headers[key] = typeof v === 'string' ? v : String(v);
-          }
-          const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
-          if (sc) {
-            self.saveResponseCookies(domain, typeof sc === 'string' ? sc : String(sc));
-            self.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
-          }
-          resolved = true;
-          req.destroy();
-          resolve(resp);
-        }
-      });
-
-      req.request(
-        url,
-        {
-          method: http.RequestMethod.POST,
-          header: reqHeaders,
-          extraData: bodyStr,
-          expectDataType: http.HttpDataType.STRING,
-          readTimeout: 120000,
-          connectTimeout: 30000,
-        },
-        async (err: BusinessError | undefined, data: http.HttpResponse) => {
-          if (resolved) {
-            return;
-          }
-          if (err !== undefined && err.code !== 0) {
-            reject(new Error('HTTP ' + err.code + ': ' + err.message));
-            req.destroy();
-            return;
-          }
-          resp.statusCode = data.responseCode;
-
-          const rawH = data.header as Record<string, string | number | string[]>;
-          const respHeaders: Record<string, string> = {};
-          for (const key of Object.keys(rawH)) {
-            const v = rawH[key];
-            respHeaders[key] = typeof v === 'string' ? v : String(v);
-          }
-          resp.headers = respHeaders;
-
-          const raw = data.result;
-          resp.body = typeof raw === 'string' ? raw : '';
-          resp.isRedirect = resp.statusCode >= 300 && resp.statusCode < 400;
-          resp.location = respHeaders['location'] || respHeaders['Location'];
-
-          const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
-          if (sc) {
-            this.saveResponseCookies(domain, sc);
-            this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
-          }
-
-          req.destroy();
-          resolve(resp);
-        }
-      );
-    });
+    return this.requestNoRedirect(url, http.RequestMethod.POST, bodyStr, headers);
   }
 
   private async request(

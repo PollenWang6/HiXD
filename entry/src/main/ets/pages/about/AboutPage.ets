@@ -5,6 +5,7 @@ import { VersionInfo } from '../../services/VersionService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 
 @Component
 export struct AboutPage {
@@ -160,6 +161,19 @@ export struct AboutPage {
       }
     }
     .width('100%').height('100%')
+    .title(this.customTitle(), { backgroundColor: this.accentColor })
+    .backgroundColor(ThemeColors.bgPage)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .hideBackButton(true)
+  }
+
+  @Builder customTitle() {
+    Row({ space: 6 }) {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([Color.White])
+      }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      Text('关于软件').fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+    }.height(56).width('100%').padding({ left: 12, right: 12 })
   }
 }
