@@ -36,12 +36,7 @@ export struct AboutPage {
       if (info) {
         this.hasUpdate = true;
         this.updateInfo = info;
-        const skipped = PreferenceUtil.getString('skip_version');
-        if (skipped !== info.version) {
-          this.showUpdateDialog = true;
-        } else {
-          promptAction.showToast({ message: '当前已是最新版本' });
-        }
+        this.showUpdateDialog = true;
       } else {
         promptAction.showToast({ message: '当前已是最新版本' });
       }
