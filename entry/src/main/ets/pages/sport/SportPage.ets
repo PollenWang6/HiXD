@@ -13,7 +13,12 @@ export struct SportPage {
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   @State currentTab: number = 0;
-  private swiperController: SwiperController = new SwiperController();
+  @State indicatorBase: number = 0;
+  @State indicatorSwipe: number = 0;
+  @State barW: number = 360;
+  private swiperCtrl: SwiperController = new SwiperController();
+  private swiperWidth: number = 360;
+  private perTabW: number = 180;
 
   // 体测成绩
   @State scoreLoading: boolean = false;
@@ -97,6 +102,7 @@ export struct SportPage {
     this.classErrorMsg = '';
     try {
       this.classList = await this.sport.getClass();
+      console.info('SportPage', 'loadClass result: ' + this.classList.length + ' items');
     } catch (e) {
       this.classErrorMsg = (e as Error).message || '获取课程信息失败';
     } finally {
@@ -526,65 +532,85 @@ export struct SportPage {
       .width('100%')
       .backgroundColor(this.accentColor)
 
-      // Tab 切换栏
-      Row() {
-        Column() {
-          Text('体测成绩')
-            .fontSize(15)
-            .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-            .fontColor(this.currentTab === 0 ? this.accentColor : ThemeColors.textSecondary)
-          if (this.currentTab === 0) {
-            Divider().strokeWidth(2).color(this.accentColor).width(24).margin({ top: 4 })
+      // Tab 栏（单条滑动指示器）
+      Stack({ alignContent: Alignment.BottomStart }) {
+        Row() {
+          Column() {
+            Text('体测成绩').fontSize(15)
+              .fontColor(this.currentTab === 0 ? this.accentColor : ThemeColors.textSecondary)
+              .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
           }
+          .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
+          .onClick(() => {
+            this.currentTab = 0;
+            animateTo({ duration: 220, curve: Curve.FastOutSlowIn }, () => {
+              this.indicatorBase = 0;
+              this.indicatorSwipe = 0;
+            });
+            this.swiperCtrl.changeIndex(0, true);
+            if (!this.sportScore && !this.scoreLoading) this.loadScore();
+          })
+
+          Column() {
+            Text('课程信息').fontSize(15)
+              .fontColor(this.currentTab === 1 ? this.accentColor : ThemeColors.textSecondary)
+              .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
+          }
+          .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
+          .onClick(() => {
+            this.currentTab = 1;
+            animateTo({ duration: 220, curve: Curve.FastOutSlowIn }, () => {
+              this.indicatorBase = this.perTabW;
+              this.indicatorSwipe = 0;
+            });
+            this.swiperCtrl.changeIndex(1, true);
+            if (this.classList.length === 0 && !this.classLoading) this.loadClass();
+          })
         }
-        .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.currentTab = 0;
-          this.swiperController.changeIndex(0);
-          if (!this.sportScore && !this.scoreLoading) this.loadScore();
+        .width('100%')
+        .onAreaChange((_old: Area, newArea: Area) => {
+          this.barW = newArea.width as number;
+          this.perTabW = this.barW / 2;
         })
 
-        Column() {
-          Text('课程信息')
-            .fontSize(15)
-            .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-            .fontColor(this.currentTab === 1 ? this.accentColor : ThemeColors.textSecondary)
-          if (this.currentTab === 1) {
-            Divider().strokeWidth(2).color(this.accentColor).width(24).margin({ top: 4 })
-          }
-        }
-        .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.currentTab = 1;
-          this.swiperController.changeIndex(1);
-          if (this.classList.length === 0 && !this.classLoading) this.loadClass();
-        })
+        // 单条滑动指示器
+        Row()
+          .width(24).height(3)
+          .backgroundColor(this.accentColor).borderRadius(1.5)
+          .margin({ left: this.indicatorBase + this.indicatorSwipe - 12 + this.barW * 0.25 })
       }
-      .width('100%').height(44)
+      .width('100%')
       .backgroundColor(ThemeColors.bgCard)
-      .border({ width: { bottom: 0.5 }, color: '#E0E0E0' })
+      .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
 
       // Swiper 内容区
-      Swiper(this.swiperController) {
-        // Tab 0: 体测成绩
-        Column() { this.ScoreTab() }.width('100%').layoutWeight(1)
-        // Tab 1: 课程信息
-        Column() { this.ClassTab() }.width('100%').layoutWeight(1)
+      Swiper(this.swiperCtrl) {
+        Column() { this.ScoreTab() }.width('100%')
+        Column() { this.ClassTab() }.width('100%')
       }
       .index(this.currentTab)
       .indicator(false)
       .loop(false)
-      .duration(250)
-      .curve(Curve.EaseInOut)
-      .layoutWeight(1)
-      .onChange((index: number) => {
-        this.currentTab = index;
-        if (index === 0) {
+      .onAreaChange((_old: Area, newArea: Area) => {
+        this.swiperWidth = newArea.width as number;
+      })
+      .onGestureSwipe((index: number, event: SwiperAnimationEvent) => {
+        const offset: number = event.currentOffset as number;
+        const ratio: number = Math.abs(offset) / this.swiperWidth;
+        const move: number = ratio >= 1 ? this.perTabW : this.perTabW * ratio;
+        this.indicatorSwipe = offset < 0 ? move : -move;
+      })
+      .onAnimationStart((_index: number, targetIndex: number, _event: SwiperAnimationEvent) => {
+        this.currentTab = targetIndex;
+        this.indicatorBase = targetIndex === 0 ? 0 : this.perTabW;
+        this.indicatorSwipe = 0;
+        if (targetIndex === 0) {
           if (!this.sportScore && !this.scoreLoading) this.loadScore();
         } else {
           if (this.classList.length === 0 && !this.classLoading) this.loadClass();
         }
       })
+      .layoutWeight(1)
 
       // 密码弹窗
       Stack() {

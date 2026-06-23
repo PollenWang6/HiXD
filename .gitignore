@@ -26,6 +26,7 @@ hvigorfile.ts.js.map
 /.appanalyzer/
 
 # ===================== 隐私/密钥文件（必须加！） =====================
+build-profile.json5
 local.properties
 keystore/
 *.jks

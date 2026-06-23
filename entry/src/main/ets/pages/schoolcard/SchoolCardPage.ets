@@ -20,6 +20,7 @@ export struct SchoolCardPage {
   // 日期筛选
   @State beginDate: string = '';
   @State endDate: string = '';
+  @State activePreset: number = 30; // -1=自定义
   // Service
   private cardSvc: SchoolCardService = SchoolCardService.getInstance();
 
@@ -141,6 +142,8 @@ export struct SchoolCardPage {
   }
 
   setDateRange(days: number): void {
+    this.activePreset = days;
+    if (days === -1) return; // 自定义模式，等用户选日期后手动查询
     const now = new Date();
     this.endDate = this.fmtDate(now);
     this.beginDate = this.fmtDate(new Date(now.getTime() - days * 86400000));
@@ -149,6 +152,7 @@ export struct SchoolCardPage {
 
   // 日期选择器
   pickDate(kind: number): void { // 0=开始, 1=结束
+    this.activePreset = -1;
     const curDate = this.parseDate(kind === 0 ? this.beginDate : this.endDate);
     DatePickerDialog.show({
       start: new Date('2022-01-01'),
@@ -250,6 +254,7 @@ export struct SchoolCardPage {
             this.dateTag('近7天', 7)
             this.dateTag('近30天', 30)
             this.dateTag('近90天', 90)
+            this.dateTag('自定义', -1)
           }.width('100%').padding({ left: 18, right: 18, bottom: 8 })
 
           // 日期选择行
@@ -345,10 +350,11 @@ export struct SchoolCardPage {
   @Builder dateTag(label: string, days: number) {
     Text(label)
       .fontSize(12)
-      .fontColor(this.accentColor)
+      .fontColor(this.activePreset === days ? this.accentColor : ThemeColors.textSecondary)
       .padding({ left: 10, right: 10, top: 4, bottom: 4 })
       .borderRadius(10)
-      .border({ width: 0.5, color: this.accentColor })
+      .border({ width: 0.5, color: this.activePreset === days ? this.accentColor : ThemeColors.border })
+      .backgroundColor(this.activePreset === days ? (this.accentColor + '18') : Color.Transparent)
       .onClick(() => { this.setDateRange(days); })
   }
 }

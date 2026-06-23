@@ -1,4 +1,4 @@
-﻿// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
+// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
 import { ThemeColors } from '../../utils/ThemeColors';
 import { webview } from '@kit.ArkWeb';
 import web_webview from '@ohos.web.webview';
@@ -6,14 +6,14 @@ import cryptoFramework from '@ohos.security.cryptoFramework';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService } from '../../services/CasLoginService';
+import { promptAction } from '@kit.ArkUI';
 
 const TAG: string = 'ElectricityPage';
 
-// xxcapp OAuth SSO 入口（WebView 自动跟随重定向，利用 CookieJar 中 TGC 完成 CAS 登录）
 const SSO_ENTRY: string =
   'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600&state=12312312312312&qrcode=0';
 
-const AES_KEY: string = '1234567812345678'; // AES-CBC key=IV
+const AES_KEY: string = '1234567812345678';
 
 interface DailyItem {
   date: string;
@@ -30,7 +30,6 @@ interface ElecCache {
   date: string;
   daily: DailyItem[];
   error: string;
-  // 水费字段（可选，部分宿舍可能没有水表）
   waterRemain: string;
   waterMetID: string;
   waterDate: string;
@@ -43,6 +42,13 @@ interface NodeReq { NodeID: string }
 interface MeterReq { MetID: string; ReadTimeS: string; ReadTimeE: string; ReadNum: string }
 interface PostBody { content: string }
 interface SigReq { data: string; access_token: string; OpCode: string; RequestID: string }
+interface TimePreset { label: string; days: number }
+
+const TIME_PRESETS: TimePreset[] = [
+  { label: '近7天', days: 7 },
+  { label: '近30天', days: 30 },
+  { label: '近90天', days: 90 }
+];
 
 function strToU8(s: string): Uint8Array {
   const buf: Array<number> = [];
@@ -50,18 +56,6 @@ function strToU8(s: string): Uint8Array {
     buf.push(s.charCodeAt(i) & 0xFF);
   }
   return new Uint8Array(buf);
-}
-
-function u8ToStr(u: Uint8Array): string {
-  const buf: Array<number> = [];
-  for (let i: number = 0; i < u.length; i++) {
-    buf.push(u[i]);
-  }
-  let result: string = '';
-  for (let i: number = 0; i < buf.length; i++) {
-    result += String.fromCharCode(buf[i]);
-  }
-  return result;
 }
 
 function base64Encode(u8: Uint8Array): string {
@@ -91,37 +85,46 @@ export struct ElectricityPage {
   @State readDate: string = '';
   @State dailyItems: DailyItem[] = [];
   @State displayDaily: DailyItem[] = [];
-  @State showMore: boolean = false;
   // 水费
   @State waterBalance: string = '';
   @State waterMetID: string = '';
   @State waterReadDate: string = '';
   @State waterDailyItems: DailyItem[] = [];
   @State waterDisplayDaily: DailyItem[] = [];
-  @State showMoreWater: boolean = false;
   @StorageLink('electricity_cache') @Watch('onCacheChanged') elCache: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @State webViewSrc: string = '';
+  // 查询与Tab
+  @State activePreset: number = 30;
+  @State customStartStr: string = '';
+  @State customEndStr: string = '';
+  @State customQuerying: boolean = false;
+  @State activeTab: number = 0;
+  @State indicatorBase: number = 0;
+  @State indicatorSwipe: number = 0;
+  @State barW: number = 360;
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
   private isSilent: boolean = false;
   private http: HttpUtil = HttpUtil.getInstance();
   private ssoDone: boolean = false;
+  private cachedApiHeaders: Record<string, string> = {};
+  private cachedMetID: string = '';
+  private swiperCtrl: SwiperController = new SwiperController();
+  private swiperWidth: number = 360;
+  private perTabW: number = 180;
 
   async aboutToAppear(): Promise<void> {
-    // 先同步 HTTP cookie 到 WebView，再加载 SSO 页面（避免 cookie 未就绪的竞态）
     await CasLoginService.getInstance().syncCookiesToWebView();
     this.webViewSrc = SSO_ENTRY;
-
-    // 静默模式：自动刷新后 pop
+    this.customStartStr = this.dayShift(30);
+    this.customEndStr = this.dayShift(0);
     const silent: boolean = AppStorage.Get('electricity_silent') as boolean;
     if (silent === true) {
       AppStorage.Set('electricity_silent', false);
       this.isSilent = true;
       return;
     }
-
-    // 非静默模式：有缓存立即展示
     if (this.elCache.length > 0) {
       this.onCacheChanged();
     }
@@ -148,7 +151,6 @@ export struct ElectricityPage {
         }
       }
       this.displayDaily = this.dailyItems.slice(0, 7);
-      // 水费缓存恢复
       this.waterBalance = data.waterRemain || '';
       this.waterMetID = data.waterMetID || '';
       this.waterReadDate = data.waterDate || '';
@@ -161,7 +163,6 @@ export struct ElectricityPage {
       }
       this.waterDisplayDaily = this.waterDailyItems.slice(0, 7);
       this.isLoading = false;
-
       if (this.isSilent) {
         this.isSilent = false;
         this.pageInfo.pop();
@@ -185,25 +186,19 @@ export struct ElectricityPage {
     return amp >= 0 ? code.substring(0, amp) : code;
   }
 
-  // AES-CBC 加密（cryptoFramework）
   private async aesEncrypt(plaintext: string): Promise<string> {
     const keyData: cryptoFramework.DataBlob = { data: strToU8(AES_KEY) };
     const iv: cryptoFramework.DataBlob = { data: strToU8(AES_KEY) };
-
     const gen = cryptoFramework.createSymKeyGenerator('AES128');
     const symKey: cryptoFramework.SymKey = await gen.convertKey(keyData);
-
     const cipher = cryptoFramework.createCipher('AES128|CBC|PKCS5');
     const params: cryptoFramework.IvParamsSpec = { algName: 'IvParamsSpec', iv: iv } as cryptoFramework.IvParamsSpec;
     await cipher.init(cryptoFramework.CryptoMode.ENCRYPT_MODE, symKey, params);
-
     const input: cryptoFramework.DataBlob = { data: strToU8(plaintext) };
     const output: cryptoFramework.DataBlob = await cipher.doFinal(input);
-
     return base64Encode(output.data);
   }
 
-  // 日期往前推 n 天
   private dayShift(n: number): string {
     const d: number = Date.now() - n * 86400000;
     const dt: Date = new Date(d);
@@ -213,16 +208,14 @@ export struct ElectricityPage {
     return y + '-' + m + '-' + day;
   }
 
-  // ===== ignypt HTTP API 链（Step 1-5） =====
   private async fetchData(code: string): Promise<void> {
     if (!this.isSilent) this.isLoading = true;
     this.loadError = '';
     const IG_HEADERS: Record<string, string> = {
       'User-Agent': 'Mozilla/5.0 (Linux; HarmonyOS) AppleWebKit/537.36'
     };
-
     try {
-      // ── Step 1: GetSignature ──
+      // Step 1
       const sigUrl = 'https://ignypt.xidian.edu.cn/baseNew/api/User/GetSignature';
       const emptySigBody: SigReq = { data: '', access_token: '', OpCode: 'MPAY', RequestID: '' };
       const sigResp = await this.http.post(sigUrl, emptySigBody, IG_HEADERS);
@@ -232,45 +225,36 @@ export struct ElectricityPage {
       const timestamp: string = String(sigData['timestamp']);
       const signature: string = String(sigData['signature']);
       const apiHeaders: Record<string, string> = {
-        'timestamp': timestamp,
-        'signature': signature,
-        'OpCode': 'MPAY',
-        'OrgId': '',
-        'RequestID': ''
+        'timestamp': timestamp, 'signature': signature, 'OpCode': 'MPAY', 'OrgId': '', 'RequestID': ''
       };
-      console.info(TAG, 'Step1 OK, timestamp=' + timestamp);
-
-      // ── Step 2: OauthGetUserInfo ──
+      this.cachedApiHeaders = {
+        'timestamp': timestamp, 'signature': signature, 'OpCode': 'MPAY', 'OrgId': '', 'RequestID': ''
+      };
+      // Step 2
       const step2Req: CodeReq = { CODE: code };
       const enc2: string = await this.aesEncrypt(JSON.stringify(step2Req));
       const uInfoUrl: string = 'https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/OauthGetUserInfo?content=' + encodeURIComponent(enc2);
       const uInfoResp = await this.http.get(uInfoUrl, apiHeaders);
-      if (!uInfoResp.isOk) throw new Error('OauthGetUserInfo failed: ' + uInfoResp.statusCode);
-      console.info(TAG, 'Step2 OK');
-
-      // ── Step 3: H5UserIDLogIn ──
+      if (!uInfoResp.isOk) throw new Error('OauthGetUserInfo failed');
+      // Step 3
       const userId: string = PreferenceUtil.getString('ids_account') || PreferenceUtil.getString('login_username') || '';
       const step3Req: LoginReq = { UserID: userId, Pwd: '', IsCehckPwd: '1', NodeID: '' };
       const enc3: string = await this.aesEncrypt(JSON.stringify(step3Req));
       const loginBody: PostBody = { content: enc3 };
-      const loginResp = await this.http.post('https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/H5UserIDLogIn',
-        loginBody, apiHeaders);
-      if (!loginResp.isOk) throw new Error('H5UserIDLogIn failed: ' + loginResp.statusCode);
+      const loginResp = await this.http.post('https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/H5UserIDLogIn', loginBody, apiHeaders);
+      if (!loginResp.isOk) throw new Error('H5UserIDLogIn failed');
       const loginJson: object = JSON.parse(loginResp.body) as object;
       const resData: object[] = (loginJson as Record<string, object[]>)['ResData'] as object[];
       const nodeID: string = String((resData[0] as Record<string, object>)['NodeID']);
-      console.info(TAG, 'Step3 OK, NodeID=' + nodeID);
-
-      // ── Step 4: H5QueryMeterList ──
+      // Step 4
       const step4Req: NodeReq = { NodeID: nodeID };
       const enc4: string = await this.aesEncrypt(JSON.stringify(step4Req));
       const meterUrl: string = 'https://ignypt.xidian.edu.cn/estManage/api/wechat/v2/H5QueryMeterList?content=' + encodeURIComponent(enc4);
       const meterResp = await this.http.get(meterUrl, apiHeaders);
-      if (!meterResp.isOk) throw new Error('H5QueryMeterList failed: ' + meterResp.statusCode);
+      if (!meterResp.isOk) throw new Error('H5QueryMeterList failed');
       const meterJson: object = JSON.parse(meterResp.body) as object;
       const md: object = (meterJson as Record<string, object>)['ResData'] as object;
       const rows: object[] = (md as Record<string, object[]>)['rows'] as object[];
-      // Find electric meter (MediumCode=2) and water meter (other)
       let elecRow: Record<string, object> = rows[0] as Record<string, object>;
       let hasWater: boolean = false;
       let waterRemain: string = '';
@@ -290,9 +274,8 @@ export struct ElectricityPage {
       const remain: string = String(elecRow['LastNum']);
       const metID: string = String(elecRow['MetID']);
       const readDate: string = String(elecRow['LastReadDate']);
-      console.info(TAG, 'Step4 OK, remain=' + remain + ', metID=' + metID + ', hasWater=' + String(hasWater));
-
-      // ── Step 5: GetMetRead (30天) ──
+      this.cachedMetID = metID;
+      // Step 5
       const daily: DailyItem[] = [];
       let waterDaily: DailyItem[] = [];
       try {
@@ -316,9 +299,7 @@ export struct ElectricityPage {
               daily.push({ date: date, prevDate: prevDate, use: use, startNum: startNum, endNum: endNum });
             }
           }
-          console.info(TAG, 'Step5 OK, daily records=' + daily.length);
         }
-        // Water meter readings
         if (hasWater) {
           const wReq: MeterReq = { MetID: waterMetID, ReadTimeS: this.dayShift(365), ReadTimeE: this.dayShift(0), ReadNum: '' };
           const wEnc: string = await this.aesEncrypt(JSON.stringify(wReq));
@@ -336,20 +317,14 @@ export struct ElectricityPage {
               const use: string = Number(r['ReadNum']).toFixed(2);
               waterDaily.push({ date: date, prevDate: '', use: use, startNum: startNum, endNum: endNum });
             }
-            console.info(TAG, 'Step5 water OK, daily records=' + waterDaily.length);
           }
         }
       } catch (e5) {
-        console.warn(TAG, 'Step5 failed (non-critical): ' + JSON.stringify(e5));
+        console.warn(TAG, 'Step5 failed: ' + JSON.stringify(e5));
       }
-
-      // ── 写入缓存 ──
       const cache: ElecCache = { remain: remain, metID: metID, nodeID: nodeID, date: readDate, daily: daily, error: '', waterRemain: waterRemain, waterMetID: waterMetID, waterDate: waterDate, waterDaily: waterDaily };
       AppStorage.setOrCreate('electricity_cache', JSON.stringify(cache));
-      PreferenceUtil.putString('electricity_cache_v2', JSON.stringify(cache)); // 跨 NavDestination 用 Preference
-      console.error('ElectricityPage', 'wrote electricity_cache remain=' + remain + ' date=' + readDate);
-
-      // 直接更新本组件状态（@Watch 可能不触发）
+      PreferenceUtil.putString('electricity_cache_v2', JSON.stringify(cache));
       this.balance = remain;
       this.metID = metID;
       this.readDate = readDate;
@@ -360,9 +335,8 @@ export struct ElectricityPage {
       this.waterReadDate = waterDate;
       this.waterDailyItems = waterDaily;
       this.waterDisplayDaily = waterDaily.slice(0, 7);
-      
+      this.activePreset = 30;
       this.isLoading = false;
-
       if (this.isSilent) {
         this.isSilent = false;
         this.pageInfo.pop();
@@ -379,6 +353,95 @@ export struct ElectricityPage {
     }
   }
 
+  private async queryStep5(startStr: string, endStr: string): Promise<void> {
+    if (this.cachedApiHeaders['timestamp'] === undefined || this.cachedMetID.length === 0) {
+      promptAction.showToast({ message: '请等待数据加载完成', duration: 2000 });
+      return;
+    }
+    this.customQuerying = true;
+    try {
+      const req: MeterReq = { MetID: this.cachedMetID, ReadTimeS: startStr, ReadTimeE: endStr, ReadNum: '' };
+      const enc: string = await this.aesEncrypt(JSON.stringify(req));
+      const url: string = 'https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/GetMetRead?content=' + encodeURIComponent(enc);
+      const resp = await this.http.get(url, this.cachedApiHeaders);
+      if (!resp.isOk) {
+        promptAction.showToast({ message: '查询失败', duration: 2000 });
+        this.customQuerying = false;
+        return;
+      }
+      const json: object = JSON.parse(resp.body) as object;
+      const rd: object = (json as Record<string, object>)['ResData'] as object;
+      const rows: object[] = (rd as Record<string, object[]>)['rows'] as object[] || [] as object[];
+      const items: DailyItem[] = [];
+      for (let i: number = 0; i < rows.length; i++) {
+        const r: Record<string, object> = rows[i] as Record<string, object>;
+        const date: string = String(r['ReadTime']).substring(0, 10);
+        const startNum: string = Number(r['StartNum']).toFixed(2);
+        const endNum: string = Number(r['EndNum']).toFixed(2);
+        const use: string = Number(r['ReadNum']).toFixed(2);
+        if (i + 1 < rows.length) {
+          const nr: Record<string, object> = rows[i + 1] as Record<string, object>;
+          const prevDate: string = String(nr['ReadTime']).substring(0, 10);
+          items.push({ date: date, prevDate: prevDate, use: use, startNum: startNum, endNum: endNum });
+        }
+      }
+      this.dailyItems = items;
+      this.displayDaily = items.slice(0, 7);
+    } catch (e) {
+      console.error(TAG, 'CustomStep5 failed: ' + JSON.stringify(e));
+      promptAction.showToast({ message: '查询失败', duration: 2000 });
+    }
+    this.customQuerying = false;
+  }
+
+  private selectPreset(days: number): void {
+    if (days === -1) { this.activePreset = -1; return; }
+    this.activePreset = days;
+    const startStr: string = this.dayShift(days);
+    const endStr: string = this.dayShift(0);
+    this.queryStep5(startStr, endStr);
+  }
+
+  private doCustomQuery(): void {
+    if (this.customStartStr.length === 0 || this.customEndStr.length === 0) {
+      promptAction.showToast({ message: '请选择开始和结束日期', duration: 2000 });
+      return;
+    }
+    if (this.customStartStr > this.customEndStr) {
+      promptAction.showToast({ message: '开始日期不能晚于结束日期', duration: 2000 });
+      return;
+    }
+    this.queryStep5(this.customStartStr, this.customEndStr);
+  }
+
+  private showStartDatePicker(): void {
+    DatePickerDialog.show({
+      start: new Date('2022-1-1'),
+      end: new Date(),
+      selected: this.customStartStr.length > 0 ? new Date(this.customStartStr) : new Date(),
+      onAccept: (value: DatePickerResult) => {
+        const y: number = value.year as number;
+        const m: number = (value.month as number) + 1;
+        const d: number = value.day as number;
+        this.customStartStr = String(y) + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      }
+    });
+  }
+
+  private showEndDatePicker(): void {
+    DatePickerDialog.show({
+      start: new Date('2022-1-1'),
+      end: new Date(),
+      selected: this.customEndStr.length > 0 ? new Date(this.customEndStr) : new Date(),
+      onAccept: (value: DatePickerResult) => {
+        const y: number = value.year as number;
+        const m: number = (value.month as number) + 1;
+        const d: number = value.day as number;
+        this.customEndStr = String(y) + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      }
+    });
+  }
+
   private doRefresh(): void {
     this.isLoading = true;
     this.loadError = '';
@@ -386,9 +449,9 @@ export struct ElectricityPage {
     this.metID = '';
     this.readDate = '';
     this.dailyItems = [];
+    this.activePreset = 30;
     this.ssoDone = false;
     AppStorage.setOrCreate('electricity_cache', '');
-    // WebView SSO 入口已通过 src 加载，这里只需确保重新加载
     this.webController.loadUrl(SSO_ENTRY);
   }
 
@@ -401,280 +464,295 @@ export struct ElectricityPage {
     return m + '月' + day + '日';
   }
 
+  private totalUsage(): string {
+    let sum: number = 0;
+    for (let i: number = 0; i < this.dailyItems.length; i++) {
+      sum += parseFloat(this.dailyItems[i].use) || 0;
+    }
+    return sum.toFixed(2);
+  }
+
   @Builder
-  fullReadingsBuilder(): void {
+  buildWhiteTitle(t: string) {
+    Row() {
+      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+        Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
+      }
+      .height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      Text(t).fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+    }
+    .width('100%').height(56).padding({ left: 12, right: 16 })
+  }
+
+  @Builder
+  buildBalanceCard() {
     Column() {
       Row() {
-        Text('全部抄读记录').fontSize(16).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        Text('⚡ 电费余额').fontSize(14).fontColor(Color.White).opacity(0.9)
         Blank()
-        Image($r('app.media.ic_public_close'))
-          .width(24).height(24)
-          .fillColor(ThemeColors.textSecondary)
-          .onClick(() => { this.showMore = false; })
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 10 })
+        Image($r('app.media.ic_public_refresh')).width(22).height(22).fillColor(Color.White).opacity(0.9)
+          .onClick(() => { this.doRefresh(); })
+      }.width('100%')
+      Row({ space: 4 }) {
+        Text(this.balance).fontSize(52).fontWeight(FontWeight.Bold).fontColor(Color.White)
+        Text('kWh').fontSize(16).fontColor(Color.White).opacity(0.7).margin({ bottom: 6 })
+      }.margin({ top: 8 })
+      Text('电表 ' + this.metID + '  ·  抄读于 ' + this.readDate)
+        .fontSize(12).fontColor(Color.White).opacity(0.6).margin({ top: 6 })
+    }
+    .width('100%').padding({ left: 20, right: 20, top: 20, bottom: 22 }).borderRadius(16)
+    .linearGradient({
+      angle: 135,
+      colors: this.themeIsDark ? [['#4A2800', 0.0], ['#E65100', 1.0]] : [['#FF8F00', 0.0], ['#E65100', 1.0]]
+    })
+    .shadow({ radius: 16, color: '#E6510020', offsetY: 6 }).margin({ left: 16, right: 16, top: 16 })
+  }
 
-      Scroll() {
-        Column() {
+  @Builder
+  buildPresetChip(label: string, days: number) {
+    Text(label).fontSize(12)
+      .fontColor(this.activePreset === days ? this.accentColor : ThemeColors.textSecondary)
+      .padding({ left: 10, right: 10, top: 4, bottom: 4 }).borderRadius(10)
+      .border({ width: 0.5, color: this.activePreset === days ? this.accentColor : ThemeColors.border })
+      .backgroundColor(this.activePreset === days ? (this.accentColor + '18') : Color.Transparent)
+      .onClick(() => { this.selectPreset(days); })
+  }
+
+  @Builder
+  elecContent() {
+    Column() {
+      Row() {
+        Text('用电记录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        Blank()
+        if (this.dailyItems.length > 0) {
+          Text(String(this.dailyItems.length) + ' 条').fontSize(12).fontColor(ThemeColors.textHint)
+        }
+      }.width('100%').padding({ left: 18, right: 18, top: 14, bottom: 6 })
+
+      Row({ space: 8 }) {
+        ForEach(TIME_PRESETS, (p: TimePreset) => { this.buildPresetChip(p.label, p.days) }, (p: TimePreset): string => p.label)
+        this.buildPresetChip('自定义', -1)
+      }.width('100%').padding({ left: 18, right: 18, bottom: 8 })
+
+      Row({ space: 8 }) {
+        Text('起').fontSize(13).fontColor(ThemeColors.textHint)
+        Row() {
+          Text(this.activePreset === -1 ? this.customStartStr : this.dayShift(this.activePreset))
+            .fontSize(13).fontColor(ThemeColors.textPrimary)
+        }.padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(6).backgroundColor(ThemeColors.bgPage)
+        .onClick(() => { this.activePreset = -1; this.showStartDatePicker(); })
+
+        Text('~').fontSize(13).fontColor(ThemeColors.textHint)
+        Text('止').fontSize(13).fontColor(ThemeColors.textHint)
+        Row() {
+          Text(this.activePreset === -1 ? this.customEndStr : this.dayShift(0))
+            .fontSize(13).fontColor(ThemeColors.textPrimary)
+        }.padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(6).backgroundColor(ThemeColors.bgPage)
+        .onClick(() => { this.activePreset = -1; this.showEndDatePicker(); })
+
+        if (this.activePreset === -1) {
+          Button('查询').fontSize(13).height(32).backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(6)
+            .padding({ left: 14, right: 14 }).onClick(() => { this.doCustomQuery(); })
+        }
+      }.width('100%').padding({ left: 18, right: 18, bottom: 10 })
+
+      if (this.customQuerying) {
+        Row() {
+          LoadingProgress().width(16).height(16).color(this.accentColor)
+          Text('查询中...').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ left: 6 })
+        }.width('100%').justifyContent(FlexAlign.Center).padding({ bottom: 6 })
+      }
+
+      Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 18, right: 18 })
+
+      if (this.dailyItems.length > 0 && !this.customQuerying) {
+        Row() {
+          Text('合计 ' + this.totalUsage() + ' kWh').fontSize(13).fontWeight(FontWeight.Medium).fontColor('#FF6D00')
+          Text(' · ').fontSize(13).fontColor(ThemeColors.textHint)
+          Text(String(this.dailyItems.length) + ' 条').fontSize(13).fontColor(ThemeColors.textSecondary)
+        }.width('100%').padding({ left: 18, right: 18, top: 8, bottom: 4 })
+      }
+
+      if (this.dailyItems.length === 0 && !this.customQuerying) {
+        Text('该时间段暂无用电记录').fontSize(14).fontColor(ThemeColors.textSecondary)
+          .width('100%').textAlign(TextAlign.Center).padding({ top: 24, bottom: 24 })
+      } else {
+        List() {
           ForEach(this.dailyItems, (item: DailyItem, index: number) => {
-            Column() {
-              // 第一行：读表时间 + 用量
+            ListItem() {
               Row() {
-                Text(this.fmtDate(item.date)).fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
-                Blank()
-                Text(item.use + ' kWh').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-              }.width('100%')
-              // 第二行：上次读数 / 本次读数
-              Row() {
-                Text('上次: ' + item.startNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
-                Blank()
-                Text('本次: ' + item.endNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
-              }.width('100%').margin({ top: 2 })
-            }
-            .width('100%').padding({ top: 10, bottom: 10 })
-            if (index < this.dailyItems.length - 1) {
-              Divider().color('#F5F5F5')
+                Column({ space: 3 }) {
+                  Text(this.fmtDate(item.prevDate.length > 0 ? item.prevDate : '?') + ' → ' + this.fmtDate(item.date))
+                    .fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1)
+                  Text('上次 ' + item.startNum + '  ·  本次 ' + item.endNum)
+                    .fontSize(11).fontColor(ThemeColors.textHint)
+                }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+                Text(item.use + ' kWh').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FF6D00')
+              }.width('100%').padding({ left: 18, right: 18, top: 11, bottom: 11 })
             }
           }, (item: DailyItem): string => item.date)
         }
-        .width('100%').padding({ left: 16, right: 16 })
+        .layoutWeight(1).divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
       }
-      .layoutWeight(1)
     }
-    .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
+    .borderRadius(14).backgroundColor(ThemeColors.bgCard)
+    .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
+    .margin({ left: 16, right: 16, top: 10, bottom: 16 })
+    .layoutWeight(1)
   }
 
-    @Builder buildWhiteTitle(t: string) {
-    Row() {
-      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
-        Image($r('app.media.close'))
-          .height(22)
-          .fillColor(ThemeColors.textPrimary)
-          .draggable(false)
+  @Builder
+  waterContent() {
+    Column() {
+      Row() {
+        Text('水表 ' + this.waterMetID).fontSize(14).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        Blank()
+        Text('抄读于 ' + this.waterReadDate).fontSize(12).fontColor(ThemeColors.textSecondary)
+      }.width('100%').padding({ left: 18, right: 18, top: 14, bottom: 4 })
+
+      Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 18, right: 18 })
+
+      if (this.waterDailyItems.length > 0) {
+        Row() {
+          Text('读表时间').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('25%')
+          Text('用量').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('20%')
+          Text('本次读数').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('27%')
+          Text('上次读数').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('28%')
+        }.width('100%').padding({ left: 18, right: 18, top: 8, bottom: 8 })
+
+        List() {
+          ForEach(this.waterDailyItems, (item: DailyItem, index: number) => {
+            ListItem() {
+              Row() {
+                Text(this.fmtDate(item.date)).fontSize(12).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('25%')
+                Text(item.use + ' 吨').fontSize(13).fontWeight(FontWeight.Medium).fontColor('#2196F3').width('20%')
+                Text('本次:' + item.endNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('27%')
+                Text('上次:' + item.startNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('28%')
+              }.width('100%').padding({ top: 8, bottom: 8, left: 18, right: 18 })
+            }
+          }, (item: DailyItem): string => item.date)
+        }
+        .layoutWeight(1).divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
+      } else {
+        Text('暂无用水记录').fontSize(14).fontColor(ThemeColors.textSecondary)
+          .width('100%').textAlign(TextAlign.Center).padding({ top: 28, bottom: 28 })
       }
-      .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
-      Text(t)
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
-        .layoutWeight(1)
     }
-    .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .borderRadius(14).backgroundColor(ThemeColors.bgCard)
+    .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
+    .margin({ left: 16, right: 16, top: 10, bottom: 16 })
+    .layoutWeight(1)
   }
 
   build() {
     NavDestination() {
       Stack() {
-        // 隐藏 WebView（全尺寸，被 UI 层覆盖，仅做 SSO 拿 code）
         Web({ src: this.webViewSrc, controller: this.webController })
           .width('100%').height('100%')
-          .javaScriptAccess(true)
-          .domStorageAccess(true)
+          .javaScriptAccess(true).domStorageAccess(true)
           .onPageEnd((event) => {
             if (event && event.url && !this.ssoDone) {
               const code: string = this.extractCode(event.url);
               if (code.length > 0) {
                 this.ssoDone = true;
-                console.info(TAG, 'SSO code obtained: ' + code.substring(0, 10) + '...');
                 this.fetchData(code);
               }
             }
           })
           .onErrorReceive((event) => {
             if (event) {
-              console.error(TAG, 'WebView error: ' + event.error.getErrorInfo());
               this.loadError = '加载失败: ' + event.error.getErrorInfo();
               this.isLoading = false;
             }
           })
 
-        // 原生 UI 层
         Column() {
-          // Loading
           if (this.isLoading) {
             Column() {
               LoadingProgress().width(48).height(48).color(this.accentColor)
               Text('正在查询水电...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 16 })
-            }
-            .width('100%').layoutWeight(1)
-            .justifyContent(FlexAlign.Center)
+            }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           }
 
-          // Error
           if (!this.isLoading && this.loadError.length > 0) {
             Column() {
               Text('😞').fontSize(48)
               Text(this.loadError).fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-              Button('重试').fontSize(14).height(36)
-                .backgroundColor('#FF6D00').fontColor('#FFFFFF').borderRadius(20)
-                .margin({ top: 20 }).padding({ left: 24, right: 24 })
-                .onClick(() => { this.doRefresh(); })
-            }
-            .width('100%').layoutWeight(1)
-            .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+              Button('重试').fontSize(14).height(36).backgroundColor('#FF6D00').fontColor('#FFFFFF').borderRadius(20)
+                .margin({ top: 20 }).padding({ left: 24, right: 24 }).onClick(() => { this.doRefresh(); })
+            }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
           }
 
-          // Data
           if (!this.isLoading && this.loadError.length === 0 && this.balance.length > 0) {
             Scroll() {
               Column() {
-                // 余额卡片
-                Column() {
+                this.buildBalanceCard()
+
+                Stack({ alignContent: Alignment.BottomStart }) {
                   Row() {
-                    Text('⚡ 电费余额').fontSize(14).fontColor(ThemeColors.textSecondary)
-                    Blank()
-                    Image($r('app.media.ic_public_refresh'))
-                      .width(20).height(20)
-                      .fillColor('#FF6D00')
-                      .onClick(() => { this.doRefresh(); })
+                    Column() {
+                      Text('⚡ 电费').fontSize(15)
+                        .fontColor(this.activeTab === 0 ? this.accentColor : ThemeColors.textSecondary)
+                        .fontWeight(this.activeTab === 0 ? FontWeight.Bold : FontWeight.Normal)
+                    }.layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
+                    .onClick(() => { this.activeTab = 0; animateTo({ duration: 400, curve: Curve.EaseInOut }, () => { this.indicatorBase = 0; this.indicatorSwipe = 0; }); this.swiperCtrl.changeIndex(0, true); })
+
+                    Column() {
+                      Text('💧 水费').fontSize(15)
+                        .fontColor(this.activeTab === 1 ? this.accentColor : ThemeColors.textSecondary)
+                        .fontWeight(this.activeTab === 1 ? FontWeight.Bold : FontWeight.Normal)
+                    }.layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
+                    .onClick(() => { this.activeTab = 1; animateTo({ duration: 400, curve: Curve.EaseInOut }, () => { this.indicatorBase = this.perTabW; this.indicatorSwipe = 0; }); this.swiperCtrl.changeIndex(1, true); })
                   }.width('100%')
-                  Row() {
-                    Text(this.balance).fontSize(48).fontWeight(FontWeight.Bold).fontColor('#FF6D00')
-                    Text(' kWh').fontSize(18).fontColor(ThemeColors.textSecondary).margin({ left: 4 })
-                  }.margin({ top: 8 })
-                  Text('电表 ' + this.metID + '  ·  抄读于 ' + this.readDate)
-                    .fontSize(12).fontColor('#AAAAAA').margin({ top: 8 })
+                  .onAreaChange((_old: Area, newArea: Area) => {
+                    this.barW = newArea.width as number;
+                    this.perTabW = this.barW / 2;
+                  })
+
+                  Row().width(24).height(3).backgroundColor(this.accentColor).borderRadius(1.5)
+                    .margin({ left: this.indicatorBase + this.indicatorSwipe - 12 + this.barW * 0.25 })
+                }.width('100%').padding({ left: 16, right: 16 })
+                .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
+
+                Swiper(this.swiperCtrl) {
+                  this.elecContent()
+                  this.waterContent()
                 }
-                .width('100%').padding(20)
-                .backgroundColor(ThemeColors.bgCard).borderRadius(16)
-                .margin({ left: 16, right: 16, top: 16 })
-                .shadow({ radius: 12, color: '#00000008', offsetY: 4 })
-
-
-                // 每日用电卡片
-                Column() {
-                  Row() {
-                    Text('📊 用电记录').fontSize(16).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-                    Blank()
-                    Button('查看更多').fontSize(12).fontColor('#FF6D00')
-                      .type(ButtonType.Normal).backgroundColor(Color.Transparent).borderRadius(0).padding(0)
-                      .onClick(() => { this.showMore = true; })
-                  }.width('100%').margin({ bottom: 4 })
-
-                  Divider().color('#F0F0F0').margin({ bottom: 8 })
-
-                  if (this.displayDaily.length > 0) {
-                    ForEach(this.displayDaily, (item: DailyItem, index: number) => {
-                      Row() {
-                        Text(this.fmtDate(item.prevDate.length > 0 ? item.prevDate : '?') + ' → ' + this.fmtDate(item.date)).fontSize(13).fontColor(ThemeColors.textSecondary)
-                        Blank()
-                        Text(item.use).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                        Text(' kWh').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ left: 2 })
-                      }
-                      .width('100%').padding({ top: 10, bottom: 10 })
-                      if (index < this.displayDaily.length - 1) {
-                        Divider().color('#F5F5F5')
-                      }
-                    }, (item: DailyItem): string => item.date)
-                  } else {
-                    Text('暂无用电记录').fontSize(13).fontColor(ThemeColors.textSecondary)
-                      .width('100%').textAlign(TextAlign.Center).padding({ top: 16, bottom: 16 })
-                  }
-                }
-                .width('100%').padding(16)
-                .backgroundColor(ThemeColors.bgCard).borderRadius(16)
-                .margin({ left: 16, right: 16, top: 12, bottom: 16 })
-                .shadow({ radius: 12, color: '#00000008', offsetY: 4 })
-
-                // 水费记录卡片（数据少，全量显示，不折叠）
-                if (this.waterMetID.length > 0) {
-                  Column() {
-                    Text('💧 用水记录').fontSize(16).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-                    Divider().color('#F0F0F0').margin({ top: 8, bottom: 8 })
-
-                    if (this.waterDailyItems.length > 0) {
-                      // 表头
-                      Row() {
-                        Text('读表时间').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('25%')
-                        Text('用量').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('20%')
-                        Text('本次读数').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('27%')
-                        Text('上次读数').fontSize(12).fontColor(ThemeColors.textSecondary).fontWeight(FontWeight.Bold).width('28%')
-                      }.width('100%').padding({ bottom: 8 })
-                      Divider().color('#F0F0F0')
-                      // 数据行
-                      ForEach(this.waterDailyItems, (item: DailyItem, index: number) => {
-                        Row() {
-                          // 四列：读表时间 / 用量 / 本次读数 / 上次读数
-                          Text(this.fmtDate(item.date)).fontSize(12).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('25%')
-                          Text(item.use + ' 吨').fontSize(13).fontWeight(FontWeight.Medium).fontColor('#2196F3').width('20%')
-                          Text('本次:' + item.endNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('27%')
-                          Text('上次:' + item.startNum).fontSize(11).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary).width('28%')
-                        }
-                        .width('100%').padding({ top: 8, bottom: 8 })
-                        if (index < this.waterDailyItems.length - 1) {
-                          Divider().color('#F5F5F5')
-                        }
-                      }, (item: DailyItem): string => item.date)
-                    } else {
-                      Text('暂无用水记录').fontSize(13).fontColor(ThemeColors.textSecondary)
-                        .width('100%').textAlign(TextAlign.Center).padding({ top: 16, bottom: 16 })
-                    }
-                  }
-                  .width('100%').padding(16)
-                  .backgroundColor(ThemeColors.bgCard).borderRadius(16)
-                  .margin({ left: 16, right: 16, top: 12, bottom: 16 })
-                  .shadow({ radius: 12, color: '#00000008', offsetY: 4 })
-                }
+                .index(this.activeTab).indicator(false).loop(false)
+                .onAreaChange((_old: Area, newArea: Area) => {
+                  this.swiperWidth = newArea.width as number;
+                })
+                .onGestureSwipe((index: number, event: SwiperAnimationEvent) => {
+                  const offset: number = event.currentOffset as number;
+                  const ratio: number = Math.abs(offset) / this.swiperWidth;
+                  const move: number = ratio >= 1 ? this.perTabW : this.perTabW * ratio;
+                  this.indicatorSwipe = offset < 0 ? move : -move;
+                })
+                .onAnimationStart((_index: number, targetIndex: number, _event: SwiperAnimationEvent) => {
+                  this.activeTab = targetIndex;
+                  this.indicatorBase = targetIndex === 0 ? 0 : this.perTabW;
+                  this.indicatorSwipe = 0;
+                })
+                .layoutWeight(1)
               }
             }
             .layoutWeight(1)
           }
 
-          // 初始空状态
           if (!this.isLoading && this.loadError.length === 0 && this.balance.length === 0) {
             Column() {
               Text('🔌').fontSize(48)
               Text('正在连接缴费系统...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
-            }
-            .width('100%').layoutWeight(1)
-            .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+            }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
           }
         }
-        .width('100%').height('100%')
-        .backgroundColor(ThemeColors.bgInput)
-
-        // 查看更多弹窗
-        if (this.showMore) {
-          Stack() {
-            Column()
-              .width('100%').height('100%')
-              .backgroundColor('rgba(0,0,0,0.5)')
-              .onClick(() => { this.showMore = false; })
-              .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseIn }))
-
-            Column() {
-              Row().width('100%').height(4)
-                .backgroundColor('#FF6D00')
-                .borderRadius({ topLeft: 16, topRight: 16 })
-
-              this.fullReadingsBuilder()
-            }
-            .width('88%')
-            .height('70%')
-            .backgroundColor(ThemeColors.bgCard)
-            .borderRadius(16)
-            .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetY: 10 })
-            .onClick(() => {})
-            .transition(TransitionEffect.scale({ x: 0.9, y: 0.9 })
-              .combine(TransitionEffect.OPACITY)
-              .animation({ duration: 300, curve: Curve.EaseOut }))
-          }
-          .width('100%').height('100%')
-          .alignContent(Alignment.Center)
-        }
+        .width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
       }
       .width('100%').height('100%')
     }
     .title({ builder: this.buildWhiteTitle('水电查询'), height: 56 }, { backgroundColor: this.accentColor })
     .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .onBackPressed(() => {
-      if (this.showMore) { this.showMore = false; return true; }
-      if (this.showMoreWater) { this.showMoreWater = false; return true; }
-      return false;
-    })
+    .onBackPressed(() => { return false; })
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})
   }

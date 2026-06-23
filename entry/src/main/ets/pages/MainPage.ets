@@ -22,17 +22,16 @@ import { ElectricityPage } from './electricity/ElectricityPage';
 import { PortalWebPage } from './portal/PortalWebPage';
 import { FaqPage } from './faq/FaqPage';
 import { AboutPage } from './about/AboutPage';
-import { CourseReminderPage } from './course_reminder/CourseReminderPage';
+import { CalendarExportPage } from './calendar_export/CalendarExportPage';
 import { AttendancePage } from './attendance/AttendancePage';
 import { SchoolCardService } from '../services/SchoolCardService';
 import { DormWaterPage } from './dormwater/DormWaterPage';
 import { SportPage } from './sport/SportPage';
 import { UserInfoService } from '../services/UserInfoService';
 import { AttendanceService } from '../services/AttendanceService';
-import { CourseReminderService } from '../services/CourseReminderService';
 import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
-import { fileIo, fileUri } from '@kit.CoreFileKit';
+import { fileIo, fileUri, storageStatistics } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import web_webview from '@ohos.web.webview';
@@ -429,7 +428,7 @@ struct MainPage {
 
   private tabsController: HdsTabsController = new HdsTabsController();
   private context!: common.UIAbilityContext;
-  // 应用级缓存目录（异步初始化，供 computeCacheSizeDirect 同步使用）
+  // 应用级缓存目录（异步初始化）
   private appCacheDir: string = '';
   private appCacheWebDir: string = '';
   // 菜单排序
@@ -457,7 +456,7 @@ struct MainPage {
     }
     // 立即显示界面，后台检查登录
     this.username = PreferenceUtil.getString('ids_account');
-    this.computeCacheSizeDirect();
+    this.updateCacheSize();
     // 基于 ids_account 判断登录状态（无 is_logged_in 标记）
     this.isLoggedIn = this.username.length > 0;
     this.phyPwdStatus = PreferenceUtil.getString('physics_pwd').length > 0 ? '已设置' : '未设置';
@@ -566,10 +565,6 @@ struct MainPage {
     if (current !== this._lastCtUpdated && current.length > 0) {
       this._lastCtUpdated = current;
       this.loadClassPreview();
-      // 课表数据变更 → 自动重排课程提醒（增量对比）
-      if (CourseReminderService.getInstance().isAnyEnabled()) {
-        CourseReminderService.getInstance().scheduleAllReminders(false);
-      }
     }
   }
 
@@ -1150,7 +1145,7 @@ struct MainPage {
 
   // removeAllCache(true) 清全局磁盘+内存缓存，API 18+ 静态方法，无需 WebView
   // removeAllCache(true) 静态方法，API 18+，不需要 WebView 实例
-  // 注意：不能用 setTimeout 包 computeCacheSizeDirect()，否则 @State 赋值不触发 UI 刷新
+  // 注意：不能用 setTimeout 包 updateCacheSize()，否则 @State 赋值不触发 UI 刷新
   private clearCache(): void {
     this.cacheSize = '清理中...';
     try {
@@ -1158,69 +1153,29 @@ struct MainPage {
     } catch (e) {
       console.error('MainPage', 'clearCache error: ' + String(e));
     }
-    this.computeCacheSizeDirect();
-  }
-
-  // 手动遍历 cache 目录算大小（绕过 getCurrentBundleStats 缓存）
-  // 同步计算缓存大小（绕过 getCurrentBundleStats 缓存）
-  // 注意：不用 async/await，否则 @State 赋值可能不触发 UI 刷新
-  computeCacheSizeDirect(): void {
-    console.info('MainPage', 'computeCacheSizeDirect START');
-    let total: number = 0;
-    // 应用级（WebView 缓存）+ HAP 级
-    const dirs: string[] = [];
-    if (this.appCacheDir.length > 0) { dirs.push(this.appCacheDir); }
-    if (this.appCacheWebDir.length > 0) { dirs.push(this.appCacheWebDir); }
-    dirs.push(this.context.cacheDir);
-    for (let i = 0; i < dirs.length; i++) {
-      try {
-        const entries = fileIo.listFileSync(dirs[i]);
-        for (let j = 0; j < entries.length; j++) {
-          let dp = dirs[i] + '/' + entries[j];
-          try {
-            let st = fileIo.statSync(dp);
-            if (st.isDirectory()) {
-              total += this.dirSize(dp);
-            } else {
-              total += st.size;
-            }
-          } catch(e) {
-            console.info('MainPage', 'computeCacheSizeDirect stat fail: ' + dp + ' err=' + String(e));
-            // skip
-          }
-        }
-      } catch(e) {
-        console.info('MainPage', 'computeCacheSizeDirect listFileSync dir fail: ' + dirs[i] + ' err=' + String(e));
-      }
-    }
-    console.info('MainPage', 'computeCacheSizeDirect DONE total=' + total);
-    this.cacheSize = this.formatBytes(total);
-  }
-
-  // 递归计算目录大小
-  private dirSize(dirPath: string): number {
-    let size: number = 0;
     try {
-      const children = fileIo.listFileSync(dirPath);
-      for (let k = 0; k < children.length; k++) {
-        let cp = dirPath + '/' + children[k];
+      const moduleContext: common.Context = this.context.createModuleContext('entry');
+      const paths: string[] = [moduleContext.cacheDir, moduleContext.cacheDir + '/web', this.context.cacheDir];
+      for (let i = 0; i < paths.length; i++) {
         try {
-          let st = fileIo.statSync(cp);
-          if (st.isDirectory()) {
-            size += this.dirSize(cp);
-          } else {
-            size += st.size;
+          const entries = fileIo.listFileSync(paths[i]);
+          for (let j = 0; j < entries.length; j++) {
+            const dp: string = paths[i] + '/' + entries[j];
+            if (dp.indexOf('/web/Cookies') >= 0 || dp.indexOf('/web/CookiesD') >= 0) continue;
+            try { fileIo.rmdirSync(dp); } catch (_e) { try { fileIo.unlinkSync(dp); } catch (_e2) { /* skip */ } }
           }
-        } catch (e) {
-          console.info('MainPage', 'computeCacheSizeDirect dirSize stat fail: ' + cp + ' err=' + String(e));
-          // skip
-        }
+        } catch (_e) { /* skip */ }
       }
-    } catch (e) {
-      console.info('MainPage', 'computeCacheSizeDirect dirSize listFile fail: ' + dirPath + ' err=' + String(e));
-      // skip
-    }
-    return size;
+    } catch (_e) { /* skip */ }
+    this.updateCacheSize();
+  }
+
+  updateCacheSize(): void {
+    storageStatistics.getCurrentBundleStats().then((dataSize: storageStatistics.BundleStats) => {
+      this.cacheSize = this.formatBytes(dataSize.cacheSize);
+    }).catch((_e: Error) => {
+      this.cacheSize = '获取失败';
+    });
   }
 
   // 加载课表预览数据：读取本地缓存 → 解析classGrid → 提取接下来2节课
@@ -1814,8 +1769,8 @@ struct MainPage {
       FaqPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     } else if (name === 'AboutPage') {
       AboutPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
-    } else if (name === 'CourseReminderPage') {
-      CourseReminderPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
+    } else if (name === 'CalendarExportPage') {
+      CalendarExportPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Dianfei') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Physics') {
@@ -1929,7 +1884,7 @@ struct MainPage {
         .onAnimationStart((_index: number, targetIndex: number) => {
           this.currentIndex = targetIndex;
           if (targetIndex === 0) { this.loadClassPreview(); }
-          else if (targetIndex === 2) { this.computeCacheSizeDirect(); this.refreshThemeLabel(); }
+          else if (targetIndex === 2) { this.updateCacheSize(); this.refreshThemeLabel(); }
         })
         .width('100%')
         .layoutWeight(1)
@@ -1953,7 +1908,7 @@ struct MainPage {
         .onChange((index: number) => {
           this.currentIndex = index;
           if (index === 0) { this.loadClassPreview(); }
-          else if (index === 2) { this.computeCacheSizeDirect(); this.refreshThemeLabel(); this.loadUserInfo(); }
+          else if (index === 2) { this.updateCacheSize(); this.refreshThemeLabel(); this.loadUserInfo(); }
         })
         .width('100%')
         .layoutWeight(1)
@@ -3231,20 +3186,20 @@ struct MainPage {
               animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.sportPwdOpacity = 1; this.sportPwdTranslate = 0; });
             })
             Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
-            // 上课通知
+            // 导入系统日历
             Row() {
               Stack({ alignContent: Alignment.Center }) {
-                Circle().width(44).height(44).fill('#F57C0022')
-                Text('🔔').fontSize(22)
+                Circle().width(44).height(44).fill('#1E88E522')
+                Text('📅').fontSize(22)
               }.margin({ right: 16 })
               Column() {
-                Text('上课通知').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                Text('上课前定时发送通知提醒').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                Text('导入系统日历').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text('课程/实验/考试导入日历').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
               }.layoutWeight(1)
               Text('›').fontSize(20).fontColor('#CCCCCC')
             }
             .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
-            .onClick(() => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'CourseReminderPage' }); })
+            .onClick(() => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'CalendarExportPage' }); })
           }
           .borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
           .shadow({ radius: 2, color: '#00000008', offsetY: 1 })

@@ -2,14 +2,12 @@ import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want 
 import { window } from '@kit.ArkUI';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
-import { CourseReminderService } from '../services/CourseReminderService';
 
 export default class EntryAbility extends UIAbility {
   private routerPath: string = '';
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     await PreferenceUtil.init(this.context);
-    CourseReminderService.getInstance().setContext(this.context);
     if (want?.parameters?.router) {
       this.routerPath = want.parameters.router.toString();
     }

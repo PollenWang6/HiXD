@@ -7,6 +7,7 @@ import { UnscheduledCourse, ClassChange } from '../../services/Models';
 import { ExamService } from '../../services/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { HttpUtil } from '../../utils/HttpUtil';
+import { CalendarSyncService } from '../../services/CalendarSyncService';
 
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -379,7 +380,8 @@ export struct ClassTablePage {
           this.loading = false;  // 有缓存立即显示课表
           this.mergeExperimentDataIntoGrid();
           this.buildCellCache();
-          this.loadExamDataInPlace(); // 也加载缓存的考试
+          this.saveClassGridSnapshot();
+          this.loadExamDataInPlace(); // 也加载缓存的考试（内部会再次 saveSnapshot）
           if (this._preloadWasRunning) {
             this.syncProgress = '正在同步最新数据...';
           }
@@ -605,6 +607,38 @@ export struct ClassTablePage {
     this.buildCellCache();
     this.diagTodayGrid(grid);
     this.computeCellStatuses();
+    this.saveClassGridSnapshot();
+  }
+
+  private saveClassGridSnapshot(): void {
+    const slim: object[][] = [];
+    for (let d = 0; d <= DAY_COUNT; d++) {
+      slim[d] = [];
+      for (let s = 0; s <= SECTION_COUNT; s++) {
+        const cells: ClassCell[] = this.classGrid[d]?.[s] ?? [];
+        const slimRow: object[] = [];
+        for (let i = 0; i < cells.length; i++) {
+          const c: ClassCell = cells[i];
+          const sc: Record<string, Object> = {};
+          sc['name'] = c.name;
+          sc['teacher'] = c.teacher ?? '';
+          sc['classroom'] = c.classroom ?? '';
+          sc['day'] = c.day;
+          sc['startSection'] = c.startSection;
+          sc['endSection'] = c.endSection;
+          sc['weekList'] = c.weekList;
+          sc['isExam'] = c.isExam;
+          sc['isExperiment'] = c.isExperiment;
+          sc['experimentProject'] = c.experimentProject ?? '';
+          sc['examDate'] = c.examDate ?? '';
+          sc['examTimeDesc'] = c.examTimeDesc ?? '';
+          sc['examSeat'] = c.examSeat ?? '';
+          slimRow.push(sc);
+        }
+        slim[d][s] = slimRow;
+      }
+    }
+    PreferenceUtil.putString('class_grid_snapshot', JSON.stringify(slim));
   }
 
   // 获取真实日历周次（不受用户滑动切换影响）
@@ -697,6 +731,7 @@ export struct ClassTablePage {
       }
       if (this.mergeExperimentData(grid)) {
         this.classGrid = grid;
+        this.saveClassGridSnapshot();
         return true;
       }
     } catch (_e) { /* ignore */ }
@@ -712,6 +747,8 @@ export struct ClassTablePage {
       if (items.length === 0) return 0;
       this.applyExamItems(items);
       this.buildCellCache();
+      this.saveClassGridSnapshot();
+      CalendarSyncService.autoSync(getContext(this) as common.UIAbilityContext);
       return items.length;
     } catch (e) {
       console.error('ClassTablePage', 'loadExamDataInPlace error: ' + JSON.stringify(e));
@@ -1502,8 +1539,6 @@ export struct ClassTablePage {
     Menu() {
       MenuItem({ content: '手动添加课程', startIcon: $r('app.media.ic_public_add_norm') })
         .onClick(() => { this.showAddCourseDialog = true; })
-      MenuItem({ content: this.calendarImporting ? '导入中...' : '导入系统日历', startIcon: $r('app.media.ic_public_calendar') })
-        .onClick(() => { this.showReminderDialog = true; })
       MenuItem({ content: '课程变更', startIcon: $r('app.media.ic_public_rotate') })
         .onClick(() => { this.loadClassChanges(); })
       MenuItem({ content: '未安排课程', startIcon: $r('app.media.ic_public_albums') })
@@ -2617,6 +2652,7 @@ export struct ClassTablePage {
         }
         if (merged > 0) {
           this.classGrid = grid;
+          this.saveClassGridSnapshot();
           console.info('ClassTablePage', 'mergePhysicsExperiments: merged ' + merged);
         }
       }

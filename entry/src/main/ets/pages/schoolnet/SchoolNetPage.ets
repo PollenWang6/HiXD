@@ -33,6 +33,12 @@ export struct SchoolNetPage {
 
   // Tab 切换
   @State currentTab: number = 0;
+  @State indicatorBase: number = 0;
+  @State indicatorSwipe: number = 0;
+  @State barW: number = 360;
+  private swiperCtrl: SwiperController = new SwiperController();
+  private swiperWidth: number = 360;
+  private perTabW: number = 180;
 
   // === 认证系统 Tab (w.xidian.edu.cn) ===
   @State authLoading: boolean = false;
@@ -592,50 +598,80 @@ export struct SchoolNetPage {
     }
   }
 
-  private swiperController: SwiperController = new SwiperController();
-
   build() {
     NavDestination() {
       Column() {
-        // Tab 栏
-        Row() {
-          Column() {
-            Text('认证系统').fontSize(14)
-              .fontColor(this.currentTab === 0 ? this.accentColor : ThemeColors.textSecondary)
-              .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-            if (this.currentTab === 0) {
-              Divider().strokeWidth(2).color(this.accentColor).width(24).margin({ top: 4 })
+        // Tab 栏（单条滑动指示器）
+        Stack({ alignContent: Alignment.BottomStart }) {
+          Row() {
+            Column() {
+              Text('认证系统').fontSize(15)
+                .fontColor(this.currentTab === 0 ? this.accentColor : ThemeColors.textSecondary)
+                .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
             }
-          }.layoutWeight(1).onClick(() => { this.currentTab = 0; this.swiperController.changeIndex(0); })
+            .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
+            .onClick(() => {
+              this.currentTab = 0;
+              animateTo({ duration: 400, curve: Curve.EaseInOut }, () => {
+                this.indicatorBase = 0;
+                this.indicatorSwipe = 0;
+              });
+              this.swiperCtrl.changeIndex(0, true);
+            })
 
-          Column() {
-            Text('自服务平台').fontSize(14)
-              .fontColor(this.currentTab === 1 ? this.accentColor : ThemeColors.textSecondary)
-              .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-            if (this.currentTab === 1) {
-              Divider().strokeWidth(2).color(this.accentColor).width(24).margin({ top: 4 })
+            Column() {
+              Text('自服务平台').fontSize(15)
+                .fontColor(this.currentTab === 1 ? this.accentColor : ThemeColors.textSecondary)
+                .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
             }
-          }.layoutWeight(1).onClick(() => { this.currentTab = 1; this.swiperController.changeIndex(1); })
-        }.width('100%').height(44).padding({ left: 16, right: 16 })
-          .border({ width: { bottom: 0.5 }, color: '#E0E0E0' })
+            .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
+            .onClick(() => {
+              this.currentTab = 1;
+              animateTo({ duration: 400, curve: Curve.EaseInOut }, () => {
+                this.indicatorBase = this.perTabW;
+                this.indicatorSwipe = 0;
+              });
+              this.swiperCtrl.changeIndex(1, true);
+              this.loadZfwIfNeeded();
+            })
+          }
+          .width('100%')
+          .onAreaChange((_old: Area, newArea: Area) => {
+            this.barW = newArea.width as number;
+            this.perTabW = this.barW / 2;
+          })
 
-        // Swiper 支持左右滑动切换
-        Swiper(this.swiperController) {
-          // Tab 0: 认证系统
-          Column() { this.AuthTab() }.width('100%').layoutWeight(1)
-          // Tab 1: 自服务平台
-          Column() { this.ZfwTab() }.width('100%').layoutWeight(1)
+          // 单条滑动指示器
+          Row()
+            .width(24).height(3)
+            .backgroundColor(this.accentColor).borderRadius(1.5)
+            .margin({ left: this.indicatorBase + this.indicatorSwipe - 12 + this.barW * 0.25 })
+        }
+        .width('100%').padding({ left: 16, right: 16 })
+        .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
+
+        // Swiper 内容区
+        Swiper(this.swiperCtrl) {
+          Column() { this.AuthTab() }.width('100%')
+          Column() { this.ZfwTab() }.width('100%')
         }
         .index(this.currentTab)
         .indicator(false)
         .loop(false)
-        .duration(250)
-        .curve(Curve.EaseInOut)
-        .onChange((index: number) => {
-          this.currentTab = index;
-          if (index === 1) {
-            this.loadZfwIfNeeded();
-          }
+        .onAreaChange((_old: Area, newArea: Area) => {
+          this.swiperWidth = newArea.width as number;
+        })
+        .onGestureSwipe((index: number, event: SwiperAnimationEvent) => {
+          const offset: number = event.currentOffset as number;
+          const ratio: number = Math.abs(offset) / this.swiperWidth;
+          const move: number = ratio >= 1 ? this.perTabW : this.perTabW * ratio;
+          this.indicatorSwipe = offset < 0 ? move : -move;
+        })
+        .onAnimationStart((_index: number, targetIndex: number, _event: SwiperAnimationEvent) => {
+          this.currentTab = targetIndex;
+          this.indicatorBase = targetIndex === 0 ? 0 : this.perTabW;
+          this.indicatorSwipe = 0;
+          if (targetIndex === 1) { this.loadZfwIfNeeded(); }
         })
         .layoutWeight(1)
 
