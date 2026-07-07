@@ -945,23 +945,6 @@ export class CasLoginService {
     return parts.join('&');
   }
 
-  // 解析 CAS continue 页面中的表单字段
-  private parseContinueForm(html: string): Record<string, string> {
-    const fields: Record<string, string> = {};
-    // 找 id="continue" 的 form 内的 input
-    const formMatch: RegExpMatchArray | null = html.match(/<form[^>]*id="continue"[^>]*>([\s\S]*?)<\/form>/);
-    if (!formMatch) {
-      return fields;
-    }
-    const formHtml: string = formMatch[1];
-    const inputRegex: RegExp = /<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/g;
-    let m: RegExpExecArray | null;
-    while ((m = inputRegex.exec(formHtml)) !== null) {
-      fields[m[1]] = m[2];
-    }
-    return fields;
-  }
-
   // Base64 → Uint8Array
   private base64ToUint8Array(base64: string): Uint8Array {
     const base64Helper: util.Base64Helper = new util.Base64Helper();

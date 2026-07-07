@@ -1,4 +1,4 @@
-// CalendarExportPage.ets
+﻿// CalendarExportPage.ets
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { SemesterUtil } from '../../services/EhallService';
@@ -39,6 +39,7 @@ const SC: number = 11;
 @Component
 export struct CalendarExportPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @Prop isTablet: boolean = false;
 
@@ -758,8 +759,8 @@ export struct CalendarExportPage {
           Blank().height(100)
         }.width(this.isTablet ? '60%' : '100%').alignSelf(ItemAlign.Center)
       }.width('100%').height('100%').layoutWeight(1).scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
-    }.title(this.titleBar(), { backgroundColor: this.accentColor })
-     .backgroundColor(ThemeColors.bgPage).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    }.title({ builder: this.titleBar(), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+     .backgroundColor(ThemeColors.bgPage).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
      .hideBackButton(true)
   }
 
@@ -769,9 +770,9 @@ export struct CalendarExportPage {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([Color.White])
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text('导入系统日历').fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White)
+      Text('导入系统日历').fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White)
         .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-    }.height(56).width('100%').padding({ left: 12, right: 12 })
+    }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })
   }
 
   @Builder

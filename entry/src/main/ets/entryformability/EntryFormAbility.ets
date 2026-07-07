@@ -53,6 +53,22 @@ class FormDataClass {
   tomorrowExamTimes: string[];
   tomorrowExamRooms: string[];
   tomorrowExamCount: number;
+  // 考试倒计时卡片专用字段
+  examCountdownLabel: string;    // "5天8小时" / "进行中" (4×2用)
+  examCountdownDays: string;     // "5天" (2×2分两行用)
+  examCountdownHours: string;    // "8小时" (2×2分两行用)
+  examCountdownName: string;     // 最近一场考试名
+  examCountdownWeekday: string;  // "周二"
+  examCountdownTime: string;     // "08:30"
+  examCountdownLocation: string; // "教三楼301 · 座位12"
+  examCountdownColor: string;    // "#FF9800"
+  examCountdownIsUrgent: boolean; // ≤3天
+  examCountdownIsOngoing: boolean;
+  upcoming72hCount: number;      // 未来72h还有几门
+  upcoming72hNames: string[];
+  upcoming72hWeekdays: string[];
+  upcoming72hTimes: string[];
+  upcoming72hLocations: string[];
   // 元数据
   weekNum: number;
   weekLabel: string;
@@ -87,6 +103,21 @@ class FormDataClass {
     this.tomorrowExamTimes = [];
     this.tomorrowExamRooms = [];
     this.tomorrowExamCount = 0;
+    this.examCountdownLabel = '';
+    this.examCountdownDays = '';
+    this.examCountdownHours = '';
+    this.examCountdownName = '';
+    this.examCountdownWeekday = '';
+    this.examCountdownTime = '';
+    this.examCountdownLocation = '';
+    this.examCountdownColor = '#FF9800';
+    this.examCountdownIsUrgent = false;
+    this.examCountdownIsOngoing = false;
+    this.upcoming72hCount = 0;
+    this.upcoming72hNames = [];
+    this.upcoming72hWeekdays = [];
+    this.upcoming72hTimes = [];
+    this.upcoming72hLocations = [];
     this.weekNum = 1;
     this.weekLabel = '';
     this.dateLabel = '';
@@ -255,6 +286,42 @@ function mergeCustomCourses(form: FormDataClass, context: common.Context): void 
 
     for (let i: number = 0; i < items.length; i++) {
       const item: Record<string, Object> = items[i] as Record<string, Object>;
+      const itType: number = (item['type'] as number) || 0;
+
+      // 自定义考试（type=1）：按日期匹配今天/明天，添加到考试列表
+      if (itType === 1) {
+        const examDate: string = String(item['examDate'] || '');
+        if (!examDate) { continue; }
+        const now2: Date = new Date();
+        const pad2 = (n: number): string => n < 10 ? '0' + n : String(n);
+        const todayStr: string = now2.getFullYear() + '-' + pad2(now2.getMonth() + 1) + '-' + pad2(now2.getDate());
+        const tm2: Date = new Date(now2.getTime() + 86400000);
+        const tomorrowStr: string = tm2.getFullYear() + '-' + pad2(tm2.getMonth() + 1) + '-' + pad2(tm2.getDate());
+        if (examDate !== todayStr && examDate !== tomorrowStr) { continue; }
+        const eName: string = String(item['name'] || '考试');
+        const eTime: string = String(item['examTimeStart'] || '') + (item['examTimeEnd'] ? '-' + String(item['examTimeEnd']) : '');
+        const eRoom: string = String(item['classroom'] || '');
+        const eSeat: string = String(item['examSeat'] || '');
+        if (examDate === todayStr) {
+          form.todayNames.push(eName);
+          form.todayTimes.push(eTime);
+          form.todayRooms.push(eRoom);
+          form.todayTeachers.push('');
+          form.todayStarts.push(0);
+          form.todayTypes.push('exam');
+          form.todaySeats.push(eSeat);
+        } else {
+          form.tomorrowNames.push(eName);
+          form.tomorrowTimes.push(eTime);
+          form.tomorrowRooms.push(eRoom);
+          form.tomorrowTeachers.push('');
+          form.tomorrowStarts.push(0);
+          form.tomorrowTypes.push('exam');
+          form.tomorrowSeats.push(eSeat);
+        }
+        continue;
+      }
+
       const weekList: number[] = item['weekList'] as number[] || [];
       let weekMatch: boolean = false;
       if (currentWeek > 0 && currentWeek <= weekList.length && weekList[currentWeek] === 1) {
@@ -276,18 +343,22 @@ function mergeCustomCourses(form: FormDataClass, context: common.Context): void 
         timeStr = SECTION_TIMES[startSec].split('-')[0] + '~' + SECTION_TIMES[endSec].split('-')[1];
       }
 
+      const typeLabel: string = itType === 2 ? 'exp' : 'custom';
+
       if (day === todayDay) {
         form.todayNames.push(name);
         form.todayTimes.push(timeStr);
         form.todayRooms.push(room);
         form.todayTeachers.push(customTeacher);
         form.todayStarts.push(startSec);
+        form.todayTypes.push(typeLabel);
       } else if (day === tomorrowDay) {
         form.tomorrowNames.push(name);
         form.tomorrowTimes.push(timeStr);
         form.tomorrowRooms.push(room);
         form.tomorrowTeachers.push(customTeacher);
         form.tomorrowStarts.push(startSec);
+        form.tomorrowTypes.push(typeLabel);
       }
     }
     hilog.info(DOMAIN, TAG, 'mergeCustomCourses done: today=' + form.todayNames.length + ' tomorrow=' + form.tomorrowNames.length);
@@ -464,6 +535,164 @@ function mergeExamPreview(form: FormDataClass, currentWeek: number, localDay: nu
     hilog.warn(DOMAIN, TAG, 'mergeExamPreview error: ' + JSON.stringify(e));
   }
 }
+
+// ── 考试倒计时卡片专用：读取所有考试(学校+自定义)，计算最近一场倒计时和未来72h列表 ──
+interface ExamEntryRaw {
+  name: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  seat: string;
+}
+
+function buildExamCountdownFields(form: FormDataClass, context: common.Context): void {
+  try {
+    const WEEKDAYS_CN: string[] = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const allExams: ExamEntryRaw[] = [];
+
+    // 1) 学校考试 (exam_schedule cache)
+    let cached: string = PreferenceUtil.readSharedFile('exam_schedule', context.filesDir);
+    if (cached.length === 0) {
+      cached = PreferenceUtil.getString('exam_schedule_cache');
+    }
+    if (cached.length > 0) {
+      const root: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
+      const ds: Record<string, Object> = root['datas'] as Record<string, Object>;
+      if (ds) {
+        const wdksap: Record<string, Object> = ds['wdksap'] as Record<string, Object>;
+        if (wdksap) {
+          const items: Object[] = wdksap['rows'] as Object[];
+          if (items) {
+            for (let i: number = 0; i < items.length; i++) {
+              const item: Record<string, Object> = items[i] as Record<string, Object>;
+              const ksrq: string = String(item['KSRQ'] || '').substring(0, 10);
+              const kssjms: string = String(item['KSSJMS'] || '');
+              if (!ksrq || !kssjms) { continue; }
+              // 解析时间段 "08:30~10:05" 或 "08:30-10:05"
+              let sep: number = kssjms.indexOf('~');
+              if (sep < 0) { sep = kssjms.indexOf('～'); }
+              if (sep < 0) { sep = kssjms.indexOf('-'); }
+              if (sep < 0) { continue; }
+              const timePart: string = kssjms.substring(sep - 5, sep + 6);
+              const startTime: string = timePart.substring(0, 5);
+              const endTime: string = timePart.substring(timePart.length - 5);
+              allExams.push({
+                name: String(item['KCM'] || item['KSMC'] || '考试'),
+                date: ksrq, startTime: startTime, endTime: endTime,
+                location: String(item['JASMC'] || ''),
+                seat: String(item['ZWH'] || '')
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // 2) 自定义考试 (_custom.json)
+    try {
+      const semCode: string = getSemesterCode();
+      const customPath: string = context.filesDir + '/class_table_' + semCode + '_custom.json';
+      const cf: fileIo.File = fileIo.openSync(customPath, fileIo.OpenMode.READ_ONLY);
+      const cs: fileIo.Stat = fileIo.statSync(customPath);
+      const buf: ArrayBuffer = new ArrayBuffer(cs.size);
+      fileIo.readSync(cf.fd, buf);
+      fileIo.closeSync(cf);
+      const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
+      const text: string = decoder.decodeToString(new Uint8Array(buf));
+      const customItems: Object[] = JSON.parse(text) as Object[];
+      for (let ci: number = 0; ci < customItems.length; ci++) {
+        const citem: Record<string, Object> = customItems[ci] as Record<string, Object>;
+        if ((citem['type'] as number) !== 1) { continue; }
+        const edate: string = String(citem['examDate'] || '');
+        if (!edate) { continue; }
+        allExams.push({
+          name: String(citem['name'] || ''),
+          date: edate,
+          startTime: String(citem['examTimeStart'] || ''),
+          endTime: String(citem['examTimeEnd'] || ''),
+          location: String(citem['classroom'] || ''),
+          seat: String(citem['examSeat'] || '')
+        });
+      }
+    } catch (_) {
+      // 无自定义课程，忽略
+    }
+
+    if (allExams.length === 0) { return; }
+
+    // 按日期+开始时间排序
+    allExams.sort((a: ExamEntryRaw, b: ExamEntryRaw): number =>
+      (a.date + ' ' + a.startTime).localeCompare(b.date + ' ' + b.startTime));
+
+    const nowTs: number = Date.now();
+
+    // 找最近一场未结束的考试
+    let nearest: ExamEntryRaw | null = null;
+    for (let i: number = 0; i < allExams.length; i++) {
+      const examEndTs: number = new Date(allExams[i].date + 'T' + allExams[i].endTime + ':00').getTime();
+      if (examEndTs > nowTs) {
+        nearest = allExams[i];
+        break;
+      }
+    }
+    if (!nearest) { return; } // 全部已结束
+
+    const examStartTs: number = new Date(nearest.date + 'T' + nearest.startTime + ':00').getTime();
+    const examEndTs: number = new Date(nearest.date + 'T' + nearest.endTime + ':00').getTime();
+
+    if (nowTs >= examStartTs && nowTs <= examEndTs) {
+      form.examCountdownLabel = '进行中';
+      form.examCountdownDays = '进行';
+      form.examCountdownHours = '中';
+      form.examCountdownIsOngoing = true;
+      form.examCountdownIsUrgent = false;
+      form.examCountdownColor = '#4CAF50';
+    } else {
+      const diffMs: number = examStartTs - nowTs;
+      const diffHours: number = Math.floor(diffMs / 3600000);
+      const diffDays: number = Math.floor(diffHours / 24);
+      const remainHours: number = diffHours % 24;
+      form.examCountdownLabel = diffDays + '天' + remainHours + '小时';
+      form.examCountdownDays = diffDays + '天';
+      form.examCountdownHours = remainHours + '小时';
+      form.examCountdownIsUrgent = diffHours <= 72;
+      form.examCountdownIsOngoing = false;
+      form.examCountdownColor = form.examCountdownIsUrgent ? '#FF5252' : '#FF9800';
+    }
+
+    form.examCountdownName = nearest.name;
+    const examDateObj: Date = new Date(nearest.date + 'T00:00:00');
+    form.examCountdownWeekday = WEEKDAYS_CN[examDateObj.getDay()];
+    form.examCountdownTime = nearest.startTime;
+    if (nearest.location.length > 0) {
+      form.examCountdownLocation = nearest.location;
+      if (nearest.seat.length > 0) {
+        form.examCountdownLocation += ' · 座位' + nearest.seat;
+      }
+    }
+
+    // 未来72h的其他考试
+    const cutoff72h: number = nowTs + 72 * 3600000;
+    for (let i: number = 0; i < allExams.length; i++) {
+      if (allExams[i] === nearest) { continue; }
+      const examStart: number = new Date(allExams[i].date + 'T' + allExams[i].startTime + ':00').getTime();
+      if (examStart > nowTs && examStart <= cutoff72h) {
+        form.upcoming72hCount++;
+        form.upcoming72hNames.push(allExams[i].name);
+        const ed: Date = new Date(allExams[i].date + 'T00:00:00');
+        form.upcoming72hWeekdays.push(WEEKDAYS_CN[ed.getDay()]);
+        form.upcoming72hTimes.push(allExams[i].startTime);
+        let loc: string = allExams[i].location || '';
+        if (allExams[i].seat.length > 0 && loc.length > 0) { loc += ' · 座位' + allExams[i].seat; }
+        form.upcoming72hLocations.push(loc);
+      }
+    }
+  } catch (e) {
+    hilog.warn(DOMAIN, TAG, 'buildExamCountdownFields error: ' + JSON.stringify(e));
+  }
+}
+
 function getSemesterStartDate(): Date {
   const now: Date = new Date();
   return new Date(2026, 2, 2);
@@ -510,6 +739,7 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
 
   // ── 加载考试数据 ──
   mergeExamPreview(form, currentWeek, localDay, context);
+  buildExamCountdownFields(form, context);
 
   if (!cache || cache.length === 0) {
     form.todayCount = form.todayNames.length;
@@ -649,8 +879,13 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
 export default class EntryFormAbility extends FormExtensionAbility {
   onAddForm(want: Want) {
     hilog.info(DOMAIN, TAG, 'onAddForm');
+    const formId: string = want.parameters?.['ohos.extra.param.key.form_identity'] as string || '';
     const cache: string | null = readClassCache(this.context);
-    return formBindingData.createFormBindingData(buildFormData(cache, false, this.context));
+    const data: FormDataClass = buildFormData(cache, false, this.context);
+    if (formId.length > 0) {
+      formProvider.setFormNextRefreshTime(formId, 5).catch((_: Error) => {});
+    }
+    return formBindingData.createFormBindingData(data);
   }
 
   onUpdateForm(formId: string): void {
@@ -658,26 +893,39 @@ export default class EntryFormAbility extends FormExtensionAbility {
     const cache: string | null = readClassCache(this.context);
     const data: FormDataClass = buildFormData(cache, showTomorrowFlag, this.context);
     formProvider.updateForm(formId, formBindingData.createFormBindingData(data))
-      .then(() => { hilog.info(DOMAIN, TAG, 'updateForm success'); })
+      .then(() => {
+        hilog.info(DOMAIN, TAG, 'updateForm success');
+        formProvider.setFormNextRefreshTime(formId, 5).catch((_: Error) => {});
+      })
       .catch((err: Error) => { hilog.error(DOMAIN, TAG, 'updateForm failed: ' + JSON.stringify(err)); });
   }
 
   onFormEvent(formId: string, message: string): void {
     hilog.info(DOMAIN, TAG, 'onFormEvent formId=' + formId + ' msg=' + message);
-    let msgObj: Record<string, string> | null = null;
+    // 解析卡片交互消息：箭头点击发 { msgTest: 'toggle' }，需翻转 showTomorrowFlag 后重建
     try {
-      msgObj = JSON.parse(message) as Record<string, string>;
-    } catch (_) {
-      // not JSON
-    }
-    if (msgObj && msgObj['msgTest'] === 'toggle') {
-      showTomorrowFlag = !showTomorrowFlag;
-      hilog.info(DOMAIN, TAG, 'toggle showTomorrow=' + showTomorrowFlag);
+      const parsed: object = JSON.parse(message) as object;
+      const rec: Record<string, Object> = parsed as Record<string, Object>;
+      let action: string = '';
+      if (typeof rec['msgTest'] === 'string') {
+        action = rec['msgTest'] as string;
+      } else if (rec['params'] !== undefined &&
+        typeof (rec['params'] as Record<string, Object>)['msgTest'] === 'string') {
+        action = (rec['params'] as Record<string, Object>)['msgTest'] as string;
+      }
+      if (action === 'toggle') {
+        showTomorrowFlag = !showTomorrowFlag;
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'onFormEvent parse message failed: ' + (e as Error).message);
     }
     const cache: string | null = readClassCache(this.context);
     const data: FormDataClass = buildFormData(cache, showTomorrowFlag, this.context);
     formProvider.updateForm(formId, formBindingData.createFormBindingData(data))
-      .then(() => { hilog.info(DOMAIN, TAG, 'formEvent update success'); })
+      .then(() => {
+        hilog.info(DOMAIN, TAG, 'formEvent update success');
+        formProvider.setFormNextRefreshTime(formId, 5).catch((_: Error) => {});
+      })
       .catch((err: Error) => { hilog.error(DOMAIN, TAG, 'formEvent update failed: ' + JSON.stringify(err)); });
   }
 

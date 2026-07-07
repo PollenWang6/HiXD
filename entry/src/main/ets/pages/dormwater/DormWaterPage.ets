@@ -10,6 +10,7 @@ import { promptAction } from '@kit.ArkUI';
 export struct DormWaterPage {
   pageInfo: NavPathStack = new NavPathStack();
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   // 登录态
@@ -32,6 +33,7 @@ export struct DormWaterPage {
   @State runningDeviceId: string = '';
   @State runningMsg: string = '';
   private statusTimer: number = -1;
+  private smsTimer: number = -1;
 
   // 手动添加弹窗
   @State showManualAdd: boolean = false;
@@ -50,14 +52,14 @@ export struct DormWaterPage {
       .height(40).width(40)
       .onClick(() => { this.pageInfo.pop(); })
       Text(t)
-        .fontSize(20)
+        .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .height(52 + this.statusBarHeight)
+    .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
 
@@ -75,6 +77,7 @@ export struct DormWaterPage {
 
   aboutToDisappear(): void {
     this.clearStatusTimer();
+    if (this.smsTimer >= 0) { clearInterval(this.smsTimer); this.smsTimer = -1; }
   }
 
   private clearStatusTimer(): void {
@@ -187,9 +190,9 @@ export struct DormWaterPage {
       await this.svc.sendSmsCode(this.phone, this.imageCode);
       this.loginMsg = '短信已发送';
       this.smsCountdown = 60;
-      const timer = setInterval(() => {
+      this.smsTimer = setInterval(() => {
         this.smsCountdown--;
-        if (this.smsCountdown <= 0) clearInterval(timer);
+        if (this.smsCountdown <= 0) { clearInterval(this.smsTimer); this.smsTimer = -1; }
       }, 1000);
     } catch (e) {
       this.loginMsg = (e as Error).message;
@@ -309,8 +312,8 @@ export struct DormWaterPage {
         }
       }
     }
-    .title({ builder: this.buildWhiteTitle('宿舍水机'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('宿舍水机'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .onBackPressed(() => { this.pageInfo.pop(); return true; })
     .backgroundColor(ThemeColors.bgPage)
   }

@@ -4,7 +4,7 @@ import { CacheService } from './CacheService';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { EmptyClassroomItem, BuildingInfo, BuildingRow, EmptyClassroomRow,
          EHALL_APP_EMPTY_CLASSROOM } from './Models';
-import { EHALL_HEADERS, findAppIdByPath, extractRaw } from './EhallConstants';
+import { EHALL_HEADERS, extractRaw, sharedAppPost, AppPostContext } from './EhallConstants';
 import { SemesterUtil } from './EhallService';
 
 const TAG = 'EmptyClassroomService';
@@ -28,7 +28,7 @@ export class EmptyClassroomService {
 
   static extractRaw(body: string): object[] { return extractRaw(body, TAG); }
 
-  private async activateAppSession(appId: string): Promise<void> {
+  private async activateAppSession(appId: string, _force: boolean = false): Promise<void> {
     if (this.appSessionUrl[appId]) {
       console.info(TAG, 'activateAppSession: using cached for ' + appId);
       return;
@@ -90,40 +90,15 @@ export class EmptyClassroomService {
       ' hasJSESSIONID=' + hasJsession);
   }
 
+  private readonly _appCtx: AppPostContext = new AppPostContext(
+    this.http,
+    (appId: string, force: boolean = false) => this.activateAppSession(appId, force),
+    this.appSessionUrl,
+    TAG
+  );
+
   private async appPost(path: string, body: Record<string, string>): Promise<HttpResponse> {
-    const url = 'https://ehall.xidian.edu.cn' + path;
-    const cookies = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
-    const hasCas: boolean = cookies.indexOf('MOD_AUTH_CAS') >= 0;
-    const hasJsession: boolean = cookies.toLowerCase().indexOf('jsessionid') >= 0;
-    console.info(TAG, `appPost: url=${path} hasMOD_AUTH=${hasCas} hasJSESSIONID=${hasJsession} cookieLen=${cookies.length}`);
-    let resp = await this.http.postForm(url, body, EHALL_HEADERS);
-    console.info(TAG, 'appPost: resp status=' + resp.statusCode);
-
-    if (resp.isRedirect && resp.location && resp.location.includes('login')) {
-      console.warn(TAG, 'appPost: session expired, redirecting to login');
-      this.appSessionUrl = {};
-      const appId = findAppIdByPath(path);
-      if (appId) {
-        console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
-        await this.activateAppSession(appId);
-        resp = await this.http.postForm(url, body, EHALL_HEADERS);
-        console.info(TAG, 'appPost: retry resp=' + resp.statusCode);
-      }
-    }
-
-    if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
-      console.warn(TAG, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
-      this.appSessionUrl = {};
-      const appId = findAppIdByPath(path);
-      if (appId) {
-        console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
-        await this.activateAppSession(appId);
-        resp = await this.http.postForm(url, body, EHALL_HEADERS);
-        console.info(TAG, 'appPost: retry resp=' + resp.statusCode);
-      }
-    }
-
-    return resp;
+    return sharedAppPost(this._appCtx, path, body);
   }
 
   async getEmptyClassroomBuildings(): Promise<BuildingInfo[]> {

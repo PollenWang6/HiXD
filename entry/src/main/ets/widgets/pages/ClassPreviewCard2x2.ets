@@ -47,12 +47,23 @@ struct ClassPreviewCard2x2 {
   private curSeats(): string[] { return this.showTomorrow ? this.tomorrowSeats : this.todaySeats; }
   private curCount(): number { return this.showTomorrow ? this.tomorrowCount : this.todayCount; }
   private isExamIdx(idx: number): boolean { return idx < this.curTypes().length && this.curTypes()[idx] === 'exam'; }
+  private isExpIdx(idx: number): boolean { return idx < this.curTypes().length && this.curTypes()[idx] === 'exp'; }
+  private typeLabel(idx: number): string {
+    if (this.isExamIdx(idx)) { return '考试'; }
+    if (this.isExpIdx(idx)) { return '实验'; }
+    return '课程';
+  }
+  private typeColor(idx: number): string {
+    if (this.isExamIdx(idx)) { return '#FF9800'; }
+    if (this.isExpIdx(idx)) { return '#66BB6A'; }
+    return '#42A5F5';
+  }
   private timeAt(idx: number): string { return idx < this.curTimes().length ? this.curTimes()[idx] : ''; }
   private roomAt(idx: number): string { return idx < this.curRooms().length ? this.curRooms()[idx] : ''; }
   private teacherAt(idx: number): string { return idx < this.curTeachers().length ? this.curTeachers()[idx] : ''; }
   private seatAt(idx: number): string { return idx < this.curSeats().length ? this.curSeats()[idx] : ''; }
   @State refreshSpin: number = 0;
-  private colorAt(idx: number): string { return this.isExamIdx(idx) ? '#FF9800' : COLORS_2X2[idx % COLORS_2X2.length]; }
+  private colorAt(idx: number): string { return this.typeColor(idx); }
 
   @Builder
   Row2x2(color: string, name: string, sub1: string, sub2: string, time: string) {
@@ -63,7 +74,7 @@ struct ClassPreviewCard2x2 {
           Text(name).fontSize(11).fontWeight(FontWeight.Bold).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             .constraintSize({ maxWidth: '60%' })
           Text(' ' + sub1 + ' ').fontSize(7).fontColor('#FFFFFF')
-            .backgroundColor(sub1 === '考试' ? '#FF9800' : '#42A5F5')
+            .backgroundColor(color)
             .borderRadius(3).height(12).flexShrink(0)
         }.layoutWeight(1).margin({ left: 5 })
         if (time.length > 0) { Text(time).fontSize(9).fontColor('#42A5F5').flexShrink(0) }
@@ -122,7 +133,7 @@ struct ClassPreviewCard2x2 {
             Column() {
               ForEach(this.curNames(), (name: string, idx: number) => {
                 this.Row2x2(this.colorAt(idx), name,
-                  this.isExamIdx(idx) ? '考试' : '课程',
+                  this.typeLabel(idx),
                   this.isExamIdx(idx) ? (this.roomAt(idx) + (this.seatAt(idx).length > 0 ? ' · 座' + this.seatAt(idx) : ''))
                     : (this.teacherAt(idx) + (this.roomAt(idx).length > 0 ? ' · ' + this.roomAt(idx) : '')).replace(/^·\s*/, '').replace(/\s*·$/, ''),
                   this.timeAt(idx))

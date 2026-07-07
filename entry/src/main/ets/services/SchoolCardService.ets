@@ -1,7 +1,6 @@
-// SchoolCardService.ets — 校园卡（一卡通）数据服务
+﻿// SchoolCardService.ets — 校园卡（一卡通）数据服务
 // 数据源: v8scan.xidian.edu.cn，认证走 IDS OAuth2（同ehall CAS）
 import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
-import { PreferenceUtil } from '../utils/PreferenceUtil';
 
 const TAG = 'SchoolCardService';
 const BASE_URL = 'https://v8scan.xidian.edu.cn';

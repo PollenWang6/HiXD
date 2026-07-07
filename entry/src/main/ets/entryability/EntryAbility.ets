@@ -36,6 +36,14 @@ export default class EntryAbility extends UIAbility {
     const sysDark = (sysColorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     AppStorage.setOrCreate('theme_is_dark', sysDark);
 
+    // 开全屏消除底部白杠；获取安全区高度供手动避让
+    const win = windowStage.getMainWindowSync();
+    win.setWindowLayoutFullScreen(true);
+    const sysAvoid = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+    AppStorage.setOrCreate('statusBarHeight', px2vp(sysAvoid.topRect.height));
+    const navAvoid = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+    AppStorage.setOrCreate('navIndicatorHeight', px2vp(navAvoid.bottomRect.height));
+
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         console.error('EntryAbility', 'Failed to load content: ' + JSON.stringify(err));

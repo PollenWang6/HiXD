@@ -47,13 +47,26 @@ struct ClassPreviewCard4x2 {
   private curSeats(): string[] { return this.showTomorrow ? this.tomorrowSeats : this.todaySeats; }
   private curCount(): number { return this.showTomorrow ? this.tomorrowCount : this.todayCount; }
   private isExamIdx(idx: number): boolean { return idx < this.curTypes().length && this.curTypes()[idx] === 'exam'; }
+  private isExpIdx(idx: number): boolean { return idx < this.curTypes().length && this.curTypes()[idx] === 'exp'; }
+  private typeLabel(idx: number): string {
+    if (this.isExamIdx(idx)) { return '考试'; }
+    if (this.isExpIdx(idx)) { return '实验'; }
+    return '课程';
+  }
+  private typeColor(idx: number): string {
+    if (this.isExamIdx(idx)) { return '#FF9800'; }
+    if (this.isExpIdx(idx)) { return '#66BB6A'; }
+    return '#42A5F5';
+  }
   private timeAt(idx: number): string { return idx < this.curTimes().length ? this.curTimes()[idx] : ''; }
   private roomAt(idx: number): string { return idx < this.curRooms().length ? this.curRooms()[idx] : ''; }
   private teacherAt(idx: number): string { return idx < this.curTeachers().length ? this.curTeachers()[idx] : ''; }
   private seatAt(idx: number): string { return idx < this.curSeats().length ? this.curSeats()[idx] : ''; }
   @State refreshSpin: number = 0;
   private colorAt(idx: number): string {
-    return this.isExamIdx(idx) ? '#FF9800' : COLORS_4X2[idx % COLORS_4X2.length];
+    if (this.isExamIdx(idx)) { return '#FF9800'; }
+    if (this.isExpIdx(idx)) { return '#66BB6A'; }
+    return COLORS_4X2[idx % COLORS_4X2.length];
   }
   private subText(idx: number): string {
     if (this.isExamIdx(idx)) { return this.roomAt(idx) + (this.seatAt(idx).length > 0 ? ' · 座位' + this.seatAt(idx) : ''); }
@@ -127,8 +140,8 @@ struct ClassPreviewCard4x2 {
           ListItem() {
             Column() {
               ForEach(this.curNames(), (name: string, idx: number) => {
-                this.ItemRow(this.colorAt(idx), name, this.isExamIdx(idx) ? '考试' : '课程',
-                  this.isExamIdx(idx) ? '#FF9800' : '#42A5F5', this.subText(idx), this.timeAt(idx))
+                this.ItemRow(this.colorAt(idx), name, this.typeLabel(idx),
+                  this.typeColor(idx), this.subText(idx), this.timeAt(idx))
                 if (idx < this.curCount() - 1) { Divider().width('94%') }
               }, (name: string, idx: number): string => name + '4x' + idx)
             }

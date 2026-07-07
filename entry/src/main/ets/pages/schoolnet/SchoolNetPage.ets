@@ -1,4 +1,4 @@
-// SchoolNetPage.ets — 校园网页面（流量概览 + 在线设备 + ZFW详细账单）
+﻿// SchoolNetPage.ets — 校园网页面（流量概览 + 在线设备 + ZFW详细账单）
 // 对齐 Flutter: NetworkCardWindow (两个Tab: 自服务平台 + 认证系统)
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
@@ -8,6 +8,7 @@ import { SchoolnetService, ZfwIpEntry, ZfwUsageData } from '../../services/Schoo
 export struct SchoolNetPage {
   pageInfo: NavPathStack = new NavPathStack();
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   @Builder buildWhiteTitle(t: string) {
@@ -21,14 +22,14 @@ export struct SchoolNetPage {
       .height(40).width(40)
       .onClick(() => { this.pageInfo.pop(); })
       Text(t)
-        .fontSize(20)
+        .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .height(52 + this.statusBarHeight)
+    .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
   // Tab 切换
@@ -725,8 +726,8 @@ export struct SchoolNetPage {
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
     }
-    .title({ builder: this.buildWhiteTitle('校园网'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('校园网'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
   }
 }

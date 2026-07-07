@@ -1,4 +1,4 @@
-// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
+﻿// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
 import { ThemeColors } from '../../utils/ThemeColors';
 import { webview } from '@kit.ArkWeb';
 import web_webview from '@ohos.web.webview';
@@ -76,6 +76,7 @@ function base64Encode(u8: Uint8Array): string {
 @Component
 export struct ElectricityPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @State isLoading: boolean = true;
   @State loadError: string = '';
@@ -479,9 +480,9 @@ export struct ElectricityPage {
         Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
       }
       .height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text(t).fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+      Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
     }
-    .width('100%').height(56).padding({ left: 12, right: 16 })
+    .width('100%').height(52 + this.statusBarHeight).padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
   @Builder
@@ -750,8 +751,8 @@ export struct ElectricityPage {
       }
       .width('100%').height('100%')
     }
-    .title({ builder: this.buildWhiteTitle('水电查询'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('水电查询'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .onBackPressed(() => { return false; })
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {})

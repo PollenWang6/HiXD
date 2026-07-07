@@ -1,10 +1,10 @@
-// ScoreService.ets — 成绩数据服务
+﻿// ScoreService.ets — 成绩数据服务
 import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { CacheService } from './CacheService';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { CasLoginService } from './CasLoginService';
-import { ScoreItemModel, ScoreRow, ComposeDetail, EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE, EHALL_APP_EMPTY_CLASSROOM } from './Models';
-import { EHALL_HEADERS, APP_PATH_MAP, findAppIdByPath, extractRaw } from './EhallConstants';
+import { ScoreItemModel, ScoreRow, ComposeDetail, EHALL_APP_SCORE } from './Models';
+import { EHALL_HEADERS, APP_PATH_MAP, extractRaw, sharedAppPost, AppPostContext } from './EhallConstants';
 
 const TAG = 'ScoreService';
 
@@ -88,48 +88,17 @@ export class ScoreService {
       ' hasJSESSIONID=' + hasJsession);
   }
 
-  /**
-   * 业务 POST 请求
-   */
+  private readonly _appCtx: AppPostContext = new AppPostContext(
+    this.http,
+    (appId: string, force: boolean = false) => this.activateAppSession(appId, force),
+    this.appSessionUrl,
+    TAG
+  );
+
   private async appPost(path: string, body: Record<string, string>): Promise<HttpResponse> {
-    const url = 'https://ehall.xidian.edu.cn' + path;
-    const cookies = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
-    const hasCas: boolean = cookies.indexOf('MOD_AUTH_CAS') >= 0;
-    const hasJsession: boolean = cookies.toLowerCase().indexOf('jsessionid') >= 0;
-    console.info(TAG, `appPost: url=${path} hasMOD_AUTH=${hasCas} hasJSESSIONID=${hasJsession} cookieLen=${cookies.length}`);
-    let resp = await this.http.postForm(url, body, EHALL_HEADERS);
-    console.info(TAG, 'appPost: resp status=' + resp.statusCode);
-
-    if (resp.isRedirect && resp.location && resp.location.includes('login')) {
-      console.warn(TAG, 'appPost: session expired, redirecting to login');
-      this.appSessionUrl = {};
-      const appId = findAppIdByPath(path);
-      if (appId) {
-        console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
-        await this.activateAppSession(appId, true);
-        resp = await this.http.postForm(url, body, EHALL_HEADERS);
-        console.info(TAG, 'appPost: retry resp=' + resp.statusCode);
-      }
-    }
-
-    if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
-      console.warn(TAG, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
-      this.appSessionUrl = {};
-      const appId = findAppIdByPath(path);
-      if (appId) {
-        console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
-        await this.activateAppSession(appId, true);
-        resp = await this.http.postForm(url, body, EHALL_HEADERS);
-        console.info(TAG, 'appPost: retry resp=' + resp.statusCode);
-      }
-    }
-
-    return resp;
+    return sharedAppPost(this._appCtx, path, body);
   }
 
-  /**
-   * 根据 API 路径反查 appId
-   */
   static extractRaw(body: string): object[] { return extractRaw(body, TAG); }
 
   async getScores(sid: string): Promise<string> {

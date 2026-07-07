@@ -2,7 +2,6 @@
 import { AttendanceService } from '../../services/AttendanceService';
 import { ClassAttendance, ClassAttendanceDetail, AttendanceStatus } from '../../services/AttendanceModels';
 import { ThemeColors } from '../../utils/ThemeColors';
-import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { SemesterUtil } from '../../services/EhallService';
@@ -10,6 +9,7 @@ import { SemesterUtil } from '../../services/EhallService';
 @Component
 export struct AttendancePage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
@@ -41,14 +41,14 @@ export struct AttendancePage {
       .height(40).width(40)
       .onClick(() => { this.pageInfo.pop(); })
       Text(t)
-        .fontSize(20)
+        .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .height(52 + this.statusBarHeight)
+    .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
 
@@ -440,8 +440,8 @@ export struct AttendancePage {
         }
       }
     }
-    .title({ builder: this.buildWhiteTitle('考勤查询'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('考勤查询'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     
     .backgroundColor(ThemeColors.bgPage)
     .onBackPressed(() => {

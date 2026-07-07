@@ -1,4 +1,4 @@
-// SportPage.ets — 体育信息页面（体测成绩 + 课程信息）
+﻿// SportPage.ets — 体育信息页面（体测成绩 + 课程信息）
 // 从 Flutter 版 sport_window.dart / sport_score_window.dart / sport_class_window.dart 移植
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
@@ -10,6 +10,7 @@ const WEEKDAY_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五
 export struct SportPage {
   pageInfo: NavPathStack = new NavPathStack();
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   @State currentTab: number = 0;
@@ -52,14 +53,14 @@ export struct SportPage {
       .height(40).width(40)
       .onClick(() => { this.pageInfo.pop(); })
       Text(t)
-        .fontSize(20)
+        .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .height(52 + this.statusBarHeight)
+    .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
   aboutToAppear(): void {
@@ -114,10 +115,6 @@ export struct SportPage {
 
   private isQualified(rank: string): boolean {
     return rank.indexOf('不') < 0;
-  }
-
-  private isFourYearsComplete(list: SportScoreOfYear[]): boolean {
-    return list.length >= 4;
   }
 
   private unitToShow(evalStr: string): string {

@@ -1,9 +1,7 @@
 ﻿// ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ThemeColors } from '../../utils/ThemeColors';
-import { ExperimentData, ExperimentType, TimeRange } from '../../services/Models';
-import { ExperimentService } from '../../services/ExperimentService';
-import { SemesterUtil, EhallService } from '../../services/EhallService';
+import { SemesterUtil } from '../../services/EhallService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import router from '@ohos.router';
 
@@ -37,6 +35,7 @@ function getWeekdayName(w: number): string { let i=w-1; return (i>=0&&i<7)?WEEKD
 @Component
 export struct ExperimentPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @State pageState: PageState = PageState.IDLE;
   @State statusText: string = '';
@@ -58,14 +57,14 @@ export struct ExperimentPage {
       .height(40).width(40)
       .onClick(() => { this.pageInfo.pop(); })
       Text(t)
-        .fontSize(20)
+        .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .height(52 + this.statusBarHeight)
+    .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
   async aboutToAppear(): Promise<void> {
@@ -490,8 +489,8 @@ export struct ExperimentPage {
           }
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
-    }.title({ builder: this.buildWhiteTitle('\u5b9e\u9a8c\u4fe1\u606f'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    }.title({ builder: this.buildWhiteTitle('\u5b9e\u9a8c\u4fe1\u606f'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     
     .backgroundColor(ThemeColors.bgPage)
   }

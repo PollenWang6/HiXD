@@ -146,7 +146,7 @@ struct MainPage {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.bgOpacity = 0; this.bgTranslate = 30; });
     setTimeout(() => { this.showBgDialog = false; }, 200);
   }
-  // 选择背景图片
+  // 选择背景图片 → 跳转裁剪页
   selectBgImage(): void {
     try {
       const photoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
@@ -155,12 +155,10 @@ struct MainPage {
       const photoPicker = new photoAccessHelper.PhotoViewPicker();
       photoPicker.select(photoSelectOptions).then((result: photoAccessHelper.PhotoSelectResult) => {
         if (result.photoUris.length > 0 && result.photoUris[0] !== undefined) {
-          this.bgPath = result.photoUris[0];
-          // 提取真实路径，保存时用于复制文件
-          this.bgOriPath = new fileUri.FileUri(this.bgPath).path;
-          if (!this.bgShow) {
-            this.bgShow = true;
-          }
+          const selectedUri = result.photoUris[0];
+          const path = new fileUri.FileUri(selectedUri).path;
+          // 跳转到裁剪页面
+          router.pushUrl({ url: 'pages/ImageCropPage', params: { path: path } });
         }
       }).catch((err: BusinessError) => {
         console.error(TAG, 'PhotoViewPicker failed: ' + JSON.stringify(err));
@@ -173,15 +171,12 @@ struct MainPage {
   async saveBgSettings(): Promise<void> {
     try {
       if (this.bgShow && this.bgOriPath.length > 0) {
-        // 新选择了图片：复制到应用沙箱
-        const destPath: string = this.context.filesDir + '/class_bg_image';
-        try { await fileIo.copyFile(this.bgOriPath, destPath); } catch (_) { console.warn("MainPage", "copy bg file failed"); }
-        await PreferenceUtil.putString('class_bg_path', destPath);
+        // 裁剪后的图片已在沙箱，直接存路径
+        await PreferenceUtil.putString('class_bg_path', this.bgOriPath);
       } else if (!this.bgShow) {
         // 关闭自定义背景
         await PreferenceUtil.putString('class_bg_path', '');
       }
-      // 如果 bgShow 为 true 但未新选图片，保留已有路径不变
       await PreferenceUtil.putBool('class_bg_show', this.bgShow);
       await PreferenceUtil.putNumber('class_bg_opacity', this.bgOpacityVal);
     } catch (_) { console.warn("MainPage", "ignored error"); }
@@ -314,6 +309,8 @@ struct MainPage {
   @State bgOriPath: string = '';    // 原始文件路径
   @State bgOpacityVal: number = 60; // 不透明度，存储为整数（60=60%）
   @StorageProp('currentColorMode') @Watch('onColorModeChange') systemColorMode: number = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('navIndicatorHeight') navIndicatorHeight: number = 0;
   @State currentThemeLabel: string = '当前：浅色模式';
   // ==================== xgxt 隐藏 WebView（个人信息抓取 + 超星头像） ====================
   @State xgxtActive: boolean = false;
@@ -557,6 +554,14 @@ struct MainPage {
       this.refreshSessionIfNeeded();
     }
     this.tryRefreshPreview();
+    // 检查裁剪页面返回的图片
+    const croppedPath: string = AppStorage.get<string>('cropped_bg_path') ?? '';
+    if (croppedPath.length > 0) {
+      this.bgPath = fileUri.getUriFromPath(croppedPath) + '?t=' + Date.now();
+      this.bgOriPath = croppedPath;
+      this.bgShow = true;
+      AppStorage.set<string>('cropped_bg_path', '');
+    }
   }
 
   // 每次 build 时检查课表是否更新（直接读 AppStorage，避免 @StorageLink 在隐藏 Tab 不更新）
@@ -1876,8 +1881,9 @@ struct MainPage {
         .barOverlap(true)
         .barBackgroundBlurStyle(BlurStyle.Thin)
         .barFloatingStyle({
+          barBottomMargin: this.navIndicatorHeight,
           systemMaterialEffect: {
-            materialType: hdsMaterial.MaterialType.IMMERSIVE,
+            materialType: hdsMaterial.MaterialType.ADAPTIVE,
             materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
           }
         })
@@ -1893,18 +1899,24 @@ struct MainPage {
           TabContent() {
             this.HomeTab()
           }.tabBar(this.TabBuilder(0, '🏠', '主页'))
+            .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
           TabContent() {
             this.PortalTab()
           }.tabBar(this.TabBuilder(1, '🔧', '更多功能'))
+            .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
           TabContent() {
             this.MyTab()
           }.tabBar(this.TabBuilder(2, '👤', '我的'))
+            .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         }
         .scrollable(false)
         .barMode(BarMode.Fixed)
         .barBackgroundColor('#FFFFFF')
+        .barOverlap(true)
+        .barFloatingStyle({ barBottomMargin: this.navIndicatorHeight })
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onChange((index: number) => {
           this.currentIndex = index;
           if (index === 0) { this.loadClassPreview(); }
@@ -2427,7 +2439,7 @@ struct MainPage {
         Stack({ alignContent: Alignment.Center }) {
           Image(this.bgPath.length > 0 ? this.bgPath : $r('app.media.background'))
             .width('100%')
-            .aspectRatio(4 / 3)
+            .aspectRatio(this.isTablet ? 4 / 3 : 3 / 4)
             .constraintSize({ maxHeight: 300 })
             .objectFit(ImageFit.Cover)
             .borderRadius(10)
@@ -2625,6 +2637,7 @@ struct MainPage {
     }
     } // closes Stack
     .width('100%').height('100%')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   // 根据主题色亮度选择白色或黑色文字
@@ -2845,9 +2858,8 @@ struct MainPage {
         .margin({ top: 2 })
     }
     .width('100%')
-    .height('100%')
+    .height('52vp')
     .justifyContent(FlexAlign.Center)
-    .padding({ top: 6, bottom: 8, left: 12, right: 12 })
   }
 
   // ==================== 主页 Tab ====================
@@ -2898,7 +2910,7 @@ struct MainPage {
             })
         }
       }
-      .width('100%').height(60).padding({ left: 20, right: 16, top: 8 })
+      .width('100%').height(52 + this.statusBarHeight).padding({ left: 20, right: 16, top: this.statusBarHeight })
       .backgroundColor(this.accentColor)
 
       // 课表预览卡片
@@ -2957,7 +2969,7 @@ struct MainPage {
       Row() {
         Text('更多功能').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
       }
-      .width('100%').height(56).padding({ left: 20 })
+      .width('100%').height(52 + this.statusBarHeight).padding({ left: 20, top: this.statusBarHeight })
       .backgroundColor(this.accentColor)
       Divider().color('#F0F0F0')
 
@@ -3002,7 +3014,7 @@ struct MainPage {
       Row() {
         Text('我的').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
       }
-      .width('100%').height(56).padding({ left: 20 })
+      .width('100%').height(52 + this.statusBarHeight).padding({ left: 20, top: this.statusBarHeight })
       .backgroundColor(this.accentColor)
       Divider().color('#F0F0F0')
 

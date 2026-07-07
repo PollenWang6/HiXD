@@ -1,4 +1,5 @@
 // EhallConstants.ets — 共享的 ehall 常量（EHALL_HEADERS、APP_PATH_MAP、extractRaw）
+import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE, EHALL_APP_EMPTY_CLASSROOM } from './Models';
 
 export const EHALL_HEADERS: Record<string, string> = {
@@ -17,6 +18,66 @@ export const APP_PATH_MAP: Map<string, string> = new Map([
   [EHALL_APP_SCORE, '/jwapp/sys/cjcx'],
   [EHALL_APP_EMPTY_CLASSROOM, '/jwapp/sys/kxjas'],
 ]);
+
+export class AppPostContext {
+  readonly http: HttpUtil;
+  readonly activateAppSession: (appId: string, force?: boolean) => Promise<void>;
+  appSessionUrl: Record<string, string>;
+  readonly tag: string;
+
+  constructor(
+    http: HttpUtil,
+    activateAppSession: (appId: string, force?: boolean) => Promise<void>,
+    appSessionUrl: Record<string, string>,
+    tag: string
+  ) {
+    this.http = http;
+    this.activateAppSession = activateAppSession;
+    this.appSessionUrl = appSessionUrl;
+    this.tag = tag;
+  }
+}
+
+/** 共享 ehall 业务 POST — DRY：Class/Score/Exam/EmptyClassroom/Ehall 共用一个实现 */
+export async function sharedAppPost(
+  ctx: AppPostContext, path: string, body: Record<string, string>
+): Promise<HttpResponse> {
+  const url = 'https://ehall.xidian.edu.cn' + path;
+  const cookies = ctx.http.getCookiesForDomain('ehall.xidian.edu.cn');
+  const hasCas: boolean = cookies.indexOf('MOD_AUTH_CAS') >= 0;
+  const hasJsession: boolean = cookies.toLowerCase().indexOf('jsessionid') >= 0;
+  console.info(ctx.tag, `appPost: url=${path} hasMOD_AUTH=${hasCas} hasJSESSIONID=${hasJsession} cookieLen=${cookies.length}`);
+  let resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
+  console.info(ctx.tag, 'appPost: resp status=' + resp.statusCode);
+
+  if (resp.isRedirect && resp.location && resp.location.includes('login')) {
+    console.warn(ctx.tag, 'appPost: session expired, redirecting to login');
+    ctx.appSessionUrl = {};
+    const appId = findAppIdByPath(path);
+    if (appId) {
+      console.info(ctx.tag, 'appPost: retrying with re-activation for ' + appId);
+      await ctx.activateAppSession(appId, true);
+      resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
+      console.info(ctx.tag, 'appPost: retry resp=' + resp.statusCode);
+    }
+  }
+
+  if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
+    console.warn(ctx.tag, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
+    ctx.appSessionUrl = {};
+    const appId = findAppIdByPath(path);
+    if (appId) {
+      console.info(ctx.tag, 'appPost: retrying with re-activation for ' + appId);
+      await ctx.activateAppSession(appId, true);
+      resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
+      console.info(ctx.tag, 'appPost: retry resp=' + resp.statusCode);
+    }
+  }
+
+  return resp;
+}
+
+/// ── 向后兼容别名（EhallService 内部仍可通过实例方法调用）──
 
 export function findAppIdByPath(path: string): string {
   if (path.includes('wdkb')) return EHALL_APP_CLASS_TABLE;

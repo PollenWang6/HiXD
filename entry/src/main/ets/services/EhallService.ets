@@ -12,6 +12,8 @@ import { ClassItemModel, ExamItemModel, ScoreItemModel,
          EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE,
          ExperimentType, ExperimentData, TimeRange, SYSJ_SECTION_TIMES } from './Models';
 
+import { findAppIdByPath as _findAppByPath, sharedAppPost, AppPostContext } from './EhallConstants';
+
 // 重导出共享模型，保持向后兼容（各页面仍可从 EhallService 导入）
 export { ClassItemModel, ExamItemModel, ScoreItemModel,
          ComposeDetail, ClassTableRow, ExamRow, ScoreRow,
@@ -294,49 +296,19 @@ export class EhallService {
       ' hasJSESSIONID=' + hasJsession);
   }
 
+  private readonly _appCtx: AppPostContext = new AppPostContext(
+    this.http,
+    (appId: string, force: boolean = false) => this.activateAppSession(appId, force),
+    this.appSessionUrl,
+    TAG
+  );
+
   private async appPost(path: string, body: Record<string, string>): Promise<HttpResponse> {
-    const url = 'https://ehall.xidian.edu.cn' + path;
-    const cookies = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
-    const hasCas: boolean = cookies.indexOf('MOD_AUTH_CAS') >= 0;
-    const hasJsession: boolean = cookies.toLowerCase().indexOf('jsessionid') >= 0;
-    console.info(TAG, `appPost: url=${path} hasMOD_AUTH=${hasCas} hasJSESSIONID=${hasJsession} cookieLen=${cookies.length}`);
-    let resp = await this.http.postForm(url, body, EHALL_HEADERS);
-    console.info(TAG, 'appPost: resp status=' + resp.statusCode);
-
-    if (resp.isRedirect && resp.location && resp.location.includes('login')) {
-      console.warn(TAG, 'appPost: session expired, redirecting to login');
-      this.appSessionUrl = {};
-      const appId = this.findAppIdByPath(path);
-      if (appId) {
-        console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
-        await this.activateAppSession(appId, true);
-        resp = await this.http.postForm(url, body, EHALL_HEADERS);
-        console.info(TAG, 'appPost: retry resp=' + resp.statusCode);
-      }
-    }
-
-    if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
-      console.warn(TAG, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
-      this.appSessionUrl = {};
-      const appId = this.findAppIdByPath(path);
-      if (appId) {
-        console.info(TAG, 'appPost: retrying with re-activation for ' + appId);
-        await this.activateAppSession(appId, true);
-        resp = await this.http.postForm(url, body, EHALL_HEADERS);
-        console.info(TAG, 'appPost: retry resp=' + resp.statusCode);
-      }
-    }
-
-    return resp;
+    return sharedAppPost(this._appCtx, path, body);
   }
 
-  private findAppIdByPath(path: string): string {
-    if (path.includes('wdkb')) return '4770397878132218';
-    if (path.includes('studentWdksapApp') || path.includes('wdksap')) return '4768687067472349';
-    if (path.includes('cjcx')) return '4768574631264620';
-    if (path.includes('kxjas')) return '4768402106681759';
-    return '';
-  }
+  // 别名（EhallService 保持实例方法签名兼容）
+  private findAppIdByPath(path: string): string { return _findAppByPath(path); }
 
   static extractRaw(body: string): object[] {
     try {

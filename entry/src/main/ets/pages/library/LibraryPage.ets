@@ -1,4 +1,4 @@
-// LibraryPage.ets — 图书馆页面
+﻿// LibraryPage.ets — 图书馆页面
 import { ThemeColors } from '../../utils/ThemeColors';
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
@@ -60,6 +60,7 @@ interface BorrowItem {
 @Component
 export struct LibraryPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
 
   @Builder buildWhiteTitle(t: string) {
@@ -73,14 +74,14 @@ export struct LibraryPage {
       .height(40).width(40)
       .onClick(() => { this.pageInfo.pop(); })
       Text(t)
-        .fontSize(20)
+        .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .height(52 + this.statusBarHeight)
+    .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
   @State searchWord: string = '';
@@ -652,8 +653,8 @@ export struct LibraryPage {
         }
       }
     }
-    .title({ builder: this.buildWhiteTitle('图书馆'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('图书馆'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onBackPressed(() => {
       if (this.selectedBook !== null) {

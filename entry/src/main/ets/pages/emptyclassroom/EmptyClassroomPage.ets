@@ -1,4 +1,4 @@
-// EmptyClassroomPage.ets — 空闲教室搜索
+﻿// EmptyClassroomPage.ets — 空闲教室搜索
 import { ThemeColors } from '../../utils/ThemeColors';
 import { EmptyClassroomItem, BuildingInfo } from '../../services/Models';
 import { EmptyClassroomService } from '../../services/EmptyClassroomService';
@@ -7,6 +7,7 @@ import { PreferenceUtil } from '../../utils/PreferenceUtil';
 @Component
 export struct EmptyClassroomPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State loadingBuildings: boolean = false;
@@ -50,8 +51,8 @@ export struct EmptyClassroomPage {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text(t).fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
-    }.width('100%').height(56).padding({ left: 12, right: 16 })
+      Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+    }.width('100%').height(52 + this.statusBarHeight).padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
   aboutToAppear(): void {
@@ -227,8 +228,8 @@ export struct EmptyClassroomPage {
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
     }
-    .title({ builder: this.buildWhiteTitle('空闲教室'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('空闲教室'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
   }
 }

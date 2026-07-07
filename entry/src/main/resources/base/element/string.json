@@ -41,6 +41,14 @@
       "value": "用于感知设备运动状态"
     },
     {
+      "name": "exam_countdown_card_name",
+      "value": "考试倒计时"
+    },
+    {
+      "name": "exam_countdown_card_desc",
+      "value": "显示即将到来的考试及倒计时天数"
+    },
+    {
       "name": "reminder_permission_reason",
       "value": "用于设置课程上课前提醒通知"
     }

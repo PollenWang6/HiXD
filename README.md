@@ -6,7 +6,7 @@
 
 一款为西安电子科技大学学生打造的鸿蒙原生校园工具，集成课表、成绩、考试、实验、空教室、图书馆、校园卡、校园网、电费查询等常用功能于一体。
 
-[![Version](https://img.shields.io/badge/version-1.3.1-blue)](https://github.com/PollenWang6/HiXD)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue)](https://github.com/PollenWang6/HiXD)
 [![HarmonyOS](https://img.shields.io/badge/HarmonyOS-Next%20API%2023-orange)](https://developer.huawei.com/consumer/cn/harmonyos/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -29,7 +29,8 @@
 | 💳 校园卡 | 余额查询、付款码、消费流水；挂失/解绑/修改密码 |
 | 📋 考勤查询 | 超星平台到课率、缺勤统计、可缺勤次数，分组颜色标注 |
 | 🚰 宿舍水机 | 扫码绑定、远程控制宿舍饮水机 |
-| 🌐 校园网 | 流量查询、在线设备管理 |
+| 🏃 体育系统 | 体测成绩查询、体育课程信息查询 |
+| 🌐 校园网 | 流量查询、在线设备管理，自助服务平台数据接入 |
 | ⚡ 电费查询 | 宿舍电费余额和用量查询 |
 | 📧 学生邮箱 | icoremail 邮箱入口 |
 | 🎨 主题定制 | 预设主题色 + 自定义色号，深色/浅色独立配色 |
@@ -48,6 +49,8 @@
 |------|------|------|
 | 课程预告 | 4×2 | 今日/明日课程预览，点击跳转课表 |
 | 课程预告 | 2×2 | 紧凑版课程预览，支持滚动 |
+| 考试倒计时 | 4×2 | 距最近考试天数与详情，点击跳转考试页 |
+| 考试倒计时 | 2×2 | 紧凑版倒计时 |
 
 ---
 

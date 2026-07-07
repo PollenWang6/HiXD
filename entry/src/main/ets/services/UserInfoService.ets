@@ -1,7 +1,6 @@
-// UserInfoService.ets — 用户信息管理（ehall getuserinfo.json + Preference 缓存）
+﻿// UserInfoService.ets — 用户信息管理（ehall getuserinfo.json + Preference 缓存）
 import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
-import { EhallService } from './EhallService';
 import { CasLoginService } from './CasLoginService';
 import { AttendanceService } from './AttendanceService';
 

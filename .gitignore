@@ -42,3 +42,6 @@ keystore/
 *.bak
 *.bak2
 *.hibackup
+
+# ===================== AI 工具目录 =====================
+.codegenie/

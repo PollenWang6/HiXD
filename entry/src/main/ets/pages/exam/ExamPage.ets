@@ -3,7 +3,6 @@ import { ThemeColors } from '../../utils/ThemeColors';
 import { SemesterUtil, ExamItemModel } from '../../services/EhallService';
 import { ExamService } from '../../services/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { router } from '@kit.ArkUI';
 
 
 // 卡片背景色 [浅色, 深色] — 深色模式用暗调确保白字可读
@@ -19,6 +18,7 @@ const EXAM_CARD_COLORS: string[][] = [
 @Component
 export struct ExamPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State errorMsg: string = '';
@@ -40,14 +40,14 @@ export struct ExamPage {
       .height(40).width(40)
       .onClick(() => { this.pageInfo.pop(); })
       Text(t)
-        .fontSize(20)
+        .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 16 })
+    .height(52 + this.statusBarHeight)
+    .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
 
@@ -252,8 +252,8 @@ export struct ExamPage {
       .height('100%')
       .backgroundColor(ThemeColors.bgPage)
     }
-    .title({ builder: this.buildWhiteTitle('考试安排'), height: 56 }, { backgroundColor: this.accentColor })
-    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.buildWhiteTitle('考试安排'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .onReady((ctx: NavDestinationContext) => {
       // NavDestination 初始化完成

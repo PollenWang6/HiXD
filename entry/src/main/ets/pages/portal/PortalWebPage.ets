@@ -24,6 +24,7 @@ const UA_DESKTOP: number = 3;
 @Component
 export struct PortalWebPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @Prop title: string = '';
   @Prop url: string = '';
@@ -197,8 +198,8 @@ export struct PortalWebPage {
       .width('100%')
       .height('100%')
     }
-    .title(this.customTitle(), { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.customTitle(), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .hideBackButton(true)
 
@@ -255,8 +256,8 @@ export struct PortalWebPage {
       .width(40)
       .bindMenu(this.WebviewMenu(), { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
     }
-    .padding({ left: 12, right: 12 })
-    .height(56)
+    .padding({ left: 12, right: 12, top: this.statusBarHeight })
+    .height(52 + this.statusBarHeight)
     .width('100%')
   }
 

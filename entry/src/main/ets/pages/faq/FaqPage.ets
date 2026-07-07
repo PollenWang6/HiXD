@@ -4,6 +4,7 @@ import { ThemeColors } from '../../utils/ThemeColors';
 @Component
 export struct FaqPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @Prop isTablet: boolean = false;
@@ -69,8 +70,8 @@ export struct FaqPage {
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
     }
-    .title(this.customTitle(), { backgroundColor: this.accentColor })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .title({ builder: this.customTitle(), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .hideBackButton(true)
   }
@@ -81,9 +82,9 @@ export struct FaqPage {
         Image($r('app.media.close')).height(22)
           .fillColor(ThemeColors.textPrimary).draggable(false)
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text('常见问题').fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+      Text('常见问题').fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-    }.height(56).width('100%').padding({ left: 12, right: 12 })
+    }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })
   }
 
   @Builder SectionText(text: string) {

@@ -1,15 +1,15 @@
-// AboutPage.ets — 关于软件
+﻿// AboutPage.ets — 关于软件
 import { ThemeColors } from '../../utils/ThemeColors';
 import { VersionService } from '../../services/VersionService';
 import { VersionInfo } from '../../services/VersionService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
 
 @Component
 export struct AboutPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   pageInfo: NavPathStack = new NavPathStack();
   @Prop isTablet: boolean = false;
@@ -156,9 +156,9 @@ export struct AboutPage {
       }
     }
     .width('100%').height('100%')
-    .title(this.customTitle(), { backgroundColor: this.accentColor })
+    .title({ builder: this.customTitle(), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
     .backgroundColor(ThemeColors.bgPage)
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .hideBackButton(true)
   }
 
@@ -167,8 +167,8 @@ export struct AboutPage {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([Color.White])
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text('关于软件').fontSize(20).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+      Text('关于软件').fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-    }.height(56).width('100%').padding({ left: 12, right: 12 })
+    }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })
   }
 }
