@@ -29,8 +29,7 @@ export class EmptyClassroomService {
   static extractRaw(body: string): object[] { return extractRaw(body, TAG); }
 
   private async activateAppSession(appId: string, _force: boolean = false): Promise<void> {
-    if (this.appSessionUrl[appId]) {
-      console.info(TAG, 'activateAppSession: using cached for ' + appId);
+    if (!_force && this.appSessionUrl[appId]) {
       return;
     }
 
@@ -39,55 +38,43 @@ export class EmptyClassroomService {
 
     const cookiesBefore = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesBefore.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: already have JSESSIONID, skip for ' + appId);
       return;
     }
 
-    console.info(TAG, 'activateAppSession: establishing session for ' + appId);
 
     try {
       const resp = await this.http.get(
         'https://ehall.xidian.edu.cn/appShow?appId=' + appId,
         EHALL_HEADERS
       );
-      console.info(TAG, 'activateAppSession: /appShow resp=' + resp.statusCode);
     } catch (e) {
-      console.warn(TAG, 'activateAppSession: /appShow failed (expected): ' + JSON.stringify(e));
     }
 
     const cookiesAfter1 = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesAfter1.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: JSESSIONID obtained from /appShow');
       return;
     }
 
     try {
       const directUrl = 'https://ehall.xidian.edu.cn' + appPath + '/%2Adefault%2A/index.do';
-      console.info(TAG, 'activateAppSession: trying URL-encoded default page: ' + directUrl);
       const resp2 = await this.http.get(directUrl, EHALL_HEADERS);
-      console.info(TAG, 'activateAppSession: direct page resp=' + resp2.statusCode);
 
       if (resp2.isRedirect && resp2.location) {
         let loc: string = resp2.location;
         if (loc.startsWith('/')) {
           loc = 'https://ehall.xidian.edu.cn' + loc;
         }
-        console.info(TAG, 'activateAppSession: following redirect to ' + loc);
         try {
           await this.http.get(loc, EHALL_HEADERS);
         } catch (e3) {
-          console.warn(TAG, 'activateAppSession: redirect follow failed: ' + JSON.stringify(e3));
         }
       }
     } catch (e2) {
-      console.warn(TAG, 'activateAppSession: direct page failed: ' + JSON.stringify(e2));
     }
 
     const cookiesFinal = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     const hasModAuth = cookiesFinal.toLowerCase().includes('mod_auth_cas');
     const hasJsession = cookiesFinal.toLowerCase().includes('jsessionid');
-    console.info(TAG, 'activateAppSession: final cookies hasMOD_AUTH=' + hasModAuth +
-      ' hasJSESSIONID=' + hasJsession);
   }
 
   private readonly _appCtx: AppPostContext = new AppPostContext(
@@ -109,7 +96,6 @@ export class EmptyClassroomService {
         'https://ehall.xidian.edu.cn/jwapp/sys/kxjas/modules/kxjas/jxlcx.do?*order=%2BXXXQDM%2C%2BPX%2C%2BJXLDM',
         EHALL_HEADERS
       );
-      console.info(TAG, 'getEmptyClassroomBuildings: resp=' + resp.statusCode);
       const raw: object[] = EmptyClassroomService.extractRaw(resp.body);
       const out: BuildingInfo[] = [];
       for (const row of raw) {
@@ -159,7 +145,6 @@ export class EmptyClassroomService {
         }
       } catch { /* fallback */ }
 
-      console.info(TAG, 'searchEmptyClassrooms: ZC=' + zc + ' XQJ=' + xqj + ' date=' + dateStr);
 
       const querySetting = JSON.stringify([
         { name: 'JXLDM', caption: '教学楼代码', builder: 'equal', linkOpt: 'AND', value: buildingCode },
@@ -168,13 +153,6 @@ export class EmptyClassroomService {
         { name: 'XQJ', value: xqj, linkOpt: 'AND', builder: 'equal' },
       ]);
       const resp2 = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/cxjsqk.do', {
-        'XNXQDM': weekRange + '-' + weekPart,
-        'ZC': zc,
-        'XQ': xqj,
-        'querySetting': querySetting,
-        '*order': '+LC,+JASMC',
-        'pageSize': '999',
-        'pageNumber': '1',
       });
       return resp2.body;
     }, 10 * 60 * 1000);
@@ -189,9 +167,6 @@ export class EmptyClassroomService {
     const semCode = SemesterUtil.getCurrentSemesterCode();
     const semParts = semCode.split('-');
     const resp1 = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/rqzhzcjc.do', {
-      'RQ': dateStr,
-      'XN': semParts[0] + '-' + semParts[1],
-      'XQ': semParts[2],
     });
     let zc = '';
     let xqj = '';
@@ -207,7 +182,6 @@ export class EmptyClassroomService {
       }
     } catch { /* fallback */ }
 
-    console.info(TAG, `searchEmptyClassroomsByDate: ${dateStr} ZC=${zc} XQJ=${xqj}`);
 
     const querySetting = JSON.stringify([
       { name: 'JXLDM', caption: '教学楼代码', builder: 'equal', linkOpt: 'AND', value: buildingCode },
@@ -215,11 +189,6 @@ export class EmptyClassroomService {
       { name: 'XQJ', value: xqj, linkOpt: 'AND', builder: 'equal' },
     ]);
     const resp = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/cxjsqk.do', {
-      'XNXQDM': semCode,
-      'ZC': zc,
-      'XQ': xqj,
-      'querySetting': querySetting,
-      '*order': '+LC,+JASMC',
     });
     return resp.body;
   }
@@ -238,7 +207,6 @@ export class EmptyClassroomService {
   static extractEmptyClassrooms(body: string): EmptyClassroomItem[] {
     const out: EmptyClassroomItem[] = [];
     const rows = EmptyClassroomService.extractRaw(body);
-    console.info(TAG, 'extractEmptyClassrooms: rows count=' + rows.length);
     for (const row of rows) {
       const r: EmptyClassroomRow = row as EmptyClassroomRow;
       const rawName = r.JASMC || '';
@@ -249,8 +217,6 @@ export class EmptyClassroomService {
       const u10 = r.JC10 || ''; const u11 = r.JC11 || '';
 
       if (out.length === 0) {
-        console.info(TAG, 'extractEmptyClassrooms: first row JASMC=' + rawName +
-          ' JC1=[' + u1 + '] JC2=[' + u2 + '] JC3=[' + u3 + ']');
       }
 
       const isUsed: boolean[] = [

@@ -36,7 +36,6 @@ export class SchoolCardService {
   setOpenId(oid: string): void {
     this.openid = oid;
     this.openidFetchedAt = Date.now();
-    console.info(TAG, 'setOpenId: injected from WebView, len=' + oid.length);
   }
 
   private isOpenIdValid(): boolean {
@@ -69,12 +68,9 @@ export class SchoolCardService {
     const casCallback = 'https://xxcapp.xidian.edu.cn/a_xidian/api/cas-login/index?redirect=' + redirect3 + '&from=wap';
     const serviceParam = encodeURIComponent(casCallback);
     const casUrl = 'https://ids.xidian.edu.cn/authserver/login?service=' + serviceParam;
-    console.info(TAG, 'ensureOpenId: CAS URL len=' + casUrl.length);
 
     const resp = await this.http.get(casUrl);
     const html = resp.body || '';
-    console.info(TAG, 'ensureOpenId: status=' + resp.statusCode + ' page len=' + html.length);
-    console.info(TAG, 'ensureOpenId: HTML preview: ' + html.substring(0, 500));
 
     // 解析 openid
     const match = html.match(/id="openid"[^>]*type="hidden"[^>]*value="([^"]*)"/) ||
@@ -83,7 +79,6 @@ export class SchoolCardService {
     if (match && match[1].length > 0) {
       this.openid = match[1];
       this.openidFetchedAt = Date.now();
-      console.info(TAG, 'ensureOpenId: got openid, len=' + this.openid.length);
       return this.openid;
     }
 
@@ -98,11 +93,9 @@ export class SchoolCardService {
     try {
       return await action(oid);
     } catch (e) {
-      console.warn(TAG, 'withOpenIdRetry: first attempt failed: ' + String(e));
       // WebView 注入的 openid 还在有效期内，直接重试同一 openid，
       // 不要回退到 HTTP ensureOpenId（会触发 NETSTACK 跨域 cookie 死胡同）
       if (this.isOpenIdValid()) {
-        console.info(TAG, 'withOpenIdRetry: retry with same WebView openid');
         return await action(this.openid);
       }
       const oid2 = await this.ensureOpenId(true);
@@ -119,7 +112,6 @@ export class SchoolCardService {
   async getBalance(): Promise<string> {
     return this.withOpenIdRetry(async (openid: string) => {
       const url = BASE_URL + '/myaccount/openMyAccount?openid=' + openid;
-      console.info(TAG, 'getBalance: GET ' + url.substring(0, 80));
 
       const resp = await this.http.get(url);
       if (!resp.isOk) {
@@ -132,7 +124,6 @@ export class SchoolCardService {
       if (balance.length === 0) {
         throw new Error('余额解析失败');
       }
-      console.info(TAG, 'getBalance: ' + balance);
       return balance;
     });
   }
@@ -167,7 +158,6 @@ export class SchoolCardService {
   async getPaidRecords(beginDate: string, endDate: string): Promise<PaidRecord[]> {
     return this.withOpenIdRetry(async (openid: string) => {
       const url = BASE_URL + '/selftrade/queryCardSelfTradeList?openid=' + openid;
-      console.info(TAG, 'getPaidRecords: POST ' + url.substring(0, 80));
 
       const body = JSON.stringify({
         beginDate: beginDate,
@@ -197,7 +187,6 @@ export class SchoolCardService {
           money: item['txamt'] || '',
         });
       }
-      console.info(TAG, 'getPaidRecords: got ' + records.length + ' records');
       return records;
     });
   }
@@ -213,7 +202,6 @@ export class SchoolCardService {
     for (let i = 0; i < maxSteps; i++) {
       const resp = await this.http.getNoRedirect(currentUrl);
       if (!resp.isRedirect || !resp.location) {
-        console.info(TAG, 'followRedirects: [' + i + '] final status=' + resp.statusCode);
         return resp;
       }
       // 处理相对 URL
@@ -223,7 +211,6 @@ export class SchoolCardService {
         const base = idx > 0 ? currentUrl.substring(0, idx) : currentUrl;
         location = base + location;
       }
-      console.info(TAG, 'followRedirects: [' + i + '] 302 → ' + location.substring(0, 80));
       currentUrl = location;
     }
     throw new Error('校园卡重定向链过长(>' + maxSteps + '步)');
@@ -252,7 +239,6 @@ export class SchoolCardService {
       if (!imgMatch) throw new Error('付款码图片未找到');
       let base64 = imgMatch[1];
       base64 = base64.replace('data:image/png;base64,', '').replace(/\n/g, '');
-      console.info(TAG, 'getQRCodeBase64: got base64 len=' + base64.length);
       return base64;
     });
   }

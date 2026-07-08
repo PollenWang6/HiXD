@@ -169,7 +169,6 @@ export class SchoolnetService {
     // 检查 cookie 大小，如果异常大则清除（防止之前 bug 积累的超大 cookie）
     const cookieStr: string = this.http.getCookiesForDomain('zfw.xidian.edu.cn');
     if (cookieStr.length > 2000) {
-      console.error(TAG, 'ZFW cookie too large (' + cookieStr.length + '), clearing');
       await this.http.clearCookies('zfw.xidian.edu.cn');
       return null;
     }
@@ -178,17 +177,14 @@ export class SchoolnetService {
 
     // 被重定向到 /login → 未登录
     if (resp.body.indexOf('LoginForm') >= 0) {
-      console.info(TAG, 'ZFW not logged in (login form found)');
       return null;
     }
 
     // 已登录 → 解析首页
     if (resp.body.indexOf('自服务在线中') >= 0) {
-      console.info(TAG, 'ZFW already logged in');
       return this.parseZfwHome(resp.body);
     }
 
-    console.warn(TAG, 'ZFW home unknown state, bodyLen=' + resp.body.length);
     return null;
   }
 
@@ -201,13 +197,11 @@ export class SchoolnetService {
     await this.http.clearCookies('zfw.xidian.edu.cn');
     // 调试：打印 clear 后 cookie 状态
     const afterClear: string = this.http.getCookiesForDomain('zfw.xidian.edu.cn');
-    console.error(TAG + ' after-clear cookieLen=' + afterClear.length + ' cookies=' + afterClear.substring(0, 200));
 
     const resp: HttpResponse = await this.http.get(ZFW_BASE + '/login');
     const body: string = resp.body;
     // 调试：打印 set-cookie 响应头
     const scHeader: string = resp.headers['set-cookie'] || resp.headers['Set-Cookie'] || 'NONE';
-    console.error(TAG + ' login-page set-cookie=' + scHeader.substring(0, 500));
 
     // 遍历 <input> 标签提取 csrf 和 RSA public key
     let csrf: string = '';
@@ -236,12 +230,8 @@ export class SchoolnetService {
       if (csrf.length > 0 && rsaKey.length > 0) break;
     }
 
-    console.info(TAG, 'ZFW login page: csrf=' + (csrf.length > 0 ? csrf.substring(0, 10) + '...' : 'MISSING') +
-      ', key=' + (rsaKey.length > 0 ? rsaKey.substring(0, 20) + '...' : 'MISSING') +
-      ', bodyLen=' + body.length);
     // 调试：打印 GET /login 后拿到的 cookie
     const loginCookies: string = this.http.getCookiesForDomain('zfw.xidian.edu.cn');
-    console.error(TAG + ' after-login cookies=' + loginCookies.substring(0, 300));
 
     if (csrf.length === 0 || rsaKey.length === 0) {
       throw new Error('ZFW login page missing csrf or RSA key');
@@ -267,7 +257,6 @@ export class SchoolnetService {
     // ArrayBuffer → base64
     const bytes: Uint8Array = new Uint8Array(buffer);
     const encoded: string = this.base64Helper.encodeToStringSync(bytes);
-    console.info(TAG, 'ZFW captcha fetched, base64 length=' + encoded.length);
     return 'data:image/png;base64,' + encoded;
   }
 
@@ -292,14 +281,11 @@ export class SchoolnetService {
 
     // 调试：打印 CSRF 和 cookie 状态
     const cookieDebug: string = this.http.getCookiesForDomain('zfw.xidian.edu.cn');
-    console.error(TAG + ' validate-user csrf=' + csrf.substring(0, 10) + '... cookieLen=' + cookieDebug.length);
-    console.error(TAG + ' validate-user cookies=' + cookieDebug.substring(0, 300));
 
     const resp: HttpResponse = await this.http.postForm(
       ZFW_BASE + '/site/validate-user', data, headers
     );
 
-    console.error(TAG + ' validate-user resp=' + resp.body.substring(0, 200));
     const parsed: Record<string, string | boolean> = JSON.parse(resp.body) as Record<string, string | boolean>;
     return {
       success: parsed['success'] === true,
@@ -335,7 +321,6 @@ export class SchoolnetService {
     // NETSTACK: POST 302 不跟随，body 为空，需手动 GET /home
     const homeResp: HttpResponse = await this.http.get(ZFW_BASE + '/home');
     const ok: boolean = homeResp.body.indexOf('自服务在线中') >= 0;
-    console.error(TAG + ' completeLogin homeBodyLen=' + homeResp.body.length + ' ok=' + ok);
     return ok;
   }
 
@@ -415,9 +400,6 @@ export class SchoolnetService {
       }
     }
 
-    console.info(TAG, 'Parsed ZFW home: used=' + result.usedFlow +
-      ', remain=' + result.remainFlow + ', settle=' + result.settleDate +
-      ', ips=' + result.ipList.length);
     return result;
   }
 
@@ -469,8 +451,6 @@ export class SchoolnetService {
       }
     }
 
-    console.info(TAG, 'Parsed ZFW detail: entries=' + entries.length +
-      ', pages=' + totalPages + ', summary flow=' + summary.flow);
     return { entries: entries, totalPages: totalPages, summary: summary };
   }
 
@@ -490,7 +470,6 @@ export class SchoolnetService {
       b64 = b64.replace(/\n/g, '');
       b64 = b64.replace(/\s/g, '');
     }
-    console.error(TAG + ' RSA b64 key len=' + b64.length + ' head=' + b64.substring(0, 20));
 
     // base64 解码得到 X.509 SPKI DER
     const decoded: Uint8Array = this.base64Helper.decodeSync(b64);
@@ -512,7 +491,6 @@ export class SchoolnetService {
 
     // 加密结果 → base64
     const base64: string = this.base64Helper.encodeToStringSync(output.data);
-    console.error(TAG + ' RSA encrypted pwd len=' + base64.length);
     return base64;
   }
 }

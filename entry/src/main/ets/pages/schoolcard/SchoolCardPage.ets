@@ -1,4 +1,5 @@
-﻿// SchoolCardPage.ets — 校园卡原生页面（纯 HTTP，对标 Flutter）
+﻿import { AccentColors } from '../../utils/AccentColors';
+// SchoolCardPage.ets — 校园卡原生页面（纯 HTTP，对标 Flutter）
 // 余额、付款码、消费记录
 import { promptAction } from '@kit.ArkUI';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -38,7 +39,7 @@ export struct SchoolCardPage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .layoutWeight(1)
     }
     .width('100%')
@@ -68,7 +69,6 @@ export struct SchoolCardPage {
 
       // Step 1: OAuth 获取 openid（5min 内缓存）
       const oid = await this.cardSvc.ensureOpenId();
-      console.info('SchoolCardPage', 'initData: openid len=' + oid.length);
 
       // Step 2: 并行获取余额 + 消费记录
       const results = await Promise.all([
@@ -79,7 +79,6 @@ export struct SchoolCardPage {
       AppStorage.setOrCreate('card_balance', this.balance);
       PreferenceUtil.putString('card_balance_cached', this.balance);
       this.records = results[1] as PaidRecord[];
-      console.info('SchoolCardPage', 'initData: bal=' + (results[0] as string) + ' recs=' + (results[1] as PaidRecord[]).length);
       this.loading = false;
     } catch (e) {
       // 尝试仅余额
@@ -92,7 +91,6 @@ export struct SchoolCardPage {
       } catch (_e2) {
         this.error = '校园卡加载失败';
         this.loading = false;
-        console.error('SchoolCardPage', 'initData error: ' + String(e));
       }
     }
   }
@@ -122,7 +120,6 @@ export struct SchoolCardPage {
       this.qrBase64 = await this.cardSvc.getQRCodeBase64();
       this.showBarcode = true;
     } catch (e) {
-      console.error('SchoolCardPage', 'fetchQRCode error: ' + String(e));
     } finally {
       this.qrLoading = false;
     }
@@ -135,7 +132,6 @@ export struct SchoolCardPage {
       this.records = await this.cardSvc.getPaidRecords(this.beginDate, this.endDate);
       promptAction.showToast({ message: '查询成功，共 ' + String(this.records.length) + ' 条', duration: 2000 });
     } catch (e) {
-      console.error('SchoolCardPage', 'onQueryRecords error: ' + String(e));
       promptAction.showToast({ message: '查询失败', duration: 2000 });
     } finally {
       this.loading = false;
@@ -237,8 +233,8 @@ export struct SchoolCardPage {
                 .width('100%').textAlign(TextAlign.Center).padding({ top: 20, bottom: 20 })
             }
           }
-          .borderRadius(14).backgroundColor(ThemeColors.bgCard)
-          .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
+          .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+          .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
           .margin({ left: 16, right: 16, top: 10 })
         }
 
@@ -326,8 +322,8 @@ export struct SchoolCardPage {
             .divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
           }
         }
-        .borderRadius(14).backgroundColor(ThemeColors.bgCard)
-        .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
+        .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+        .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
         .margin({ left: 16, right: 16, top: 10 })
         .layoutWeight(1)
 

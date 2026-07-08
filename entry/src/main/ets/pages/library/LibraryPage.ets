@@ -1,4 +1,5 @@
-﻿// LibraryPage.ets — 图书馆页面
+﻿import { AccentColors } from '../../utils/AccentColors';
+// LibraryPage.ets — 图书馆页面
 import { ThemeColors } from '../../utils/ThemeColors';
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
@@ -76,7 +77,7 @@ export struct LibraryPage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .layoutWeight(1)
     }
     .width('100%')
@@ -296,7 +297,6 @@ export struct LibraryPage {
       PreferenceUtil.putString('lib_summary', result.length + '|' + overdue);
       this.fetchBorrowCovers(result);
     } catch (e) {
-      console.error('LibraryPage', 'loadBorrowList failed: ' + String(e));
       this.errorMsg = '借阅列表加载失败，请下拉重试';
     }
   }
@@ -388,7 +388,6 @@ export struct LibraryPage {
       this.hasMore = rawList.length >= 20;
       this.fetchAllCovers(newBooks);
     } catch (e) {
-      console.error('LibraryPage', 'searchBooks failed: ' + String(e));
       if (p === 1) { this.books = []; }
       this.errorMsg = '搜索失败，请检查网络后重试';
     } finally { this.isSearching = false; }
@@ -488,7 +487,9 @@ export struct LibraryPage {
                     }.width('100%').margin({ top: 4 })
                   }.layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ left: 12 })
                 }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                .borderRadius(8).backgroundColor(ThemeColors.bgCard)
+                .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+                .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+                .margin({ left: 14, right: 14, bottom: 8 })
                 .onClick(() => {
                   this.selectedBook = book;
                   animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
@@ -610,8 +611,10 @@ export struct LibraryPage {
                     }
                   }.width('100%').margin({ top: 10 })
                 }.width('100%').padding(14)
-                .backgroundColor(ThemeColors.bgCard).borderRadius(10)
-              }.padding({ left: 14, right: 14 })
+                .backgroundColor(ThemeColors.bgCard).borderRadius(12)
+                .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+              }.padding({ left: 14, right: 14, top: 12, bottom: 12 })
+                .margin({ left: 14, right: 14, bottom: 8 })
             }, (borrow: BorrowItem, idx?: number) => `borrow_${idx}_${borrow.imageUrl.length > 0 ? '1' : '0'}`)
           }.layoutWeight(1)
           }.layoutWeight(1)

@@ -129,6 +129,9 @@ class FormDataClass {
 }
 
 function getSemesterCode(): string {
+  // 必须与 SemesterUtil.getCurrentSemesterCode() 保持一致：优先读 current_semester 偏好
+  const saved: string = PreferenceUtil.getString('current_semester');
+  if (saved.length > 0) { return saved; }
   const now: Date = new Date();
   const y: number = now.getFullYear();
   const m: number = now.getMonth() + 1;
@@ -569,14 +572,11 @@ function buildExamCountdownFields(form: FormDataClass, context: common.Context):
               const ksrq: string = String(item['KSRQ'] || '').substring(0, 10);
               const kssjms: string = String(item['KSSJMS'] || '');
               if (!ksrq || !kssjms) { continue; }
-              // 解析时间段 "08:30~10:05" 或 "08:30-10:05"
-              let sep: number = kssjms.indexOf('~');
-              if (sep < 0) { sep = kssjms.indexOf('～'); }
-              if (sep < 0) { sep = kssjms.indexOf('-'); }
-              if (sep < 0) { continue; }
-              const timePart: string = kssjms.substring(sep - 5, sep + 6);
-              const startTime: string = timePart.substring(0, 5);
-              const endTime: string = timePart.substring(timePart.length - 5);
+              // 解析时间段 "08:30~10:05" / "8:30-10:05"（正则兼容单/双数字小时与任意分隔符）
+              const tm: RegExpMatchArray | null = kssjms.match(/(\d{1,2}:\d{2})\s*[~～-]\s*(\d{1,2}:\d{2})/);
+              if (!tm) { continue; }
+              const startTime: string = tm[1];
+              const endTime: string = tm[2];
               allExams.push({
                 name: String(item['KCM'] || item['KSMC'] || '考试'),
                 date: ksrq, startTime: startTime, endTime: endTime,

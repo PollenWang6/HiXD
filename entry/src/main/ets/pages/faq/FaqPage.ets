@@ -1,4 +1,5 @@
-﻿// FaqPage.ets — 常见问题
+﻿import { AccentColors } from '../../utils/AccentColors';
+// FaqPage.ets — 常见问题
 import { ThemeColors } from '../../utils/ThemeColors';
 
 @Component
@@ -82,7 +83,7 @@ export struct FaqPage {
         Image($r('app.media.close')).height(22)
           .fillColor(ThemeColors.textPrimary).draggable(false)
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text('常见问题').fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+      Text('常见问题').fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })
   }
@@ -113,6 +114,7 @@ export struct FaqPage {
     .padding({ left: 20, right: 20, top: 14, bottom: 14 })
     .backgroundColor(ThemeColors.bgCard)
     .borderRadius(12)
+    .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
     .margin({ left: 20, right: 20, bottom: 12 })
   }
 }

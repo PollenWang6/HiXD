@@ -3,7 +3,7 @@
 // Stack.clip(true) 防止图片溢出到顶栏/底栏
 import { image } from '@kit.ImageKit';
 import { fileIo } from '@kit.CoreFileKit';
-import { router, display } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 
 @Entry
@@ -65,14 +65,12 @@ struct ImageCropPage {
       this.pixelMap = pm;
       this.imgW = info.size.width;
       this.imgH = info.size.height;
-      console.info('ImageCropPage', `imgSize=${this.imgW}x${this.imgH}`);
       this.isReady = true;
       // stackW/stackH 由 onAreaChange 设置，如果已有尺寸则立即布局
       if (this.stackW > 0 && this.stackH > 0) {
         this.initLayout();
       }
     } catch (e) {
-      console.error('ImageCropPage', 'loadImage failed: ' + JSON.stringify(e));
     }
   }
 
@@ -102,7 +100,6 @@ struct ImageCropPage {
     this.imgTranslateX = 0;
     this.imgTranslateY = 0;
 
-    console.info('ImageCropPage', `layout: stack=${this.stackW}x${this.stackH} crop=(${this.cropX},${this.cropY},${this.cropW},${this.cropH}) scale=${this.imgScale}`);
   }
 
   clampTranslate(tx: number, ty: number): void {
@@ -138,7 +135,6 @@ struct ImageCropPage {
       const safeW: number = Math.min(cropPxW, this.imgW - safeX);
       const safeH: number = Math.min(cropPxH, this.imgH - safeY);
 
-      console.info('ImageCropPage', `crop: safe=(${safeX},${safeY},${safeW},${safeH})`);
 
       await this.pixelMap.crop({ x: safeX, y: safeY, size: { width: safeW, height: safeH } });
 
@@ -156,7 +152,6 @@ struct ImageCropPage {
       AppStorage.setOrCreate('cropped_bg_path', destPath);
       router.back();
     } catch (e) {
-      console.error('ImageCropPage', 'confirmCrop failed: ' + JSON.stringify(e));
       router.back();
     }
   }

@@ -1,4 +1,5 @@
-﻿// EmptyClassroomPage.ets — 空闲教室搜索
+﻿import { AccentColors } from '../../utils/AccentColors';
+// EmptyClassroomPage.ets — 空闲教室搜索
 import { ThemeColors } from '../../utils/ThemeColors';
 import { EmptyClassroomItem, BuildingInfo } from '../../services/Models';
 import { EmptyClassroomService } from '../../services/EmptyClassroomService';
@@ -51,7 +52,7 @@ export struct EmptyClassroomPage {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+      Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
     }.width('100%').height(52 + this.statusBarHeight).padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
@@ -121,7 +122,7 @@ export struct EmptyClassroomPage {
           Scroll() {
             Row({ space: 8 }) {
               ForEach(this.buildings, (b: BuildingInfo) => {
-                Button(b.name).fontSize(13).height(32).borderRadius(16)
+                Button(b.name).fontSize(15).height(40).borderRadius(20)
                   .fontColor(b.code === this.selectedBuilding ? '#FFFFFF' : ThemeColors.textPrimary)
                   .backgroundColor(b.code === this.selectedBuilding ? '#F4511E' : ThemeColors.bgInput)
                   .onClick(() => { this.selectBuilding(b.code); })
@@ -132,29 +133,33 @@ export struct EmptyClassroomPage {
 
         // 日期选择器
         Row({ space: 8 }) {
-          Button('前一天').fontSize(12).height(30).borderRadius(15)
+          Button('前一天').fontSize(14).height(38).borderRadius(19)
             .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
             .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, -1); this.search(); })
-          Text(this.fmtDate(this.selectedDate)).fontSize(17).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+          Text(this.fmtDate(this.selectedDate)).fontSize(18).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
             .width(130).textAlign(TextAlign.Center)
-          Button('后一天').fontSize(12).height(30).borderRadius(15)
+          Button('后一天').fontSize(14).height(38).borderRadius(19)
             .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
             .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, 1); this.search(); })
-          Button('今天').fontSize(12).height(30).borderRadius(15)
+          Button('今天').fontSize(14).height(38).borderRadius(19)
             .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
             .onClick(() => { this.selectedDate = new Date(); this.search(); })
         }.width('100%').padding({ left: 16, right: 16, top: 8 })
 
         // 搜索框
-        Row() {
-          Text('\ud83d\udd0d').fontSize(14).margin({ right: 6 })
+        Row({ space: 8 }) {
           TextInput({ placeholder: '搜索教室名...', text: this.searchText })
             .fontSize(14).layoutWeight(1).height(36).backgroundColor('#00000000')
             .onChange((v: string) => { this.searchText = v; this.applyFilter(); })
+            .onSubmit(() => { this.applyFilter(); })
           if (this.searchText.length > 0) {
             Text('✕').fontSize(14).fontColor(ThemeColors.textSecondary)
               .onClick(() => { this.searchText = ''; this.applyFilter(); })
           }
+          Button('搜索')
+            .fontSize(14).fontColor('#FFFFFF').height(36).borderRadius(8)
+            .backgroundColor(this.accentColor)
+            .onClick(() => { this.applyFilter(); })
         }.width('100%').padding({ left: 16, right: 16, top: 6, bottom: 4 })
         .backgroundColor(ThemeColors.bgCard).borderRadius(8).margin({ left: 16, right: 16, top: 6 })
 
@@ -221,7 +226,8 @@ export struct EmptyClassroomPage {
                       }, (free: boolean, idx: number) => 'sec_' + String(idx))
                     }
                   }.width('100%')
-                }.width('100%').padding(10).borderRadius(12).backgroundColor(ThemeColors.bgCard).margin({ bottom: 8 })
+                }.width('100%').padding(10).borderRadius(12).backgroundColor(ThemeColors.bgCard)
+                .shadow({ radius: 2, color: '#00000008', offsetY: 1 }).margin({ bottom: 8 })
               }
             }, (room: EmptyClassroomItem) => 'rm_' + room.roomName + '_' + room.floor)
           }.width('100%').layoutWeight(1).padding({ left: 16, right: 16, top: 8, bottom: 16 })

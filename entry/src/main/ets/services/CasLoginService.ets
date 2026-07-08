@@ -72,21 +72,15 @@ export class CasLoginService {
     if (onProgress) {
       onProgress({ step: 'form', message: '获取登录页面...', percent: 5 });
     }
-    console.info(TAG, 'getLoginPageForm: requesting ' + this.LOGIN_PAGE);
     const resp: HttpResponse = await this.http.getNoRedirect(
       this.LOGIN_PAGE + '?service=' + encodeURIComponent(this.SERVICE_URL)
     );
-    console.info(TAG, 'getLoginPageForm: status=' + resp.statusCode +
-      ' isRedirect=' + resp.isRedirect + ' bodyLen=' + resp.body.length +
-      ' location=' + (resp.location || 'none'));
 
     // CAS 可能先 302 重定向（如果 TGC 有效则直接跳 service），也可能返回 200 登录页
     let body: string = resp.body;
     if (resp.isRedirect && resp.location) {
       // TGC 有效已跳转 → 跟进跳转拿到 MOD_AUTH_CAS
       const finalResp: HttpResponse = await this.http.getNoRedirect(resp.location);
-      console.info(TAG, 'getLoginPageForm: redirect follow status=' + finalResp.statusCode +
-        ' bodyLen=' + finalResp.body.length);
       body = finalResp.body;
     }
 
@@ -100,8 +94,6 @@ export class CasLoginService {
       // TGC 有效时 CAS 直接 302 到 service（如 ehall），不会返回登录页
       // ehall 首页 ~90KB，CAS 登录页 ~16KB
       if (body.length > 30000) {
-        console.info(TAG, 'getLoginPageForm: TGC auto-login detected (bodyLen=' +
-          body.length + ')');
         // 跨域 Cookie 修复：getNoRedirect 按原始 URL（ids）域名存了 ehall 重定向响应的
         // MOD_AUTH_CAS，导致 checkEhallLogin() 找不到 → 反复跳转死循环。
         // 复制到正确的 ehall 域名，并备份到 PreferenceUtil。
@@ -110,7 +102,6 @@ export class CasLoginService {
         const modMatch: RegExpMatchArray | null = ehCookies.match(/MOD_AUTH_CAS=([^;]+)/);
         if (modMatch && modMatch[1]) {
           await PreferenceUtil.putString('mod_auth_cas', modMatch[1]);
-          console.info(TAG, 'TGC auto-login: saved MOD_AUTH_CAS to both domains');
         }
         await this.http.saveCookies();
         return fields;
@@ -150,10 +141,6 @@ export class CasLoginService {
         fields.lt = ltDirectMatch[1];
       }
     }
-    console.info(TAG, 'parseHiddenFields: lt=' + (fields.lt.length > 0 ? fields.lt.substring(0, 30) + '...' : '(empty/ok)') +
-      ' execution=' + (fields.execution || 'MISSING') +
-      ' salt=' + (fields.pwdEncryptSalt ? fields.pwdEncryptSalt.substring(0, 20) + '...' : 'MISSING') +
-      ' bodyLen=' + html.length);
     return fields;
   }
 
@@ -269,12 +256,9 @@ export class CasLoginService {
     // 检查 ehall cookie 是否有 MOD_AUTH_CAS
     const ehallCookiePost: string = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (ehallCookiePost.indexOf('MOD_AUTH_CAS') < 0) {
-      console.error(`${TAG} postLogin: POST 完成后未获取到 MOD_AUTH_CAS，status=${postResult.statusCode}`);
       // 如果上面没检测到具体错误，返回登录页面的前500字帮助调试
-      console.info(`${TAG} postLogin response body: ${postResult.body.substring(0, 500)}`);
       throw new Error('登录失败，请检查账号密码');
     }
-    console.info(`${TAG} postLogin: MOD_AUTH_CAS found after POST`);
 
     if (onProgress) {
       onProgress({ step: 'redirect', message: '登录处理完成', percent: 80 });
@@ -350,22 +334,18 @@ export class CasLoginService {
     try {
       const restored: boolean = await this.tryAutoRestoreLogin();
       if (restored) {
-        console.info(TAG, 'checkAndAutoLogin: TGC restored OK');
         // Log TGC health for diagnostics
         const tgc = this.http.getAllCookies('ids.xidian.edu.cn');
         const hasCASTGC = tgc.toUpperCase().includes('CASTGC') || tgc.toUpperCase().includes('TGC');
-        console.info(TAG, 'checkAndAutoLogin: TGC cookie present=' + hasCASTGC + ' len=' + tgc.length);
         return true;
       }
     } catch (e) {
-      console.warn(TAG, 'checkAndAutoLogin: TGC restore failed: ' + String(e));
     }
 
     // Step 2: 用保存的密码正式登录
     const username: string = PreferenceUtil.getString('ids_account');
     const password: string = PreferenceUtil.getString('login_password');
     if (username.length === 0 || password.length === 0) {
-      console.info(TAG, 'checkAndAutoLogin: no saved credentials');
       return false;
     }
 
@@ -376,11 +356,9 @@ export class CasLoginService {
         return [];
       });
       if (success) {
-        console.info(TAG, 'checkAndAutoLogin: password login OK (TGC restore failed)');
         return true;
       }
     } catch (e) {
-      console.warn(TAG, 'checkAndAutoLogin: password login failed: ' + String(e));
     }
 
     return false;
@@ -390,7 +368,6 @@ export class CasLoginService {
   // 如果 CAS TGC (Ticket Granting Cookie) 仍有效，
   // 直接访问 login?service= 就会 302 到 ehall 并签发新 MOD_AUTH_CAS
   async tryAutoRestoreLogin(): Promise<boolean> {
-    console.info(TAG, 'tryAutoRestoreLogin: start');
     const serviceUrl: string = encodeURIComponent(this.SERVICE_URL);
     const loginWithService: string = this.LOGIN_PAGE + '?service=' + serviceUrl;
 
@@ -428,11 +405,9 @@ export class CasLoginService {
         await PreferenceUtil.putString('mod_auth_cas', modMatch[1]);
       }
       await PreferenceUtil.putBool('is_logged_in', true);
-      console.info(TAG, 'tryAutoRestoreLogin: success, has MOD_AUTH_CAS');
       return true;
     }
 
-    console.info(TAG, 'tryAutoRestoreLogin: failed, no MOD_AUTH_CAS, ehallCookies=' + ehallCookies.substring(0, 200));
     return false;
   }
 
@@ -441,7 +416,6 @@ export class CasLoginService {
     const libTarget: string = 'https://hyytsgxzs.xidian.edu.cn/api/index/casLoginDo.html?libraryId=5&openId=o2b1a5Fg6r8hKcL0FXopEkfmiQGc&source=xdbb';
     // 先请求 CAS，带上已有 CAS Cookie，已登录则返回 302
     const casUrl: string = 'https://ids.xidian.edu.cn/authserver/login?service=' + encodeURIComponent(libTarget);
-    console.info(TAG, 'getLibraryAuth: start via CAS, url=' + casUrl.substring(0, 120));
 
     let resp: HttpResponse = await this.http.get(casUrl);
     let loopGuard: number = 0;
@@ -449,7 +423,6 @@ export class CasLoginService {
     // 跟随 CAS → library 重定向链（全部用 GET）
     while (resp.isRedirect && resp.location && loopGuard < 10) {
       let nextUrl: string = resp.location;
-      console.info(TAG, 'getLibraryAuth: redirect #' + loopGuard + ' → ' + nextUrl.substring(0, 80));
       resp = await this.http.get(nextUrl);
       loopGuard++;
     }
@@ -460,14 +433,12 @@ export class CasLoginService {
     const prefix: string = 'wx.miniProgram.postMessage({';
     const idxStart: number = body.indexOf(prefix);
     if (idxStart < 0) {
-      console.warn(TAG, 'getLibraryAuth: no postMessage found, bodyLen=' + body.length + ' body[0:200]=' + body.substring(0, 200));
       return null;
     }
     const jsonStart: number = idxStart + prefix.length - 1;
     // Flutter: replaceFirst(");", ")") — 去掉末尾分号
     const jsonEnd: number = body.indexOf('})', jsonStart);
     if (jsonEnd < 0) {
-      console.warn(TAG, 'getLibraryAuth: postMessage end not found');
       return null;
     }
     let jsonStr: string = body.substring(jsonStart, jsonEnd + 1);
@@ -478,20 +449,17 @@ export class CasLoginService {
       const obj: Record<string, Object> = JSON.parse(jsonStr) as Record<string, Object>;
       const data: Record<string, Object> = obj['data'] as Record<string, Object>;
       if (!data) {
-        console.warn(TAG, 'getLibraryAuth: no data field in postMessage, json=' + jsonStr.substring(0, 200));
         return null;
       }
       const userId: string = String(data['id'] ?? '');
       const token: string = String(data['token'] ?? '');
       if (userId && token) {
-        console.info(TAG, 'getLibraryAuth: success, userId=' + userId + ' token=' + token.substring(0, 8) + '...');
         const result: LibraryAuthResult = { userId: userId, token: token };
         await PreferenceUtil.putString('library_user_id', userId);
         await PreferenceUtil.putString('library_token', token);
         return result;
       }
     } catch (parseErr) {
-      console.warn(TAG, 'getLibraryAuth: parse error: ' + String(parseErr) + ' json=' + jsonStr.substring(0, 200));
     }
     return null;
   }
@@ -501,14 +469,12 @@ export class CasLoginService {
     const urls = ['https://' + domain, 'http://' + domain];
     for (const u of urls) {
       const old: string = web_webview.WebCookieManager.fetchCookieSync(u);
-      console.error('CasLoginService', 'clearWebViewCookiesForDomain: domain=' + domain + ' url=' + u + ' old_len=' + old.length + ' old_cookies=' + old.substring(0, 200));
       if (old.length === 0) continue;
       const oldNames: string[] = [];
       for (const kv of old.split('; ')) {
         const eq: number = kv.indexOf('=');
         if (eq > 0) oldNames.push(kv.substring(0, eq).trim());
       }
-      console.error('CasLoginService', 'clearWebViewCookiesForDomain: clearing ' + oldNames.length + ' cookies for ' + domain);
       for (const name of oldNames) {
         try {
           web_webview.WebCookieManager.setCookie(u, name + '=; Domain=.xidian.edu.cn; Path=/; max-age=0');
@@ -552,9 +518,7 @@ export class CasLoginService {
     // 写 cookie 到所有可能用到的子域名
     const tgcCookies = allCookies.filter(c => c.toUpperCase().includes('TGC') || c.toUpperCase().includes('CASTGC'));
     const hasTGC = tgcCookies.length > 0;
-    console.info(TAG, 'syncCookiesToWebView: cookie count=' + allCookies.length + ' hasTGC=' + hasTGC);
     for (const t of tgcCookies) {
-      console.info(TAG, 'syncCookiesToWebView: TGC=' + t.substring(0, 80));
     }
     for (const domain of domains) {
       for (const kv of allCookies) {
@@ -563,10 +527,9 @@ export class CasLoginService {
           if (domain.startsWith('libspace')) {
             WCM.setCookie('http://' + domain, kv + '; Domain=.xidian.edu.cn; Path=/');
           }
-        } catch (e) { console.warn("CasLoginService", "WebView cookie set failed: " + String(e)); }
+        } catch (e) {}
       }
     }
-    console.info(TAG, 'Cookies synced to WebView CookieJar for ' + domains.length + ' domains');
   }
 
   // Sync only CAS CASTGC cookie to WebView CookieJar — write to ONE domain only.
@@ -578,7 +541,6 @@ export class CasLoginService {
     const WCM = web_webview.WebCookieManager;
     const idsCookies = this.http.getAllCookies("ids.xidian.edu.cn");
     if (idsCookies.length === 0) {
-      console.warn(TAG, "syncCasCookieOnly: no ids cookies to sync");
       return;
     }
     // 只提取 CASTGC，滤掉 route/JSESSIONID 等可能干扰目标域 OpenResty 的 cookie
@@ -590,10 +552,8 @@ export class CasLoginService {
       }
     }
     if (castgcOnly.length === 0) {
-      console.warn(TAG, "syncCasCookieOnly: no CASTGC found in ids cookies");
       return;
     }
-    console.info(TAG, "syncCasCookieOnly: syncing CASTGC only (filtered " + castgcOnly.length + " from " + idsCookies.split("; ").length + " ids cookies)");
     // Write ONLY CASTGC to ids.xidian.edu.cn
     // Domain=.xidian.edu.cn ensures Chromium auto-forwards to all subdomains.
     for (const kv of castgcOnly) {
@@ -601,22 +561,18 @@ export class CasLoginService {
         WCM.setCookie("https://ids.xidian.edu.cn", kv + "; Domain=.xidian.edu.cn; Path=/");
       } catch (e) { /* ignore */ }
     }
-    console.info(TAG, "syncCasCookieOnly: done, synced CASTGC to ids.xidian.edu.cn only");
 
   }
   // For ignypt/libspace: pre-walk the OAuth/redirect chain via HttpUtil
   // to get target domain session cookies, then sync only those to WebView.
   // These services DO NOT use CAS, they have their own session mechanism.
   async preWalkAndSyncTarget(entryUrl: string, targetDomain: string): Promise<void> {
-    console.info(TAG, "preWalkAndSyncTarget: walking chain to " + targetDomain);
     const startMs = Date.now();
     try {
       await this.http.get(entryUrl);
       const elapsedMs = Date.now() - startMs;
-      console.info(TAG, "preWalkAndSyncTarget: chain completed in " + elapsedMs + "ms");
       // Extract cookies from target domain only
       const targetCookies = this.http.getAllCookies(targetDomain);
-      console.info(TAG, "preWalkAndSyncTarget: " + targetDomain + " cookies len=" + targetCookies.length);
       // Sync to WebView CookieJar
       const WCM = web_webview.WebCookieManager;
       if (targetCookies.length > 0) {
@@ -628,37 +584,29 @@ export class CasLoginService {
             } catch (e) { /* ignore */ }
           }
         }
-        console.info(TAG, "preWalkAndSyncTarget: synced to WebView");
       }
     } catch (e) {
-      console.error(TAG, "preWalkAndSyncTarget failed: " + String(e));
     }
   }
 
   // HTTP 层预热：订水 OAuth 走一遍，xxcapp session 入 HTTP cookieStore，再同步到 WebView
   // 调用时机：登录成功后（HTTP 层已有 TGC），不需要 WebView
   async warmUpWebViewSession(): Promise<void> {
-    console.info(TAG, "warmUpWebViewSession: start");
     try {
       // Step 1: warm order OAuth (dingshui)
       const t1 = Date.now();
       await this.http.get("https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1");
-      console.info(TAG, "warmUpWebViewSession: order warm done, cost=" + (Date.now() - t1) + "ms");
       // Step 2: warm xxcapp OAuth (portal + dianfei)
       const t2 = Date.now();
       try {
         await this.http.get("https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://xxcapp.xidian.edu.cn/site/xidianPage/home");
-        console.info(TAG, "warmUpWebViewSession: xxcapp warm done, cost=" + (Date.now() - t2) + "ms");
       } catch (e2) {
-        console.warn(TAG, "warmUpWebViewSession: xxcapp warm failed: " + String(e2));
       }
       // Step 3: warm v8scan OAuth (校园卡) — 通过 xxcapp 的 CAS bridge
       const t3 = Date.now();
       try {
         await this.http.get("https://xxcapp.xidian.edu.cn/a_xidian/api/cas-login/index?redirect=https%3A%2F%2Fxxcapp.xidian.edu.cn%2Fuc%2Fapi%2Foauth%2Findex%3Fredirect%3Dhttps%253A%252F%252Fv8scan.xidian.edu.cn%252Fhome%252FopenHomePage%26appid%3D200200923164459783");
-        console.info(TAG, "warmUpWebViewSession: v8scan warm done, cost=" + (Date.now() - t3) + "ms");
       } catch (e3) {
-        console.warn(TAG, "warmUpWebViewSession: v8scan warm failed: " + String(e3));
       }
       await this.http.saveCookies();
       // Diagnostic: log cookie sizes per domain
@@ -668,24 +616,19 @@ export class CasLoginService {
         const ck = this.http.getAllCookies(d);
         diag += d + ":" + ck.length + " ";
       }
-      console.info(TAG, "warmUpWebViewSession: cookie lens -> " + diag);
       await this.syncCookiesToWebView();
-      console.info(TAG, "warmUpWebViewSession: done");
     } catch (e) {
-      console.warn(TAG, "warmUpWebViewSession: " + String(e));
     }
   }
 
   // HTTP 走订水 OAuth → 拿 xxcapp session → 注入 WebView CookieJar
   // 只需 xxcapp 这一个 cookie，不全量同步，轻量精准
   async injectXxcappSession(): Promise<void> {
-    console.info(TAG, 'injectXxcappSession: start');
     try {
       await this.http.get('https://order.xidian.edu.cn/mobile/thirdoauth/oauth2Xidian/1');
       await this.http.saveCookies();
       const xxcappCookies: string = this.http.getAllCookies('xxcapp.xidian.edu.cn');
       if (xxcappCookies.length === 0) {
-        console.info(TAG, 'injectXxcappSession: no xxcapp cookies found');
         return;
       }
       const WCM = web_webview.WebCookieManager;
@@ -696,9 +639,7 @@ export class CasLoginService {
           WCM.setCookie('https://xxcapp.xidian.edu.cn', trimmed + '; Domain=.xidian.edu.cn; Path=/');
         } catch (_e) { /* ignore */ }
       }
-      console.info(TAG, 'injectXxcappSession: done, ' + xxcappCookies.split('; ').length + ' cookies injected');
     } catch (e) {
-      console.warn(TAG, 'injectXxcappSession: ' + String(e));
     }
   }
 
@@ -706,7 +647,6 @@ export class CasLoginService {
 
   // 走 CAS OAuth 链建立 yjspt session，自动跟随重定向直到拿到最终页面
   async navigateToYjspt(targetUrl: string): Promise<void> {
-    console.info(TAG, 'navigateToYjspt: ' + targetUrl.substring(0, 60));
     try {
       let currentUrl = targetUrl;
       for (let hop = 0; hop < 8; hop++) {
@@ -714,7 +654,6 @@ export class CasLoginService {
         if (!resp.isRedirect || !resp.location) {
           // 已到达最终页面
           await this.http.saveCookies();
-          console.info(TAG, 'navigateToYjspt: done at hop=' + hop + ' status=' + resp.statusCode);
           return;
         }
         let next = resp.location;
@@ -726,15 +665,12 @@ export class CasLoginService {
         currentUrl = next;
       }
       await this.http.saveCookies();
-      console.info(TAG, 'navigateToYjspt: done (max hops)');
     } catch (e) {
-      console.warn(TAG, 'navigateToYjspt: ' + String(e));
     }
   }
 
   // 登录后检测是否为研究生账号（能否访问 yjspt）→ 设置 role 偏好
   async checkWhetherPostgraduate(): Promise<void> {
-    console.info(TAG, 'checkWhetherPostgraduate: start');
     try {
       await this.navigateToYjspt(
         'https://yjspt.xidian.edu.cn/gsapp/sys/yjsemaphome/portal/index.do');
@@ -746,15 +682,12 @@ export class CasLoginService {
         const data: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
         if (data['res'] !== null && data['res'] !== undefined) {
           PreferenceUtil.putBool('role', true);
-          console.info(TAG, 'checkWhetherPostgraduate: role=postgraduate');
           return;
         }
       }
       PreferenceUtil.putBool('role', false);
-      console.info(TAG, 'checkWhetherPostgraduate: role=undergraduate');
     } catch (e) {
       PreferenceUtil.putBool('role', false);
-      console.warn(TAG, 'checkWhetherPostgraduate: ' + String(e));
     }
   }
 
@@ -865,13 +798,11 @@ export class CasLoginService {
         if (setCookie) {
           const sc: string = typeof setCookie === 'string' ? setCookie : String(setCookie);
           allSetCookies += (allSetCookies.length > 0 ? ',' : '') + sc;
-          console.info(`${TAG} httpPostOneShot: accumulated cookies, total len=${allSetCookies.length}`);
         }
         // 记录最后一个 Location（即最终目标 URL）
         const rawLoc: Object = hdr['location'] || hdr['Location'];
         if (rawLoc) {
           lastRedirectLoc = typeof rawLoc === 'string' ? rawLoc : String(rawLoc);
-          console.info(`${TAG} httpPostOneShot: redirect hop to ${lastRedirectLoc.substring(0, 80)}`);
         }
       });
 
@@ -887,7 +818,6 @@ export class CasLoginService {
         },
         async (err: BusinessError | undefined, data: http.HttpResponse) => {
           if (err !== undefined && err.code !== 0) {
-            console.info(`${TAG} httpPostOneShot: err code=${err.code} msg=${err.message}`);
             req.destroy();
             reject(new Error('HTTP ' + err.code + ': ' + err.message));
             return;
@@ -900,7 +830,6 @@ export class CasLoginService {
             self.http.saveResponseCookies('ehall.xidian.edu.cn', allSetCookies);
             self.http.saveCookies().catch(() => {
             });
-            console.info(`${TAG} httpPostOneShot: saved ${allSetCookies.length} chars of cookies`);
           }
 
           // 也存最终响应的 cookie（405 等无 body 响应 header 可能为空）
@@ -912,7 +841,6 @@ export class CasLoginService {
               self.http.saveResponseCookies('ehall.xidian.edu.cn', finalSC);
               self.http.saveCookies().catch(() => {
               });
-              console.info(`${TAG} httpPostOneShot: saved final response cookies`);
             }
           } catch (e) {
             // safe: ignore header parse errors
@@ -923,7 +851,6 @@ export class CasLoginService {
           resp.isRedirect = false;
           resp.body = typeof data.result === 'string' ? data.result : '';
           resp.location = lastRedirectLoc.length > 0 ? lastRedirectLoc : '';
-          console.info(`${TAG} httpPostOneShot: final status=${data.responseCode}, bodyLen=${resp.body.length}, cookies=${allSetCookies.length}`);
           resolve(resp);
         }
       );

@@ -1,3 +1,4 @@
+﻿import { AccentColors } from '../../utils/AccentColors';
 // MobilePortalPage.ets — 移动门户（应用内 WebView，复用 CAS 登录态）
 import web_webview from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -26,7 +27,7 @@ export struct MobilePortalPage {
       Text(t)
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .layoutWeight(1)
     }
     .width('100%')
@@ -55,7 +56,6 @@ export struct MobilePortalPage {
           })
           .onErrorReceive((event) => {
             if (event) {
-              console.error(TAG, 'WebView error: ' + event.error.getErrorInfo());
               this.loadError = '加载失败: ' + event.error.getErrorInfo();
               this.isLoading = false;
             }

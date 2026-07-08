@@ -11,6 +11,15 @@ export struct AttendancePage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+
+  private accentTextColor(): string {
+    const hex = this.accentColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b);
+    return lum > 160 ? '#333333' : '#FFFFFF';
+  }
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = false;
   @State errorMsg: string = '';
@@ -43,7 +52,7 @@ export struct AttendancePage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(this.accentTextColor())
         .layoutWeight(1)
     }
     .width('100%')
@@ -61,13 +70,8 @@ export struct AttendancePage {
     this.errorMsg = '';
     try {
       const data: ClassAttendance[] = await this.service.getAttendanceRecords();
-      console.info('AttendancePage', 'loaded ' + String(data.length) + ' courses');
       for (let i = 0; i < data.length; i++) {
         const c = data[i];
-        console.info('AttendancePage', '  [' + String(i) + '] ' + c.courseName +
-          ' rate=' + c.attendanceRate + ' absence=' + c.absenceCount +
-          ' required=' + c.requiredCheckIn + ' totalTimes=' + String(c.totalTimes) +
-          ' status=' + c.getStatusLabel() + ' id=' + c.courseId + '/' + c.clazzId);
       }
       this.courses = data;
       // 从本地课表计算每门课的总课数（对齐 Flutter numberOfClassComputedSignal）
@@ -75,7 +79,6 @@ export struct AttendancePage {
       this.updateGroups();
     } catch (e) {
       this.errorMsg = '加载失败，请检查登录状态';
-      console.error('AttendancePage loadData error: ' + String(e));
     } finally {
       this.loading = false;
     }
@@ -113,7 +116,6 @@ export struct AttendancePage {
       const ctx = getContext(this);
       const filePath: string = ctx.filesDir + '/class_table_' + semCode + '.json';
       if (!fileIo.accessSync(filePath)) {
-        console.warn('AttendancePage', 'fillTotalTimes: class table file not found at ' + filePath);
         return;
       }
       const file: fileIo.File = fileIo.openSync(filePath, fileIo.OpenMode.READ_ONLY);
@@ -160,7 +162,6 @@ export struct AttendancePage {
         }
       }
     } catch (e) {
-      console.warn('AttendancePage', 'fillTotalTimes error: ' + String(e));
     }
   }
 
@@ -181,7 +182,6 @@ export struct AttendancePage {
       );
       this.detailCourses = data;
     } catch (e) {
-      console.error('AttendancePage openDetail error: ' + String(e));
     } finally {
       this.detailLoading = false;
     }

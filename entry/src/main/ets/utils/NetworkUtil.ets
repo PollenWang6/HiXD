@@ -74,19 +74,16 @@ class NetworkUtil {
       this.netConnection = connection.createNetConnection();
 
       this.netConnection.on('netAvailable', (netHandle: connection.NetHandle): void => {
-        console.info(TAG, 'Network available, netId=' + netHandle.netId);
         this._isAvailable = true;
         this.notifyAll(true);
       });
 
       this.netConnection.on('netUnavailable', (): void => {
-        console.warn(TAG, 'Network unavailable');
         this._isAvailable = false;
         this.notifyAll(false);
       });
 
       this.netConnection.on('netLost', (netHandle: connection.NetHandle): void => {
-        console.warn(TAG, 'Network lost, netId=' + netHandle.netId);
         setTimeout((): void => {
           this.checkNow().then((available: boolean): void => {
             if (!available) {
@@ -99,13 +96,10 @@ class NetworkUtil {
 
       this.netConnection.register((err: BusinessError): void => {
         if (err) {
-          console.error(TAG, 'Failed to register network callback: ' + JSON.stringify(err));
         } else {
-          console.info(TAG, 'Network callback registered');
         }
       });
     } catch (e) {
-      console.error(TAG, 'initConnection failed: ' + String(e));
     }
   }
 
@@ -114,7 +108,6 @@ class NetworkUtil {
       try {
         this.callbacks[i](available);
       } catch (e) {
-        console.error(TAG, 'Callback error: ' + String(e));
       }
     }
   }
@@ -124,12 +117,10 @@ class NetworkUtil {
       try {
         this.netConnection.unregister((err: BusinessError): void => {
           if (err) {
-            console.warn(TAG, 'Unregister failed: ' + JSON.stringify(err));
           }
         });
         this.netConnection = null;
       } catch (e) {
-        console.error(TAG, 'destroy failed: ' + String(e));
       }
     }
     this.callbacks.length = 0;

@@ -13,6 +13,15 @@ export struct DormWaterPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
+  private accentTextColor(): string {
+    const hex = this.accentColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b);
+    return lum > 160 ? '#333333' : '#FFFFFF';
+  }
+
   // 登录态
   @State loggedIn: boolean = false;
   @State loginLoading: boolean = false;
@@ -54,7 +63,7 @@ export struct DormWaterPage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(this.accentTextColor())
         .layoutWeight(1)
     }
     .width('100%')

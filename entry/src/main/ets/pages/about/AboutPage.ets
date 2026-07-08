@@ -1,4 +1,5 @@
-﻿// AboutPage.ets — 关于软件
+﻿import { AccentColors } from '../../utils/AccentColors';
+// AboutPage.ets — 关于软件
 import { ThemeColors } from '../../utils/ThemeColors';
 import { VersionService } from '../../services/VersionService';
 import { VersionInfo } from '../../services/VersionService';
@@ -132,7 +133,6 @@ export struct AboutPage {
                   if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
                   if (this.updateInfo) {
                     try { this.context.openLink(this.updateInfo.url); } catch (_) {
-                      console.warn("AboutPage", "openLink failed");
                     }
                   }
                 })
@@ -165,9 +165,9 @@ export struct AboutPage {
   @Builder customTitle() {
     Row({ space: 6 }) {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
-        SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([Color.White])
+        SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([AccentColors.textContrast])
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text('关于软件').fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+      Text('关于软件').fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })
   }

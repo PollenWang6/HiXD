@@ -78,6 +78,22 @@ export class AccentColors {
     return (AppStorage.get('accent_color') as string) ?? '#2979FF';
   }
 
+  /**
+   * 判断 hex 颜色是否为"亮色"（白字在上面看不清）。
+   * 使用简化亮度公式 (0.299R + 0.587G + 0.114B)，阈值 170。
+   */
+  static isLightColor(hex: string): boolean {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 170;
+  }
+
+  /** 标题栏文字/图标色：浅底黑字，深底白字 */
+  static get textContrast(): Color {
+    return AccentColors.isLightColor(AccentColors.currentColor) ? Color.Black : Color.White;
+  }
+
   static get currentName(): string {
     const idx: number = AppStorage.get('accent_index') as number ?? 0;
     if (idx === -1) return '自定义';

@@ -257,7 +257,6 @@ export class SportService {
     const data: Record<string, Object> = resp['data'] as Record<string, Object>;
     this.userId = String(data['id'] ?? '');
     this.token = String(data['token'] ?? '');
-    console.info(TAG, 'login success, userId=' + this.userId);
   }
 
   // ===== 数据获取 =====
@@ -328,7 +327,6 @@ export class SportService {
             }
           } catch (e) {
             yearItem.moreInfo = '详情获取失败';
-            console.warn(TAG, 'getScoreDetail error: ' + JSON.stringify(e));
           }
         }
 
@@ -444,11 +442,9 @@ export class SportService {
             const components: SportScoreComponent[] = await this.getScoreDetail(latestId);
             result[result.length - 1].scoreComponents = components;
           } catch (e) {
-            console.warn(TAG, 'getScoreDetail error: ' + JSON.stringify(e));
           }
         }
       } catch (e) {
-        console.warn(TAG, 'getClass item error: ' + JSON.stringify(e));
         continue;
       }
     }

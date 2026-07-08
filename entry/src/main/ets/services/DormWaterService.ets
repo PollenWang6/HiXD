@@ -156,7 +156,6 @@ export class DormWaterService {
     PreferenceUtil.putString('dorm_water_token', result.token);
     PreferenceUtil.putString('dorm_water_uid', result.uid);
     PreferenceUtil.putString('dorm_water_eid', result.eid);
-    console.info(TAG, 'login success, uid=' + result.uid);
     return result;
   }
 

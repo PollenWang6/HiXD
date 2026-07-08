@@ -1,4 +1,5 @@
-﻿// ExamPage.ets — 考试安排页面
+﻿import { AccentColors } from '../../utils/AccentColors';
+// ExamPage.ets — 考试安排页面
 import { ThemeColors } from '../../utils/ThemeColors';
 import { SemesterUtil, ExamItemModel } from '../../services/EhallService';
 import { ExamService } from '../../services/ExamService';
@@ -42,7 +43,7 @@ export struct ExamPage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .layoutWeight(1)
     }
     .width('100%')
@@ -116,18 +117,14 @@ export struct ExamPage {
       const items: ExamItemModel[] = ExamService.parseExamSchedule(raw);
       // 日志：打印完整考试数据，方便排查 ksmc 显示问题
       for (const it of items) {
-        console.info('ExamPage', 'exam item: kcm=' + it.kcm + ' | ksmc=' + it.ksmc + ' | ksrq=' + it.ksrq + ' | jasmc=' + it.jasmc + ' | zw=' + it.zw);
       }
       this.arranged = items.filter(i => i.ksrq && i.ksrq.length > 0);
       this.notArranged = items.filter(i => !i.ksrq || i.ksrq.length === 0);
       this.showCacheBanner = false;
       if (items.length > 0) {
         PreferenceUtil.putString('exam_schedule_cache', raw);
-        console.error('ExamPage', '[DIAG-SAVE] items.length=' + items.length + ' rawLen=' + raw.length + ' calling saveSharedFile');
         PreferenceUtil.saveSharedFile('exam_schedule', raw);
-        console.info('ExamPage', 'Cached exam data, raw.length=' + raw.length);
       } else {
-        console.warn('ExamPage', 'Server returned 0 exams, keeping old cache if any');
       }
     } catch (e) {
       this.errorMsg = (e as Error).message?.includes('未登录') ? '登录已过期' : '加载失败';
@@ -140,9 +137,8 @@ export struct ExamPage {
             this.arranged = cachedItems.filter(i => i.ksrq && i.ksrq.length > 0);
             this.notArranged = cachedItems.filter(i => !i.ksrq || i.ksrq.length === 0);
             this.showCacheBanner = true;
-            console.info('ExamPage', 'Showing cached exam data, items=' + cachedItems.length);
           }
-        } catch (_parseErr) { console.warn('ExamPage', 'cache parse failed'); }
+        } catch (_parseErr) {}
       }
     } finally { this.loading = false; }
   }

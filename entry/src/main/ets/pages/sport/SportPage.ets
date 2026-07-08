@@ -3,6 +3,7 @@
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { SportService, SportScore, SportScoreOfYear, SportClassItem, SportItem, SportScoreComponent } from '../../services/SportService';
+import { SegmentTab } from '../../components/SegmentTab';
 
 const WEEKDAY_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -13,13 +14,16 @@ export struct SportPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
+  private accentTextColor(): string {
+    const hex = this.accentColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b);
+    return lum > 160 ? '#333333' : '#FFFFFF';
+  }
+
   @State currentTab: number = 0;
-  @State indicatorBase: number = 0;
-  @State indicatorSwipe: number = 0;
-  @State barW: number = 360;
-  private swiperCtrl: SwiperController = new SwiperController();
-  private swiperWidth: number = 360;
-  private perTabW: number = 180;
 
   // 体测成绩
   @State scoreLoading: boolean = false;
@@ -55,7 +59,7 @@ export struct SportPage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(this.accentTextColor())
         .layoutWeight(1)
     }
     .width('100%')
@@ -103,7 +107,6 @@ export struct SportPage {
     this.classErrorMsg = '';
     try {
       this.classList = await this.sport.getClass();
-      console.info('SportPage', 'loadClass result: ' + this.classList.length + ' items');
     } catch (e) {
       this.classErrorMsg = (e as Error).message || '获取课程信息失败';
     } finally {
@@ -529,85 +532,22 @@ export struct SportPage {
       .width('100%')
       .backgroundColor(this.accentColor)
 
-      // Tab 栏（单条滑动指示器）
-      Stack({ alignContent: Alignment.BottomStart }) {
-        Row() {
-          Column() {
-            Text('体测成绩').fontSize(15)
-              .fontColor(this.currentTab === 0 ? this.accentColor : ThemeColors.textSecondary)
-              .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-          }
-          .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-          .onClick(() => {
-            this.currentTab = 0;
-            animateTo({ duration: 220, curve: Curve.FastOutSlowIn }, () => {
-              this.indicatorBase = 0;
-              this.indicatorSwipe = 0;
-            });
-            this.swiperCtrl.changeIndex(0, true);
+      // Tab + Swiper
+      SegmentTab({
+        tabs: ['体测成绩', '课程信息'],
+        currentIndex: $currentTab,
+        accentColor: this.accentColor,
+        onTabChange: (idx: number) => {
+          if (idx === 0) {
             if (!this.sportScore && !this.scoreLoading) this.loadScore();
-          })
-
-          Column() {
-            Text('课程信息').fontSize(15)
-              .fontColor(this.currentTab === 1 ? this.accentColor : ThemeColors.textSecondary)
-              .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-          }
-          .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-          .onClick(() => {
-            this.currentTab = 1;
-            animateTo({ duration: 220, curve: Curve.FastOutSlowIn }, () => {
-              this.indicatorBase = this.perTabW;
-              this.indicatorSwipe = 0;
-            });
-            this.swiperCtrl.changeIndex(1, true);
+          } else {
             if (this.classList.length === 0 && !this.classLoading) this.loadClass();
-          })
+          }
         }
-        .width('100%')
-        .onAreaChange((_old: Area, newArea: Area) => {
-          this.barW = newArea.width as number;
-          this.perTabW = this.barW / 2;
-        })
-
-        // 单条滑动指示器
-        Row()
-          .width(24).height(3)
-          .backgroundColor(this.accentColor).borderRadius(1.5)
-          .margin({ left: this.indicatorBase + this.indicatorSwipe - 12 + this.barW * 0.25 })
-      }
-      .width('100%')
-      .backgroundColor(ThemeColors.bgCard)
-      .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
-
-      // Swiper 内容区
-      Swiper(this.swiperCtrl) {
+      }) {
         Column() { this.ScoreTab() }.width('100%')
         Column() { this.ClassTab() }.width('100%')
       }
-      .index(this.currentTab)
-      .indicator(false)
-      .loop(false)
-      .onAreaChange((_old: Area, newArea: Area) => {
-        this.swiperWidth = newArea.width as number;
-      })
-      .onGestureSwipe((index: number, event: SwiperAnimationEvent) => {
-        const offset: number = event.currentOffset as number;
-        const ratio: number = Math.abs(offset) / this.swiperWidth;
-        const move: number = ratio >= 1 ? this.perTabW : this.perTabW * ratio;
-        this.indicatorSwipe = offset < 0 ? move : -move;
-      })
-      .onAnimationStart((_index: number, targetIndex: number, _event: SwiperAnimationEvent) => {
-        this.currentTab = targetIndex;
-        this.indicatorBase = targetIndex === 0 ? 0 : this.perTabW;
-        this.indicatorSwipe = 0;
-        if (targetIndex === 0) {
-          if (!this.sportScore && !this.scoreLoading) this.loadScore();
-        } else {
-          if (this.classList.length === 0 && !this.classLoading) this.loadClass();
-        }
-      })
-      .layoutWeight(1)
 
       // 密码弹窗
       Stack() {

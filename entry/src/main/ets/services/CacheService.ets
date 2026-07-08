@@ -90,7 +90,6 @@ export class CacheService {
       fileIo.writeSync(file.fd, encoded.buffer);
       fileIo.closeSync(file);
     } catch (e) {
-      console.error(CACHE_TAG, 'Cache set failed');
     }
   }
 

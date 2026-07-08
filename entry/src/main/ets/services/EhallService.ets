@@ -83,6 +83,16 @@ export class SemesterUtil {
     return (y - 1) + '-' + y + '-1';
   }
 
+  // 学期标准总周数（西电标准：秋季/春季 20 周含考试周；短学期约 6 周）
+  // 用于课表周选择器上限，与 Flutter traintime_pda 保持一致（即使数据 SKZC 缺失末周也显示标准周数）
+  static getStandardWeekCount(semCode: string): number {
+    const parts: string[] = semCode.split('-');
+    const t: number = parts.length >= 3 ? parseInt(parts[2]) : 1;
+    if (t === 2) return 20;   // 春季学期 20 周
+    if (t === 3) return 6;    // 短学期（小学期）约 6 周
+    return 20;                // 秋季学期 20 周
+  }
+
   static formatSemester(code: string): string {
     const parts: string[] = code.split('-');
     if (parts.length !== 3) return code;
@@ -126,7 +136,6 @@ export class EhallService {
 
   clearSessionCache(): void {
     this.appSessionUrl = {};
-    console.info(TAG, 'Session cache cleared');
   }
 
   static getInstance(): EhallService {
@@ -147,13 +156,11 @@ export class EhallService {
         const m = raw.match(/"hasLogin"\s*:\s*(true|false)/);
         if (m) {
           const hasLogin = m[1] === 'true';
-          console.info(TAG, 'checkEhallLogin: hasLogin=' + hasLogin);
           return hasLogin;
         }
       }
       return false;
     } catch (e) {
-      console.warn(TAG, 'checkEhallLogin network error: ' + JSON.stringify(e));
       throw new Error('NETWORK_ERROR');
     }
   }
@@ -162,26 +169,19 @@ export class EhallService {
     try {
       const verified = await this.checkEhallLogin();
       if (verified) {
-        console.info(TAG, 'tryAutoRestoreLogin: already logged in');
         return true;
       }
-      console.info(TAG, 'tryAutoRestoreLogin: attempting CAS restore...');
       const cas = CasLoginService.getInstance();
       const restored = await cas.tryAutoRestoreLogin();
       if (restored) {
-        console.info(TAG, 'tryAutoRestoreLogin: CAS redirect completed, re-verifying...');
         const reVerified = await this.checkEhallLogin();
         if (reVerified) {
-          console.info(TAG, 'tryAutoRestoreLogin: CAS restore verified, session valid');
           await cas.syncCookiesToWebView();
           return true;
         }
-        console.warn(TAG, 'tryAutoRestoreLogin: re-verification FAILED, CAS restore was false positive');
       }
-      console.info(TAG, 'tryAutoRestoreLogin: all attempts failed');
       return false;
     } catch (e) {
-      console.warn(TAG, 'tryAutoRestoreLogin failed: ' + JSON.stringify(e));
       return false;
     }
   }
@@ -201,13 +201,11 @@ export class EhallService {
         const user = (obj['user'] || obj) as Record<string, string>;
         const sid = user['code'] || user['userId'] || user['userName'] || user['userCode'] || '';
         if (sid) {
-          console.info(TAG, 'fetchStudentId: got from userFavoriteApps');
           await PreferenceUtil.putString('ids_account', sid);
           return sid;
         }
       }
     } catch (e) {
-      console.warn(TAG, 'fetchStudentId: userFavoriteApps failed: ' + JSON.stringify(e));
     }
 
     try {
@@ -221,22 +219,18 @@ export class EhallService {
         const user = (obj['user'] || obj) as Record<string, string>;
         const sid = user['code'] || user['userId'] || user['userName'] || user['userCode'] || '';
         if (sid) {
-          console.info(TAG, 'fetchStudentId: got from getuserinfo');
           await PreferenceUtil.putString('ids_account', sid);
           return sid;
         }
       }
     } catch (e) {
-      console.warn(TAG, 'fetchStudentId: getuserinfo failed: ' + JSON.stringify(e));
     }
 
-    console.error(TAG, 'fetchStudentId: all methods failed');
     return '';
   }
 
   private async activateAppSession(appId: string, force: boolean = false): Promise<void> {
     if (!force && this.appSessionUrl[appId]) {
-      console.info(TAG, 'activateAppSession: using cached for ' + appId);
       return;
     }
 
@@ -245,55 +239,43 @@ export class EhallService {
 
     const cookiesBefore = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (!force && cookiesBefore.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: already have JSESSIONID, skip for ' + appId);
       return;
     }
 
-    console.info(TAG, 'activateAppSession: establishing session for ' + appId);
 
     try {
       const resp = await this.http.get(
         'https://ehall.xidian.edu.cn/appShow?appId=' + appId,
         EHALL_HEADERS
       );
-      console.info(TAG, 'activateAppSession: /appShow resp=' + resp.statusCode);
     } catch (e) {
-      console.warn(TAG, 'activateAppSession: /appShow failed (expected): ' + JSON.stringify(e));
     }
 
     const cookiesAfter1 = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesAfter1.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: JSESSIONID obtained from /appShow');
       return;
     }
 
     try {
       const directUrl = 'https://ehall.xidian.edu.cn' + appPath + '/%2Adefault%2A/index.do';
-      console.info(TAG, 'activateAppSession: trying URL-encoded default page: ' + directUrl);
       const resp2 = await this.http.get(directUrl, EHALL_HEADERS);
-      console.info(TAG, 'activateAppSession: direct page resp=' + resp2.statusCode);
 
       if (resp2.isRedirect && resp2.location) {
         let loc: string = resp2.location;
         if (loc.startsWith('/')) {
           loc = 'https://ehall.xidian.edu.cn' + loc;
         }
-        console.info(TAG, 'activateAppSession: following redirect to ' + loc);
         try {
           await this.http.get(loc, EHALL_HEADERS);
         } catch (e3) {
-          console.warn(TAG, 'activateAppSession: redirect follow failed: ' + JSON.stringify(e3));
         }
       }
     } catch (e2) {
-      console.warn(TAG, 'activateAppSession: direct page failed: ' + JSON.stringify(e2));
     }
 
     const cookiesFinal = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     const hasModAuth = cookiesFinal.toLowerCase().includes('mod_auth_cas');
     const hasJsession = cookiesFinal.toLowerCase().includes('jsessionid');
-    console.info(TAG, 'activateAppSession: final cookies hasMOD_AUTH=' + hasModAuth +
-      ' hasJSESSIONID=' + hasJsession);
   }
 
   private readonly _appCtx: AppPostContext = new AppPostContext(
@@ -312,7 +294,6 @@ export class EhallService {
 
   static extractRaw(body: string): object[] {
     try {
-      console.info(TAG, 'extractRaw: parsing body length=' + body.length);
       const obj = JSON.parse(body) as Record<string, object>;
 
       const datas = obj['datas'];
@@ -324,7 +305,6 @@ export class EhallService {
             const subMap = sub as Record<string, object>;
             const rows = subMap['rows'];
             if (Array.isArray(rows)) {
-              console.info(TAG, 'extractRaw: found rows via datas.' + key + '.rows, count=' + rows.length);
               return rows as object[];
             }
             const extParams = subMap['extParams'];
@@ -332,7 +312,6 @@ export class EhallService {
               const extMap = extParams as Record<string, object>;
               const extRows = extMap['rows'];
               if (Array.isArray(extRows)) {
-                console.info(TAG, 'extractRaw: found rows via datas.' + key + '.extParams.rows, count=' + extRows.length);
                 return extRows as object[];
               }
             }
@@ -348,7 +327,6 @@ export class EhallService {
               const tmap: Record<string, object> = third as Record<string, object>;
               const rows = tmap['rows'];
               if (Array.isArray(rows)) {
-                console.info(TAG, 'extractRaw: found rows via recursive, count=' + rows.length);
                 return rows as object[];
               }
             }
@@ -356,19 +334,15 @@ export class EhallService {
         }
       }
 
-      console.warn(TAG, 'extractRaw: no rows found in response');
       return [];
     } catch (e) {
-      console.error(TAG, 'extractRaw parse error: ' + JSON.stringify(e) + ' body[0:200]=' + body.substring(0, 200));
       return [];
     }
   }
 
   // ===== 登录后预加载 =====
   async preloadAllData(): Promise<void> {
-    console.info(TAG, 'preloadAllData: start');
     if (AppStorage.get('preload_status') === 'loading') {
-      console.info(TAG, 'preloadAllData: already running, skip');
       return;
     }
     AppStorage.setOrCreate('preload_status', 'loading');
@@ -378,7 +352,6 @@ export class EhallService {
       const sid: string = await this.fetchStudentId();
       if (!sid) {
         PreferenceUtil.putString('preload_status', '');
-        console.warn(TAG, 'preloadAllData: no student ID');
         return;
       }
 
@@ -386,35 +359,31 @@ export class EhallService {
       if (!PreferenceUtil.getBool('role')) {
         ClassService.getInstance().getSemesterStartDateFromApi(semCode).then((date: string | null) => {
           if (date) { PreferenceUtil.putString('semester_start_date', date); }
-        }).catch((_e: Error) => { console.warn("EhallService", "ignored error: " + String(_e.message)); });
+        }).catch((_e: Error) => {});
       }
 
       // 顺序预加载：课表 → 考试 → 实验，进度逐步推进
-      ClassService.getInstance().getClassTable(semCode, sid, true).then(() => {
+      // 注意：必须 await 整条链，否则 preloadAllData 会在数据拉完前就 resolve，
+      // 导致调用方（如首页自动同步日历）读到旧缓存
+      await ClassService.getInstance().getClassTable(semCode, sid, true).then(() => {
         AppStorage.setOrCreate('preload_progress', '考试');
         AppStorage.setOrCreate('ct_updated', String(Date.now()));
         return ExamService.getInstance().getExamSchedule(semCode);
       }).then((raw: string) => {
         if (raw && raw.length > 100) {
           PreferenceUtil.putString('exam_schedule_cache', raw);
-          console.error(TAG, '[DIAG-SAVE] preload: calling saveSharedFile rawLen=' + raw.length);
           PreferenceUtil.saveSharedFile('exam_schedule', raw);
-          console.info(TAG, 'preload: exam saved, ' + raw.length + ' chars');
         } else {
-          console.warn(TAG, 'preload: exam data too short (' + (raw ? raw.length : 0) + '), keeping old cache');
         }
         AppStorage.setOrCreate('preload_progress', '实验');
         return ExperimentService.getInstance().preloadDirect();
       }).then(() => {
         AppStorage.setOrCreate('preload_status', 'done');
-        console.info(TAG, 'preloadAllData: done');
       }).catch((e: Error) => {
         AppStorage.setOrCreate('preload_status', 'done');
-        console.warn(TAG, 'preload: ' + String(e));
       });
     } catch (e) {
       AppStorage.setOrCreate('preload_status', 'done');
-      console.warn(TAG, 'preloadAllData: ' + String(e));
     }
   }
 

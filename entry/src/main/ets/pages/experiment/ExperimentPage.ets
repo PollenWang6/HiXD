@@ -1,4 +1,5 @@
-﻿// ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
+﻿import { AccentColors } from '../../utils/AccentColors';
+// ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { SemesterUtil } from '../../services/EhallService';
@@ -59,7 +60,7 @@ export struct ExperimentPage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .layoutWeight(1)
     }
     .width('100%')
@@ -111,7 +112,6 @@ export struct ExperimentPage {
       // === Step 0: 先试直接调 API —— 如果已有 session 直接取数据 ===
       let r0: HttpResponse = await http.get(SYSJ_BASE + '/xidian/schedule/myScheduleInfoAjax?termId=' + TERM_ID + '&week=1');
       if (r0.isOk && r0.body.length > 0 && r0.body.charAt(0) === '[') {
-        console.info(TAG, 'already logged in, skip OAuth');
         // 直接进入数据获取循环
         let allItems: SysjScheduleItem[] = [];
         this.parseWeekData(r0.body, 1, allItems);
@@ -122,7 +122,6 @@ export struct ExperimentPage {
           } catch (e) { /* continue */ }
           this.fetchProgress = '(' + String(w) + '/' + String(MAX_WEEKS) + ')';
         }
-        console.info(TAG, 'fetched=' + String(allItems.length));
         if (allItems.length > 0) {
           let co: ESObject = { 'ts': Date.now(), 'data': allItems } as ESObject;
           PreferenceUtil.putString(CACHE_KEY, JSON.stringify(co));
@@ -132,21 +131,18 @@ export struct ExperimentPage {
         if (allItems.length > 0) { this.pageState = PageState.SUCCESS; return; }
         else { this.onError('暂无实验信息'); return; }
       }
-      console.info(TAG, 'need OAuth, API returned HTML or empty');
 
       // === Step 1: 从 sysj OAuth 重定向链提取真实 state ===
       let state: string = '';
       let r1: HttpResponse = await http.get(SYSJ_BASE + '/xidian/test');
       let b1: string = r1.body || '';
-      console.info(TAG, 'step1 body len=' + b1.length);
       let om: RegExpMatchArray | null = b1.match(/[?&]state=([a-f0-9\-]{20,50})/i);
-      if (om) { state = om[1]; console.info(TAG, 'state from body='+state); }
+      if (om) { state = om[1];}
 
       // 如果 body 没有，试用 getNoRedirect 拦截重定向
       if (state.length === 0) {
         for (let a: number = 0; a < 4; a++) {
           let sr: HttpResponse = await http.getNoRedirect(SYSJ_BASE + '/xidian/test');
-          console.info(TAG, 'step1-gnr'+a+': isRedirect='+sr.isRedirect+' status='+sr.statusCode+' loc='+(sr.location||'none').substring(0,120));
           if (sr.location && sr.location.length > 0) {
             let om2: RegExpMatchArray | null = sr.location.match(/[?&]state=([^&]+)/);
             if (om2) { state = om2[1]; break; }
@@ -154,7 +150,6 @@ export struct ExperimentPage {
             let nextUrl: string = sr.location;
             if (!nextUrl.startsWith('http')) { nextUrl = SYSJ_BASE + (nextUrl.startsWith('/')?nextUrl:'/'+nextUrl); }
             let sr2: HttpResponse = await http.getNoRedirect(nextUrl);
-            console.info(TAG, 'step1-gnr'+a+'-follow: loc='+(sr2.location||'none').substring(0,120));
             if (sr2.location) {
               let om3: RegExpMatchArray | null = sr2.location.match(/[?&]state=([^&]+)/);
               if (om3) { state = om3[1]; break; }
@@ -167,7 +162,6 @@ export struct ExperimentPage {
         }
       }
       if (state.length === 0) { this.onError('无法获取 OAuth 认证参数'); return; }
-      console.info(TAG, 'state=' + state);
 
       // === Step 2: sysj OAuth → CAS OAuth authorize ===
       let params = 'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/xidian/webapp/callback') +
@@ -175,7 +169,6 @@ export struct ExperimentPage {
         '&authorize_uri=' + encodeURIComponent(SYSJ_BASE + '/uaa/oauth/authorize');
       let r2 = await http.get(SYSJ_BASE + '/uaa/xidian/login?' + params);
       let b2 = r2.body || '';
-      console.info(TAG, 'login page got, len=' + b2.length);
 
       // Step 3: CAS — http.get() 会把重定向链中 sysj 的 cookie 错存到 ids 域名
       // 先备份 ids/ehall cookie，CAS 完成后恢复，避免污染 portal 页面
@@ -191,7 +184,6 @@ export struct ExperimentPage {
         this.onError('CAS 登录已过期，请先重新登录统一认证');
         return;
       }
-      console.info(TAG, 'CAS done, body=' + b3.length);
       // CAS 重定向到 sysj 后，Set-Cookie 被 HttpUtil 按原始 URL 存到了 ids 域名
       // sysj OAuth 需要这些 cookie 在 sysj.xidian.edu.cn 下，复制一份
       http.copyCookiesForDomain('ids.xidian.edu.cn', 'sysj.xidian.edu.cn');
@@ -207,7 +199,6 @@ export struct ExperimentPage {
       let cmA: RegExpMatchArray | null = b3.match(/var password = '([^']+)'/);
       if (cmA) {
         pwd = cmA[1];
-        console.info(TAG, 'got pwd from CAS step, len=' + String(pwd.length));
       }
 
       // 方式B：调 /uaa/oauth/authorize 拿 code
@@ -217,28 +208,18 @@ export struct ExperimentPage {
           '&state=' + state + '&client_id=GvsunLims&response_type=code';
         let r4: HttpResponse = await http.get(oauthUrl);
         let b4: string = r4.body || '';
-        console.info(TAG, 'step4 body len=' + String(b4.length) + ' head=' + b4.substring(0, 300));
-
-        // 把 body 写入 PreferenceUtil 以便调试
-        let debugStr: string = b4.replace(/\n/g, ' ').replace(/\r/g, '').replace(/\s+/g, ' ');
-        // 找含 'code' 的行
-        let codeIdx: number = debugStr.indexOf('code=');
-        if (codeIdx >= 0) { console.info(TAG, 'codeSnippet=' + debugStr.substring(Math.max(0, codeIdx-60), codeIdx+100)); }
-        let cbIdx: number = debugStr.indexOf('/webapp/callback');
-        if (cbIdx >= 0) { console.info(TAG, 'cbSnippet=' + debugStr.substring(Math.max(0, cbIdx-60), cbIdx+100)); }
 
         // 多种 regex 试 code
         let cm4: RegExpMatchArray | null = b4.match(/[?&]code=([a-zA-Z0-9]+)/);
         if (!cm4) { cm4 = b4.match(/["']code["']\s*:\s*["']([^"']+)["']/); }
         if (!cm4) { cm4 = b4.match(/window\.location.*?[?&]code=([a-zA-Z0-9]+)/); }
         if (!cm4) { cm4 = b4.match(/url=.*?[?&]code=([a-zA-Z0-9]+)/); }
-        if (cm4) { code = cm4[1]; console.info(TAG, 'code=' + code); }
+        if (cm4) { code = cm4[1]; }
 
         // 方式C：用 code 去 callback 拿 password
         if (code.length > 0) {
           let r5: HttpResponse = await http.get(SYSJ_BASE + '/xidian/webapp/callback?code=' + code + '&state=' + state);
           let b5: string = r5.body || '';
-          console.info(TAG, 'step5 body len=' + String(b5.length) + ' head=' + b5.substring(0, 200));
           let pm: RegExpMatchArray | null = b5.match(/var password = '([^']+)'/);
           if (pm) { pwd = pm[1]; }
           // fallback: CAS response
@@ -250,16 +231,13 @@ export struct ExperimentPage {
       }
 
       if (pwd.length === 0) {
-        console.info(TAG, 'failed: b3=' + b3.substring(0, 500));
         this.onError('无法获取实验系统登录密码');
         return;
       }
-      console.info(TAG, 'pwd len=' + String(pwd.length));
 
       // Step 6: POST sysj login
       let loginBody = 'username=' + encodeURIComponent(account) + '&password=' + encodeURIComponent(pwd);
       let r6 = await http.postRaw(SYSJ_BASE + '/xidian/webapp/login', loginBody, 'application/x-www-form-urlencoded');
-      console.info(TAG, 'sysj login result: status=' + r6.statusCode);
 
       // Step 7: 逐周获取数据
       let allItems: SysjScheduleItem[] = [];
@@ -285,11 +263,9 @@ export struct ExperimentPage {
             }
           }
         } catch (e) {
-          console.warn(TAG, 'week ' + w + ' err: ' + String(e));
         }
         this.fetchProgress = '(' + w + '/' + MAX_WEEKS + ')';
       }
-      console.info(TAG, 'fetched=' + allItems.length);
 
       if (allItems.length > 0) {
         let co: ESObject = { 'ts': Date.now(), 'data': allItems } as ESObject;
@@ -301,7 +277,6 @@ export struct ExperimentPage {
         this.onError('暂无实验信息');
       }
     } catch (e) {
-      console.error(TAG, 'error: ' + String(e));
       this.onError('实验系统登录失败: ' + String(e));
     }
   }
@@ -386,7 +361,7 @@ export struct ExperimentPage {
         }
       }
       if (pi.length > 0) this.buildCards(pi);
-    } catch (e) { console.warn(TAG, 'physics err: '+String(e)); }
+    } catch (e) {}
     if(this.cards.length===0)this.onError('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f'); else this.pageState=PageState.SUCCESS;
   }
 

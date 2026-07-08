@@ -46,31 +46,23 @@ export async function sharedAppPost(
   const cookies = ctx.http.getCookiesForDomain('ehall.xidian.edu.cn');
   const hasCas: boolean = cookies.indexOf('MOD_AUTH_CAS') >= 0;
   const hasJsession: boolean = cookies.toLowerCase().indexOf('jsessionid') >= 0;
-  console.info(ctx.tag, `appPost: url=${path} hasMOD_AUTH=${hasCas} hasJSESSIONID=${hasJsession} cookieLen=${cookies.length}`);
   let resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
-  console.info(ctx.tag, 'appPost: resp status=' + resp.statusCode);
 
   if (resp.isRedirect && resp.location && resp.location.includes('login')) {
-    console.warn(ctx.tag, 'appPost: session expired, redirecting to login');
     ctx.appSessionUrl = {};
     const appId = findAppIdByPath(path);
     if (appId) {
-      console.info(ctx.tag, 'appPost: retrying with re-activation for ' + appId);
       await ctx.activateAppSession(appId, true);
       resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
-      console.info(ctx.tag, 'appPost: retry resp=' + resp.statusCode);
     }
   }
 
   if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
-    console.warn(ctx.tag, 'appPost: received HTML instead of JSON, body[0:200]=' + resp.body.substring(0, 200));
     ctx.appSessionUrl = {};
     const appId = findAppIdByPath(path);
     if (appId) {
-      console.info(ctx.tag, 'appPost: retrying with re-activation for ' + appId);
       await ctx.activateAppSession(appId, true);
       resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
-      console.info(ctx.tag, 'appPost: retry resp=' + resp.statusCode);
     }
   }
 
@@ -89,7 +81,6 @@ export function findAppIdByPath(path: string): string {
 
 export function extractRaw(body: string, tag: string): object[] {
   try {
-    console.info(tag, 'extractRaw: parsing body length=' + body.length);
     const obj = JSON.parse(body) as Record<string, object>;
 
     const datas = obj['datas'];
@@ -101,7 +92,6 @@ export function extractRaw(body: string, tag: string): object[] {
           const subMap = sub as Record<string, object>;
           const rows = subMap['rows'];
           if (Array.isArray(rows)) {
-            console.info(tag, 'extractRaw: found rows via datas.' + key + '.rows, count=' + rows.length);
             return rows as object[];
           }
           const extParams = subMap['extParams'];
@@ -109,7 +99,6 @@ export function extractRaw(body: string, tag: string): object[] {
             const extMap = extParams as Record<string, object>;
             const extRows = extMap['rows'];
             if (Array.isArray(extRows)) {
-              console.info(tag, 'extractRaw: found rows via datas.' + key + '.extParams.rows, count=' + extRows.length);
               return extRows as object[];
             }
           }
@@ -125,7 +114,6 @@ export function extractRaw(body: string, tag: string): object[] {
             const tmap: Record<string, object> = third as Record<string, object>;
             const rows = tmap['rows'];
             if (Array.isArray(rows)) {
-              console.info(tag, 'extractRaw: found rows via recursive, count=' + rows.length);
               return rows as object[];
             }
           }
@@ -133,10 +121,8 @@ export function extractRaw(body: string, tag: string): object[] {
       }
     }
 
-    console.warn(tag, 'extractRaw: no rows found in response');
     return [];
   } catch (e) {
-    console.error(tag, 'extractRaw parse error: ' + JSON.stringify(e) + ' body[0:200]=' + body.substring(0, 200));
     return [];
   }
 }

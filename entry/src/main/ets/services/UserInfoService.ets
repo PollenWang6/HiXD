@@ -55,8 +55,6 @@ export class UserInfoService {
     info.dormitory = PreferenceUtil.getString('user_dormitory');
     info.studentType = PreferenceUtil.getString('user_student_type');
     info.className = PreferenceUtil.getString('user_class');
-    console.info(TAG, 'fetchAll: name=' + info.name + ' college=' + info.college +
-      ' major=' + info.major + ' grade=' + info.grade);
     return info;
   }
 
@@ -82,13 +80,10 @@ export class UserInfoService {
 
   // xgxt 个人信息拉取（CAS SSO → xgxt → getAppConfig → getStuBaseInfo）
   async fetchFromEhall(xh: string): Promise<boolean> {
-    console.info(TAG, 'fetchFromEhall: start, xh=' + xh);
     try {
       // ──── Step 0: 确保 CAS TGC 有效 ────
       const casRestored: boolean = await CasLoginService.getInstance().tryAutoRestoreLogin();
-      console.info(TAG, 'fetchFromEhall: tryAutoRestoreLogin=' + String(casRestored));
       if (!casRestored) {
-        console.warn(TAG, 'fetchFromEhall: CAS session expired, cannot proceed');
         return false;
       }
 
@@ -110,13 +105,10 @@ export class UserInfoService {
         resp = await this.http.getNoRedirect(location);
         loop++;
       }
-      console.info(TAG, 'fetchFromEhall: SSO done, final status=' + String(resp.statusCode) +
-        ' url=' + currentUrl.substring(0, 80));
 
       // 不要 copy ids → xgxt：ids 的 route/JSESSIONID/happyVoyage 与 xgxt 不同，会覆盖 xgxt SSO 拿到的正确 session
 
       const xgxtCookies: string = this.http.getCookiesForDomain('xgxt.xidian.edu.cn');
-      console.info(TAG, 'fetchFromEhall: xgxt cookies=' + xgxtCookies.substring(0, 200));
 
       // ──── Step 2: getAppConfig 初始化模块 ────
       const xgxtHeaders: Record<string, string> = {
@@ -125,41 +117,30 @@ export class UserInfoService {
       };
       const configUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/swpubapp/indexmenu/getAppConfig.do?appId=4585275700341858&appName=jbxxapp';
       resp = await this.http.postEmpty(configUrl, xgxtHeaders);
-      console.info(TAG, 'fetchFromEhall: getAppConfig status=' + String(resp.statusCode) +
-        ' body=' + resp.body.substring(0, 200));
 
       // ──── Step 3: getStuBaseInfo 拉取信息 ────
       const infoUrl: string = 'https://xgxt.xidian.edu.cn/xsfw/sys/jbxxapp/modules/infoStudent/getStuBaseInfo.do';
       const infoBody: Record<string, string> = {
-        'requestParamStr': '{"XSBH":"' + xh + '"}'
       };
       resp = await this.http.postForm(infoUrl, infoBody, xgxtHeaders);
-      console.info(TAG, 'fetchFromEhall: getStuBaseInfo status=' + String(resp.statusCode) +
-        ' body=' + resp.body.substring(0, 300));
 
       if (!resp.isOk || !resp.body) {
-        console.warn(TAG, 'fetchFromEhall: request failed');
         return false;
       }
 
       const obj: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
       const returnCode: string = String(obj['returnCode'] ?? '');
-      console.info(TAG, 'fetchFromEhall: returnCode=' + returnCode);
 
       if (returnCode !== '#E000000000000') {
-        console.warn(TAG, 'fetchFromEhall: API error');
         return false;
       }
 
       const data: Record<string, Object> = obj['data'] as Record<string, Object>;
       if (!data) {
-        console.warn(TAG, 'fetchFromEhall: no data field');
         return false;
       }
 
       const dataKeys: string[] = Object.keys(data);
-      console.info(TAG, 'fetchFromEhall: data keys=' + dataKeys.join(',') +
-        ' count=' + String(dataKeys.length));
 
       const name: string = String(data['XM'] ?? '');
       const college: string = String(data['DWDM_DISPLAY'] ?? '');
@@ -179,15 +160,11 @@ export class UserInfoService {
       if (studentType) PreferenceUtil.putString('user_student_type', studentType);
       if (className) PreferenceUtil.putString('user_class', className);
 
-      console.info(TAG, 'fetchFromEhall: OK name=' + name + ' college=' + college +
-        ' major=' + major + ' grade=' + grade + ' gender=' + gender);
-
       // 拉取超星 UID（await 确保写完 Preference 后再返回）
       await this.fetchChaoxingUid();
 
       return name.length > 0;
     } catch (e) {
-      console.warn(TAG, 'fetchFromEhall: exception: ' + String(e));
       return false;
     }
   }
@@ -197,22 +174,18 @@ export class UserInfoService {
   async fetchChaoxingUid(): Promise<string> {
     const cached: string = PreferenceUtil.getString('cx_uid');
     if (cached.length > 0) {
-      console.info(TAG, 'fetchChaoxingUid: from cache, uid=' + cached);
       return cached;
     }
 
-    console.info(TAG, 'fetchChaoxingUid: no cache, fetching via HTTP...');
     try {
       // 确保 CAS session 存活
       const casOk: boolean = await CasLoginService.getInstance().tryAutoRestoreLogin();
       if (!casOk) {
-        console.warn(TAG, 'fetchChaoxingUid: CAS session expired');
         return '';
       }
 
       // 通过 xdspoc SSO 登录超星（CAS 白名单内）
       await AttendanceService.getInstance().loginToLearning();
-      console.info(TAG, 'fetchChaoxingUid: loginToLearning complete');
 
       // 把子域 cookie 搬运到超星主站域
       const srcDomains: string[] = ['fanya.chaoxing.com', 'xdspoc.fanya.chaoxing.com',
@@ -227,11 +200,8 @@ export class UserInfoService {
       // HTTP GET i.chaoxing.com/base（服务端渲染，UID 在初始 HTML 中）
       const resp: HttpResponse = await this.http.get('https://i.chaoxing.com/base');
       const body: string = resp.body || '';
-      console.info(TAG, 'fetchChaoxingUid: base page status=' + String(resp.statusCode) +
-        ' len=' + String(body.length));
 
       if (!resp.isOk || body.length < 500) {
-        console.warn(TAG, 'fetchChaoxingUid: base page too short or not OK');
         return '';
       }
 
@@ -242,16 +212,13 @@ export class UserInfoService {
       }
 
       if (!match) {
-        console.warn(TAG, 'fetchChaoxingUid: UID not found in base page HTML');
         return '';
       }
 
       const uid: string = match[1];
       PreferenceUtil.putString('cx_uid', uid);
-      console.info(TAG, 'fetchChaoxingUid: saved uid=' + uid);
       return uid;
     } catch (e) {
-      console.warn(TAG, 'fetchChaoxingUid: exception: ' + String(e));
       return '';
     }
   }

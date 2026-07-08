@@ -1,4 +1,5 @@
-﻿// PortalWebPage.ets — 门户通用 WebView 页面
+﻿import { AccentColors } from '../../utils/AccentColors';
+// PortalWebPage.ets — 门户通用 WebView 页面
 // 通过 title + url 参数复用，避免为每个服务单独建文件
 import web_webview from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -50,39 +51,29 @@ export struct PortalWebPage {
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
     this.context = getContext(this) as common.UIAbilityContext;
-    console.info(TAG, 'aboutToAppear: url=' + this.url.substring(0, 80));
     if (this.useWeChatUA) {
       // 移动门户：清除旧脏 cookie + 只同步 CASTGC，避免 route/JSESSIONID/MOD_AUTH_CAS
       // 污染 xxcapp OpenResty 路由 → 子页面显示随机 hash（如 250bb948bd643d8b18f4c0fdd72a059d）
-      console.info(TAG, 'portal: clear stale xxcapp cookies');
       CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
       const t0 = Date.now();
       const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
-      console.info(TAG, 'checkAndAutoLogin: result=' + loginOk + ' cost=' + (Date.now() - t0) + 'ms');
       await CasLoginService.getInstance().syncCasCookieOnly();
-      console.info(TAG, 'syncCasCookieOnly done for portal, ready to load WebView');
     } else if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('ignypt') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
       const t0 = Date.now();
       const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
-      console.info(TAG, 'checkAndAutoLogin: result=' + loginOk + ' cost=' + (Date.now() - t0) + 'ms');
       await CasLoginService.getInstance().syncCookiesToWebView();
-      console.info(TAG, 'syncCookies done, ready to load WebView');
     } else if (this.url.includes('libspace') || this.url.includes('ignypt')) {
       // libspace/ignypt 对 session cookie 敏感，只同步 CASTGC
-      console.info(TAG, 'libspace/ignypt: clear stale cookies + sync CASTGC only');
       CasLoginService.getInstance().clearWebViewCookiesForDomain(
         this.url.includes('libspace') ? 'libspace.xidian.edu.cn' : 'ignypt.xidian.edu.cn'
       );
       await CasLoginService.getInstance().checkAndAutoLogin();
       await CasLoginService.getInstance().syncCasCookieOnly();
-      console.info(TAG, 'syncCasCookieOnly done');
     } else {
-      console.info(TAG, 'syncCookies skip (non-CAS domain)');
     }
     // ===== 诊断：看 WebView CookieJar 里 xxcapp 实际有什么 =====
     const wcmDiag = web_webview.WebCookieManager;
     for (const d of ['xxcapp.xidian.edu.cn', 'ids.xidian.edu.cn']) {
-      console.error(TAG, 'DIAG: cookies on ' + d + ' = [' + wcmDiag.fetchCookieSync('https://' + d).substring(0, 500) + ']');
     }
     this.webUrl = this.url;  // cookie 就绪，触发 WebView 加载
   }
@@ -97,7 +88,6 @@ export struct PortalWebPage {
             if (this.webUrl.length > 0) {
             Web({ src: this.webUrl, controller: this.webController, incognitoMode: this.useIncognito })
               .onControllerAttached(() => {
-                console.info(TAG, 'onControllerAttached: webUrl loaded');
                 if (this.useWeChatUA) {
                   this.webController.setCustomUserAgent(WE_CHAT_UA);
                 }
@@ -114,14 +104,11 @@ export struct PortalWebPage {
                 this.isLoading = true;
                 this.loadError = '';
                 const pageUrl: string = event ? event.url : this.url;
-                console.error(TAG, 'DIAG onPageBegin: url=' + pageUrl);
               })
               .onPageEnd((event) => {
                 this.isLoading = false;
                 const pageUrl: string = event ? event.url : this.url;
-                console.error(TAG, 'DIAG onPageEnd: url=' + pageUrl);
                 // 诊断：加载后看 xxcapp cookie 变了没
-                console.error(TAG, 'DIAG onPageEnd cookies: ' + web_webview.WebCookieManager.fetchCookieSync('https://xxcapp.xidian.edu.cn').substring(0, 500));
                 if (this.useWeChatUA && !this.keepWeChatUA) {
                   this.webController.setCustomUserAgent('');
                 } else if (!this.useWeChatUA) {
@@ -146,7 +133,6 @@ export struct PortalWebPage {
                 if (event) {
                   const errUrl: string = event.request.getRequestUrl();
                   const errCode: number = event.response.getResponseCode();
-                  console.error(TAG, 'DIAG onHttpError: url=' + errUrl + ' code=' + errCode);
                 }
               })
               .onErrorReceive((event) => {
@@ -154,7 +140,6 @@ export struct PortalWebPage {
                   const errInfo: string = event.error.getErrorInfo();
                   const errCode: number = event.error.getErrorCode();
                   const errUrl: string = event.request ? event.request.getRequestUrl() : '?';
-                  console.error(TAG, 'DIAG onErrorReceive: code=' + errCode + ' info=' + errInfo + ' url=' + errUrl);
                   this.loadError = '加载失败: ' + errInfo;
                   this.isLoading = false;
                 }
@@ -220,7 +205,7 @@ export struct PortalWebPage {
 
       Text(this.title)
         .fontSize(20)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .fontWeight(FontWeight.Bold)
         .layoutWeight(1)
         .maxLines(1)
@@ -286,7 +271,6 @@ export struct PortalWebPage {
             this.message = '已清除 Cookies，重新打开需登录';
             setTimeout(() => { this.message = ''; }, 2000);
           } catch (e) {
-            console.error('PortalWebPage', 'clearCookie error: ' + String(e));
           }
         })
     }
@@ -333,6 +317,5 @@ export struct PortalWebPage {
     } else {
       this.webController.setCustomUserAgent(DESKTOP_UA);
     }
-    console.info(TAG, 'UA switched to mode=' + this.uaMode);
   }
 }

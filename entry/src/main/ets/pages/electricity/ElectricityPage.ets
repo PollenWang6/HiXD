@@ -1,4 +1,5 @@
-﻿// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
+﻿import { AccentColors } from '../../utils/AccentColors';
+// ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
 import { ThemeColors } from '../../utils/ThemeColors';
 import { webview } from '@kit.ArkWeb';
 import web_webview from '@ohos.web.webview';
@@ -7,6 +8,7 @@ import { HttpUtil } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService } from '../../services/CasLoginService';
 import { promptAction } from '@kit.ArkUI';
+import { SegmentTab } from '../../components/SegmentTab';
 
 const TAG: string = 'ElectricityPage';
 
@@ -101,9 +103,6 @@ export struct ElectricityPage {
   @State customEndStr: string = '';
   @State customQuerying: boolean = false;
   @State activeTab: number = 0;
-  @State indicatorBase: number = 0;
-  @State indicatorSwipe: number = 0;
-  @State barW: number = 360;
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
   private isSilent: boolean = false;
@@ -111,9 +110,7 @@ export struct ElectricityPage {
   private ssoDone: boolean = false;
   private cachedApiHeaders: Record<string, string> = {};
   private cachedMetID: string = '';
-  private swiperCtrl: SwiperController = new SwiperController();
-  private swiperWidth: number = 360;
-  private perTabW: number = 180;
+
 
   async aboutToAppear(): Promise<void> {
     await CasLoginService.getInstance().syncCookiesToWebView();
@@ -321,7 +318,6 @@ export struct ElectricityPage {
           }
         }
       } catch (e5) {
-        console.warn(TAG, 'Step5 failed: ' + JSON.stringify(e5));
       }
       const cache: ElecCache = { remain: remain, metID: metID, nodeID: nodeID, date: readDate, daily: daily, error: '', waterRemain: waterRemain, waterMetID: waterMetID, waterDate: waterDate, waterDaily: waterDaily };
       AppStorage.setOrCreate('electricity_cache', JSON.stringify(cache));
@@ -344,7 +340,6 @@ export struct ElectricityPage {
       }
     } catch (e) {
       const errMsg: string = e instanceof Error ? (e as Error).message : JSON.stringify(e);
-      console.error(TAG, 'fetchData failed: ' + errMsg);
       this.loadError = errMsg;
       this.isLoading = false;
       if (this.isSilent) {
@@ -389,7 +384,6 @@ export struct ElectricityPage {
       this.dailyItems = items;
       this.displayDaily = items.slice(0, 7);
     } catch (e) {
-      console.error(TAG, 'CustomStep5 failed: ' + JSON.stringify(e));
       promptAction.showToast({ message: '查询失败', duration: 2000 });
     }
     this.customQuerying = false;
@@ -480,7 +474,7 @@ export struct ElectricityPage {
         Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
       }
       .height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).layoutWeight(1)
+      Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
     }
     .width('100%').height(52 + this.statusBarHeight).padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
@@ -596,8 +590,8 @@ export struct ElectricityPage {
         .layoutWeight(1).divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
       }
     }
-    .borderRadius(14).backgroundColor(ThemeColors.bgCard)
-    .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
+    .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+    .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
     .margin({ left: 16, right: 16, top: 10, bottom: 16 })
     .layoutWeight(1)
   }
@@ -639,8 +633,8 @@ export struct ElectricityPage {
           .width('100%').textAlign(TextAlign.Center).padding({ top: 28, bottom: 28 })
       }
     }
-    .borderRadius(14).backgroundColor(ThemeColors.bgCard)
-    .shadow({ radius: 4, color: '#0000000A', offsetY: 2 })
+    .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+    .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
     .margin({ left: 16, right: 16, top: 10, bottom: 16 })
     .layoutWeight(1)
   }
@@ -689,52 +683,15 @@ export struct ElectricityPage {
               Column() {
                 this.buildBalanceCard()
 
-                Stack({ alignContent: Alignment.BottomStart }) {
-                  Row() {
-                    Column() {
-                      Text('⚡ 电费').fontSize(15)
-                        .fontColor(this.activeTab === 0 ? this.accentColor : ThemeColors.textSecondary)
-                        .fontWeight(this.activeTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-                    }.layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-                    .onClick(() => { this.activeTab = 0; animateTo({ duration: 400, curve: Curve.EaseInOut }, () => { this.indicatorBase = 0; this.indicatorSwipe = 0; }); this.swiperCtrl.changeIndex(0, true); })
-
-                    Column() {
-                      Text('💧 水费').fontSize(15)
-                        .fontColor(this.activeTab === 1 ? this.accentColor : ThemeColors.textSecondary)
-                        .fontWeight(this.activeTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-                    }.layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-                    .onClick(() => { this.activeTab = 1; animateTo({ duration: 400, curve: Curve.EaseInOut }, () => { this.indicatorBase = this.perTabW; this.indicatorSwipe = 0; }); this.swiperCtrl.changeIndex(1, true); })
-                  }.width('100%')
-                  .onAreaChange((_old: Area, newArea: Area) => {
-                    this.barW = newArea.width as number;
-                    this.perTabW = this.barW / 2;
-                  })
-
-                  Row().width(24).height(3).backgroundColor(this.accentColor).borderRadius(1.5)
-                    .margin({ left: this.indicatorBase + this.indicatorSwipe - 12 + this.barW * 0.25 })
-                }.width('100%').padding({ left: 16, right: 16 })
-                .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
-
-                Swiper(this.swiperCtrl) {
+                SegmentTab({
+                  tabs: ['⚡ 电费', '💧 水费'],
+                  currentIndex: $activeTab,
+                  accentColor: this.accentColor,
+                  onTabChange: (_idx: number) => {}
+                }) {
                   this.elecContent()
                   this.waterContent()
                 }
-                .index(this.activeTab).indicator(false).loop(false)
-                .onAreaChange((_old: Area, newArea: Area) => {
-                  this.swiperWidth = newArea.width as number;
-                })
-                .onGestureSwipe((index: number, event: SwiperAnimationEvent) => {
-                  const offset: number = event.currentOffset as number;
-                  const ratio: number = Math.abs(offset) / this.swiperWidth;
-                  const move: number = ratio >= 1 ? this.perTabW : this.perTabW * ratio;
-                  this.indicatorSwipe = offset < 0 ? move : -move;
-                })
-                .onAnimationStart((_index: number, targetIndex: number, _event: SwiperAnimationEvent) => {
-                  this.activeTab = targetIndex;
-                  this.indicatorBase = targetIndex === 0 ? 0 : this.perTabW;
-                  this.indicatorSwipe = 0;
-                })
-                .layoutWeight(1)
               }
             }
             .layoutWeight(1)

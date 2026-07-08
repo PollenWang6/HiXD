@@ -6,7 +6,7 @@ import { common } from '@kit.AbilityKit';
 
 const TAG: string = 'CalendarSyncService';
 
-interface SlimCell {
+export interface SlimCell {
   name: string; teacher: string; classroom: string; day: number;
   startSection: number; endSection: number; weekList: boolean[];
   isExam: boolean; isExperiment: boolean;
@@ -97,8 +97,52 @@ export class CalendarSyncService {
     }
 
     if (added > 0 || deleted > 0) {
-      console.info(TAG, 'autoSync done: added=' + added + ' deleted=' + deleted);
     }
+  }
+
+  // 把合并网格写入 class_grid_snapshot（供 autoSync / 桌面卡片读取）
+  // 抽自 ClassTablePage，使首页刷新/登录后也能统一更新快照
+  static saveClassGridSnapshot(grid: SlimCell[][][]): void {
+    const slim: object[][] = [];
+    const semStart: Date = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
+    for (let d = 0; d <= DC; d++) {
+      slim[d] = [];
+      for (let s = 0; s <= SC; s++) {
+        const cells: SlimCell[] = grid[d]?.[s] ?? [];
+        const slimRow: object[] = [];
+        for (let i = 0; i < cells.length; i++) {
+          const c: SlimCell = cells[i];
+          const sc: Record<string, Object> = {};
+          sc['name'] = c.name;
+          sc['teacher'] = c.teacher ?? '';
+          sc['classroom'] = c.classroom ?? '';
+          sc['day'] = c.day;
+          sc['startSection'] = c.startSection;
+          sc['endSection'] = c.endSection;
+          sc['weekList'] = c.weekList;
+          sc['isExam'] = c.isExam;
+          sc['isExperiment'] = c.isExperiment;
+          sc['experimentProject'] = c.experimentProject ?? '';
+          sc['examDate'] = c.examDate ?? '';
+          sc['examTimeDesc'] = c.examTimeDesc ?? '';
+          sc['examSeat'] = c.examSeat ?? '';
+          let weekNum: number = 0;
+          if (c.isExam && c.examDate) {
+            const exDate = new Date(c.examDate + 'T00:00:00');
+            if (!isNaN(exDate.getTime())) {
+              weekNum = Math.floor((exDate.getTime() - semStart.getTime()) / 86400000 / 7) + 1;
+            }
+          }
+          sc['weekNum'] = weekNum;
+          slimRow.push(sc);
+        }
+        slim[d][s] = slimRow;
+      }
+    }
+    const json: string = JSON.stringify(slim);
+    PreferenceUtil.putString('class_grid_snapshot', json);
+    // 同时写入 AppStorage，供 MainPage 直接读取（无文件 I/O 延迟）
+    AppStorage.setOrCreate('class_grid_snapshot', json);
   }
 
   static loadConfig(): Record<string, Object> {

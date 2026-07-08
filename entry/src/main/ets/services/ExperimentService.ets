@@ -60,11 +60,9 @@ export class ExperimentService {
       const serviceUrl = SYSJ_BASE + '/xidian/test';
       const casLoginUrl = 'https://cas.xidian.edu.cn/authserver/login?service=' +
         encodeURIComponent(serviceUrl);
-      console.info(TAG, 'getCasTgc: GET ' + casLoginUrl.substring(0, 80));
 
       const loginPageResp = await this.http.get(casLoginUrl);
       const html = loginPageResp.body || '';
-      console.info(TAG, 'getCasTgc: login page len=' + html.length);
 
       const ltMatch = html.match(/name="lt"\s+value="([^"]*)"/);
       const executionMatch = html.match(/name="execution"\s+value="([^"]*)"/);
@@ -72,7 +70,6 @@ export class ExperimentService {
       const lt = ltMatch ? ltMatch[1] : '';
       const execution = executionMatch ? executionMatch[1] : '';
       const eventId = eventIdMatch ? eventIdMatch[1] : 'submit';
-      console.info(TAG, 'getCasTgc: lt=' + (lt ? 'yes' : 'no') + ' execution=' + (execution ? 'yes' : 'no'));
 
       if (!lt || !execution) {
         throw new Error('getCasTgc: cannot parse CAS login form');
@@ -92,18 +89,15 @@ export class ExperimentService {
         '&_eventId=' + encodeURIComponent(eventId) +
         '&submit=LOGIN';
 
-      console.info(TAG, 'getCasTgc: POST credentials');
       const casResp = await this.http.postNoRedirect(postUrl, body, {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Referer': casLoginUrl,
       });
 
       const casCookies = this.http.getCookiesForDomain('cas.xidian.edu.cn');
-      console.info(TAG, 'getCasTgc: cas cookies received');
 
       const tgcMatch = casCookies.match(/TGC=([^;\s]+)/);
       if (tgcMatch) {
-        console.info(TAG, 'getCasTgc: TGC captured, len=' + tgcMatch[1].length);
         return tgcMatch[1];
       }
 
@@ -118,13 +112,10 @@ export class ExperimentService {
       let hops = 0;
       while (currentUrl && hops < 10) {
         const redirResp = await this.http.getNoRedirect(currentUrl);
-        console.info(TAG, 'getCasTgc: hop[' + hops + '] status=' + redirResp.statusCode +
-          ' url=' + currentUrl.substring(0, 80));
 
         const casCk = this.http.getCookiesForDomain('cas.xidian.edu.cn');
         const tgcM = casCk.match(/TGC=([^;\s]+)/);
         if (tgcM) {
-          console.info(TAG, 'getCasTgc: TGC found at hop ' + hops + ', len=' + tgcM[1].length);
           return tgcM[1];
         }
 
@@ -145,7 +136,6 @@ export class ExperimentService {
 
       throw new Error('getCasTgc: TGC not found after redirect chain');
     } catch (e) {
-      console.info(TAG, 'getCasTgc failed: ' + JSON.stringify(e));
       return '';
     }
   }
@@ -153,24 +143,19 @@ export class ExperimentService {
   // ===== sysj 登录 =====
 
   async loginToSysjWithTgc(tgc: string): Promise<boolean> {
-    console.info(TAG, 'loginToSysjWithTgc: start');
     try {
       await this.http.injectCookies('TGC=' + tgc, 'cas.xidian.edu.cn');
-      console.info(TAG, 'loginToSysjWithTgc: TGC injected to cas.xidian.edu.cn');
 
       const resp1 = await this.http.getNoRedirect(SYSJ_BASE + '/xidian/test');
-      console.info(TAG, 'loginToSysjWithTgc: step1 status=' + resp1.statusCode + ' isRedirect=' + resp1.isRedirect);
 
       if (!resp1.isRedirect || !resp1.location) {
         if (resp1.statusCode === 200) {
-          console.info(TAG, 'loginToSysjWithTgc: already logged in');
           return true;
         }
         throw new Error('sysj step1: no redirect, status=' + resp1.statusCode);
       }
 
       const state = this.getQueryParam(resp1.location, 'state');
-      console.info(TAG, 'loginToSysjWithTgc: step1 redirect, state=' + (state || '(none)'));
 
       let currentUrl = resp1.location;
       if (currentUrl.startsWith('/')) {
@@ -178,8 +163,6 @@ export class ExperimentService {
       }
 
       const respAfterCas = await this.followRedirects(currentUrl, 12);
-      console.info(TAG, 'loginToSysjWithTgc: after CAS chain, status=' + respAfterCas.statusCode +
-        ' isRedirect=' + respAfterCas.isRedirect + ' bodyLen=' + (respAfterCas.body || '').length);
 
       let code = '';
       const finalBody = respAfterCas.body || '';
@@ -212,23 +195,19 @@ export class ExperimentService {
       if (!code) {
         throw new Error('loginToSysjWithTgc: failed to extract code, finalUrl=' + currentUrl.substring(0, 200));
       }
-      console.info(TAG, 'loginToSysjWithTgc: got code=' + code.substring(0, 10) + '...');
 
       const callbackUrl = SYSJ_BASE + '/xidian/webapp/callback?code=' + code +
         (state ? '&state=' + state : '');
       const resp4 = await this.http.get(callbackUrl);
       const callbackBody = resp4.body || '';
-      console.info(TAG, 'loginToSysjWithTgc: callback status=' + resp4.statusCode + ' bodyLen=' + callbackBody.length);
 
       const pwdMatch = callbackBody.match(/var\s+password\s*=\s*'([^']*)'/);
       if (!pwdMatch) {
-        console.warn(TAG, 'loginToSysjWithTgc: no password in callback');
         return true;
       }
       const password = pwdMatch[1];
 
       const sid = await PreferenceUtil.getString('ids_account');
-      console.info(TAG, 'loginToSysjWithTgc: ids saved');
       if (!sid) {
         throw new Error('loginToSysjWithTgc: no ids_account, need to store it after CAS login');
       }
@@ -238,16 +217,13 @@ export class ExperimentService {
         'application/x-www-form-urlencoded',
         { 'Content-Type': 'application/x-www-form-urlencoded' }
       );
-      console.info(TAG, 'loginToSysjWithTgc: login status=' + loginResp.statusCode);
 
       if (loginResp.statusCode === 200 && loginResp.body) {
         try {
           const loginResult = JSON.parse(loginResp.body) as Record<string, string | number | boolean | object>;
           if (loginResult['success'] === true || loginResult['code'] === 0) {
-            console.info(TAG, 'loginToSysjWithTgc: SUCCESS');
             return true;
           }
-          console.error(TAG, 'loginToSysjWithTgc: login failed, status=' + loginResp.statusCode);
           return false;
         } catch (_) {
           return true;
@@ -255,7 +231,6 @@ export class ExperimentService {
       }
       return false;
     } catch (e) {
-      console.error(TAG, 'loginToSysjWithTgc failed: ' + String(e));
       return false;
     }
   }
@@ -271,13 +246,11 @@ export class ExperimentService {
         { 'Content-Type': 'application/x-www-form-urlencoded' }
       );
       const body = resp.body || '';
-      console.info(TAG, 'checkSysjLogin: bodyLen=' + body.length);
       if (body.indexOf('<table') >= 0) {
         return true;
       }
       return false;
     } catch (e) {
-      console.error(TAG, 'checkSysjLogin failed: ' + String(e));
       return false;
     }
   }
@@ -384,13 +357,11 @@ export class ExperimentService {
   // ===== 按周拉取实验数据（需已登录） =====
 
   async fetchSysjScheduleWithTgc(tgc: string, onProgress?: (week: number, total: number) => void): Promise<ExperimentData[]> {
-    console.info(TAG, 'fetchSysjScheduleWithTgc: start');
 
     const loggedIn = await this.loginToSysjWithTgc(tgc);
     if (!loggedIn) {
       throw new Error('sysj login failed with TGC');
     }
-    console.info(TAG, 'fetchSysjScheduleWithTgc: login success, fetching schedule...');
 
     const expMap: Record<string, ExperimentData> = {};
 
@@ -408,14 +379,12 @@ export class ExperimentService {
         const html = resp.body || '';
 
         if (week <= 2) {
-          console.info(TAG, 'fetchSysjScheduleWithTgc: week=' + week + ' status=' + resp.statusCode + ' bodyLen=' + html.length);
         }
 
         if (!html || html.length < 100) continue;
 
         const weekExps = this.parseScheduleListHtml(html, week);
         if (weekExps.length > 0) {
-          console.info(TAG, 'fetchSysjScheduleWithTgc: week=' + week + ' found=' + weekExps.length);
         }
 
         for (const exp of weekExps) {
@@ -431,7 +400,6 @@ export class ExperimentService {
           }
         }
       } catch (e) {
-        console.warn(TAG, 'fetchSysjScheduleWithTgc: week=' + week + ' error: ' + String(e));
       }
     }
 
@@ -440,7 +408,6 @@ export class ExperimentService {
     for (const k of keys) {
       result.push(expMap[k]);
     }
-    console.info(TAG, 'fetchSysjScheduleWithTgc: done, total=' + result.length);
     return result;
   }
 
@@ -499,11 +466,9 @@ export class ExperimentService {
   // ===== 免登录拉取当前周实验 =====
 
   async fetchOtherExperimentsNoLogin(): Promise<ExperimentData[]> {
-    console.info(TAG, 'fetchOtherExperimentsNoLogin: start');
     try {
       return await this._fetchOtherExperimentsInner();
     } catch (e) {
-      console.error(TAG, 'fetchOtherExperimentsNoLogin failed: ' + String(e));
       return [];
     }
   }
@@ -521,7 +486,6 @@ export class ExperimentService {
         );
         const html = resp.body || '';
         if (week <= 2) {
-          console.info(TAG, 'fetchOtherExperiments: week=' + week + ' bodyLen=' + html.length);
         }
         if (!html || html.length < 100) continue;
 
@@ -547,7 +511,6 @@ export class ExperimentService {
 
         const weekExps = this.parseSysjHtml(secondTable, weekDates);
         if (weekExps.length > 0) {
-          console.info(TAG, 'fetchOtherExperiments: week=' + week + ' found=' + weekExps.length);
         }
 
         for (const exp of weekExps) {
@@ -561,7 +524,6 @@ export class ExperimentService {
           }
         }
       } catch (e) {
-        console.warn(TAG, 'fetchOtherExperiments: week=' + week + ' error: ' + String(e));
       }
     }
 
@@ -570,14 +532,12 @@ export class ExperimentService {
     for (const k of keys) {
       result.push(expMap[k]);
     }
-    console.info(TAG, 'fetchOtherExperiments: done, total=' + result.length);
     return result;
   }
 
   // ===== 预加载实验数据（供 EhallService.preloadAllData 调用）=====
 
   async preloadDirect(): Promise<number> {
-    console.info(TAG, 'preloadDirect: start');
 
     try {
       const r0: HttpResponse = await this.http.get(
@@ -596,19 +556,16 @@ export class ExperimentService {
           } catch (_e) { /* continue */ }
         }
       } else {
-        console.info(TAG, 'preloadDirect: doing full OAuth');
         allItems = await this._fetchWithOAuth();
       }
 
       if (allItems.length > 0) {
         const co: ESObject = { 'ts': Date.now(), 'data': allItems } as ESObject;
         PreferenceUtil.putString('sysj_exp_cache', JSON.stringify(co));
-        console.info(TAG, 'preloadDirect: saved ' + allItems.length + ' items');
         return allItems.length;
       }
       return 0;
     } catch (e) {
-      console.warn(TAG, 'preloadDirect: ' + String(e));
       return 0;
     }
   }
@@ -640,10 +597,8 @@ export class ExperimentService {
       }
     }
     if (!state) {
-      console.warn(TAG, '_fetchWithOAuth: no state');
       return [];
     }
-    console.info(TAG, '_fetchWithOAuth: state=' + state);
 
     const params = 'redirect_uri=' + encodeURIComponent(SYSJ_BASE + '/xidian/webapp/callback') +
       '&state=' + state + '&client_id=GvsunLims&response_type=code' +
@@ -657,7 +612,6 @@ export class ExperimentService {
       '&response_type=code&state=' + state + '&client_id=1387116615722893312';
     const r3 = await this.http.get(casUrl);
     if (r3.body && r3.body.indexOf('password') >= 0 && r3.body.indexOf('username') >= 0 && r3.body.indexOf('<form') >= 0) {
-      console.warn(TAG, '_fetchWithOAuth: CAS session expired');
       return [];
     }
     this.http.copyCookiesForDomain('ids.xidian.edu.cn', 'sysj.xidian.edu.cn');
@@ -689,7 +643,6 @@ export class ExperimentService {
     }
 
     if (!pwd) {
-      console.warn(TAG, '_fetchWithOAuth: no password extracted');
       return [];
     }
 
@@ -706,7 +659,6 @@ export class ExperimentService {
         this._parseWeekData(rw.body, w, allItems);
       } catch (_e) { /* continue */ }
     }
-    console.info(TAG, '_fetchWithOAuth: fetched=' + allItems.length);
     return allItems;
   }
 

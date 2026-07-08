@@ -53,14 +53,12 @@ export class HttpUtil {
           }
           this.cookieStore[entry.domain][entry.name] = entry.value;
         }
-        console.info(TAG, `Loaded ${entries.length} cookies`);
         this.cookiesLoaded = true; // 只有成功加载后才标记
       } else {
         // 没有缓存的 cookies，也算加载完成
         this.cookiesLoaded = true;
       }
     } catch (e) {
-      console.warn(TAG, 'Failed to load cookies: ' + JSON.stringify(e));
       // 加载失败，不设置 cookiesLoaded = true，允许后续重试
     }
   }
@@ -74,9 +72,7 @@ export class HttpUtil {
         }
       }
       await PreferenceUtil.putString('http_cookies', JSON.stringify(entries));
-      console.info(TAG, `Saved ${entries.length} cookies`);
     } catch (e) {
-      console.error(TAG, 'Failed to save cookies: ' + JSON.stringify(e));
     }
   }
 
@@ -115,7 +111,6 @@ export class HttpUtil {
     // 否则 PreferenceUtil.init() 已经设置 cookiesLoaded=true，后续 loadCookies() 不会重新读
     this.cookiesLoaded = false;
     await this.loadCookies();
-    console.info(TAG, `Injected cookies for ${domain}, memory store refreshed`);
   }
 
   // ===== HTTP 方法 =====
@@ -186,7 +181,7 @@ export class HttpUtil {
         const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
         if (sc) {
           this.saveResponseCookies(domain, typeof sc === 'string' ? sc : String(sc));
-          this.saveCookies().catch(() => { console.warn(TAG, 'saveCookies failed in getArrayBuffer'); });
+          this.saveCookies().catch(() => {});
         }
       });
       req.request(
@@ -229,7 +224,6 @@ export class HttpUtil {
       const modCas: string = PreferenceUtil.getString('mod_auth_cas');
       if (modCas.length > 0) {
         result = result.length > 0 ? result + '; MOD_AUTH_CAS=' + modCas : 'MOD_AUTH_CAS=' + modCas;
-        console.info(TAG, 'Injected MOD_AUTH_CAS from PreferenceUtil');
       }
     }
     return result;
@@ -373,7 +367,7 @@ export class HttpUtil {
           const sc = hdr['set-cookie'] || hdr['Set-Cookie'];
           if (sc) {
             self.saveResponseCookies(domain, typeof sc === 'string' ? sc : String(sc));
-            self.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
+            self.saveCookies().catch(() => {});
           }
           resolved = true;
           req.destroy();
@@ -422,7 +416,7 @@ export class HttpUtil {
           const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
           if (sc) {
             this.saveResponseCookies(domain, sc);
-            this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
+            this.saveCookies().catch(() => {});
           }
 
           req.destroy();
@@ -493,7 +487,7 @@ export class HttpUtil {
             const locStr: string = typeof loc === 'string' ? loc : String(loc);
             const redirectDomain: string = locStr.length > 0 ? this.getDomain(locStr) : this.getDomain(url);
             this.saveResponseCookies(redirectDomain, typeof sc === 'string' ? sc : String(sc));
-            this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
+            this.saveCookies().catch(() => {});
           }
         });
       }
@@ -535,7 +529,7 @@ export class HttpUtil {
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
             if (!skipCookies && sc) {
               this.saveResponseCookies(domain, sc);
-              this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
+              this.saveCookies().catch(() => {});
             }
 
             req.destroy();
@@ -578,7 +572,7 @@ export class HttpUtil {
             const sc = respHeaders['set-cookie'] || respHeaders['Set-Cookie'];
             if (!skipCookies && sc) {
               this.saveResponseCookies(domain, sc);
-              this.saveCookies().catch(() => { console.warn("HttpUtil", "saveCookies failed"); });
+              this.saveCookies().catch(() => {});
             }
 
             req.destroy();

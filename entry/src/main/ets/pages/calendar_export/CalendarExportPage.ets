@@ -1,4 +1,5 @@
-﻿// CalendarExportPage.ets
+import { AccentColors } from '../../utils/AccentColors';
+// CalendarExportPage.ets
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { SemesterUtil } from '../../services/EhallService';
@@ -36,10 +37,14 @@ const ST: string[] = [
 const DC: number = 7;
 const SC: number = 11;
 
+// 提醒选项预设
+const REMINDER_OPTIONS: number[] = [5, 10, 15, 20, 30, 60];
+
 @Component
 export struct CalendarExportPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('navIndicatorHeight') navIndicatorHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
   @Prop isTablet: boolean = false;
 
@@ -59,7 +64,6 @@ export struct CalendarExportPage {
   @State xDbHour: number = 20;
   @State xDbMin: number = 0;
 
-  // 自定义分钟输入框是否显示
   @State cCustom: boolean = false;
   @State eCustom: boolean = false;
   @State xCustom: boolean = false;
@@ -68,6 +72,12 @@ export struct CalendarExportPage {
   @State resultMsg: string = '';
   @State hasData: boolean = true;
   @State hasChanged: boolean = false;
+  @State isBound: boolean = false;  // 是否已导入过日历
+
+  // 统计预览
+  @State cCount: number = 0;
+  @State eCount: number = 0;
+  @State xCount: number = 0;
 
   private init: Record<string, boolean | string | number> = {};
   private gridCells: SlimCell[][][] = [];
@@ -77,6 +87,35 @@ export struct CalendarExportPage {
     this.loadGrid();
     this.loadConfig();
     this.takeSnapshot();
+    this.calcCounts();
+    this.isBound = PreferenceUtil.getBool('calendar_bound', false);
+  }
+
+  calcCounts(): void {
+    let cc = 0, ec = 0, xc = 0;
+    for (let d = 1; d <= DC; d++) {
+      for (let s = 0; s <= SC; s++) {
+        const cells: SlimCell[] = this.gridCells[d]?.[s] ?? [];
+        for (const cell of cells) {
+          if (cell.isExam) {
+            if (cell.examDate.length > 0) xc++;
+          } else if (cell.isExperiment) {
+            let w = 0;
+            for (let i = 0; i < cell.weekList.length; i++) { if (cell.weekList[i]) w++; }
+            ec += w;
+          } else {
+            if (s === cell.startSection) {
+              let w = 0;
+              for (let i = 0; i < cell.weekList.length; i++) { if (cell.weekList[i]) w++; }
+              cc += w;
+            }
+          }
+        }
+      }
+    }
+    this.cCount = cc;
+    this.eCount = ec;
+    this.xCount = xc;
   }
 
   takeSnapshot(): void {
@@ -352,7 +391,6 @@ export struct CalendarExportPage {
             st.delCount++;
           } catch (e) {
             st.failCount++;
-            console.error(TAG, 'del ' + k + ' ' + String(e));
           }
         }
       }
@@ -364,6 +402,7 @@ export struct CalendarExportPage {
       if (msg.length === 0) { msg = '无变化'; }
       this.resultMsg = msg;
       PreferenceUtil.putBool('calendar_bound', true);
+      this.isBound = true;
       this.saveConfig();
       this.takeSnapshot();
     } catch (e) {
@@ -416,7 +455,6 @@ export struct CalendarExportPage {
               st.newCount++;
             } catch (e) {
               st.failCount++;
-              console.error(TAG, 'impC ' + String(e));
             }
           }
         }
@@ -471,7 +509,6 @@ export struct CalendarExportPage {
               st.newCount++;
             } catch (e) {
               st.failCount++;
-              console.error(TAG, 'impE ' + String(e));
             }
           }
         }
@@ -526,7 +563,6 @@ export struct CalendarExportPage {
           st.newCount++;
         } catch (e) {
           st.failCount++;
-          console.error(TAG, 'impX ' + String(e));
         }
       }
     }
@@ -573,7 +609,6 @@ export struct CalendarExportPage {
               st.newCount++;
             } catch (e) {
               st.failCount++;
-              console.error(TAG, 'synC ' + String(e));
             }
           }
         }
@@ -625,7 +660,6 @@ export struct CalendarExportPage {
               st.newCount++;
             } catch (e) {
               st.failCount++;
-              console.error(TAG, 'synE ' + String(e));
             }
           }
         }
@@ -677,10 +711,23 @@ export struct CalendarExportPage {
           st.newCount++;
         } catch (e) {
           st.failCount++;
-          console.error(TAG, 'synX ' + String(e));
         }
       }
     }
+  }
+
+  // 获取已启用数量
+  getEnabledCount(): number {
+    return (this.cEnabled ? 1 : 0) + (this.eEnabled ? 1 : 0) + (this.xEnabled ? 1 : 0);
+  }
+
+  // 获取已启用类型的日程总条数
+  getEnabledTotal(): number {
+    let n = 0;
+    if (this.cEnabled) n += this.cCount;
+    if (this.eEnabled) n += this.eCount;
+    if (this.xEnabled) n += this.xCount;
+    return n;
   }
 
   // ==================== UI ====================
@@ -711,10 +758,82 @@ export struct CalendarExportPage {
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
   }
 
+  // 获取类型颜色
+  getTypeColor(t: string): string {
+    if (t === 'c') return '#2979FF';
+    if (t === 'e') return '#FF9800';
+    return '#E91E63';
+  }
+
+  // 获取类型图标
+  getTypeIcon(t: string): string {
+    if (t === 'c') return '📖';
+    if (t === 'e') return '🔬';
+    return '📋';
+  }
+
+  // 获取类型标题
+  getTypeTitle(t: string): string {
+    if (t === 'c') return '课程';
+    if (t === 'e') return '实验';
+    return '考试';
+  }
+
+  // 获取类型副标题
+  getTypeSub(t: string): string {
+    if (t === 'c') return '常规课程表';
+    if (t === 'e') return '实验课程';
+    return '考试安排';
+  }
+
+  // 获取条数
+  getCount(t: string): number {
+    if (t === 'c') return this.cCount;
+    if (t === 'e') return this.eCount;
+    return this.xCount;
+  }
+
   build() {
     NavDestination() {
       Scroll() {
         Column() {
+          // ===== 顶部概览卡片 =====
+          if (this.hasData) {
+            Row() {
+              Column() {
+                if (this.isBound && !this.hasChanged) {
+                  Text('✅ 已同步到系统日历').fontSize(14).fontColor('#FFFFFF')
+                  Text(String(this.getEnabledTotal()) + ' 条日程')
+                    .fontSize(20).fontWeight(FontWeight.Medium).fontColor('#FFFFFFCC').margin({ top: 4 })
+                } else {
+                  Text(this.hasChanged ? '保存后同步更改' : '导入到系统日历').fontSize(13).fontColor('#FFFFFFCC')
+                  Text(String(this.getEnabledTotal()))
+                    .fontSize(36).fontWeight(FontWeight.Bold).fontColor('#FFFFFF').margin({ top: 4 })
+                  Text(this.isBound ? '条日程（修改后点保存同步）' : '条日程待导入').fontSize(12).fontColor('#FFFFFF99').margin({ top: 2 })
+                }
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+
+              // 三类小统计
+              Column() {
+                Row() {
+                  Text('📖 ' + String(this.cCount)).fontSize(13).fontColor(AccentColors.textContrast)
+                  Text('  🔬 ' + String(this.eCount)).fontSize(13).fontColor(AccentColors.textContrast)
+                  Text('  📋 ' + String(this.xCount)).fontSize(13).fontColor(AccentColors.textContrast)
+                }
+                // 已启用数量
+                Text(this.getEnabledCount() + '/3 已开启')
+                  .fontSize(11).fontColor(AccentColors.textContrast).margin({ top: 8 })
+              }.alignItems(HorizontalAlign.End)
+            }
+            .width('100%')
+            .padding({ left: 20, right: 20, top: 20, bottom: 20 })
+            .backgroundColor(this.accentColor)
+            .borderRadius(16)
+            .shadow({ radius: 6, color: this.accentColor + '30', offsetY: 3 })
+            .margin({ left: 14, right: 14, top: 12 })
+          }
+
+          // ===== 无数据提示 =====
           if (!this.hasData) {
             Column() {
               Text('📭').fontSize(40).margin({ bottom: 12 })
@@ -723,40 +842,100 @@ export struct CalendarExportPage {
             }.width('90%').padding(40).borderRadius(12).backgroundColor(ThemeColors.bgCard).margin({ top: 20 })
           }
 
-          this.Card('📖', '课程', '课表中的所有课程', 'c')
-          this.Card('🔬', '实验', '所有实验课程和物理实验', 'e')
-          this.Card('📋', '考试', '考试日程安排', 'x')
+          // ===== 三类设置卡片 =====
+          this.TypeCard('c')
+          this.TypeCard('e')
+          this.TypeCard('x')
 
+          // ===== 底部操作区 =====
           if (this.hasData) {
-            Button(this.importing ? '导入中...' : '保存设置')
-              .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
-              .backgroundColor(this.hasChanged ? this.accentColor : '#CCCCCC').borderRadius(12)
-              .width('100%').height(48).margin({ left: 16, right: 16, top: 16 })
-              .enabled(this.hasChanged && !this.importing).onClick(() => { this.doImport(); })
-            Button('删除所有日程并重新导入')
-              .fontSize(14).fontWeight(FontWeight.Medium).fontColor('#EF5350')
-              .backgroundColor(Color.Transparent).border({ width: 1, color: '#EF5350' }).borderRadius(12)
-              .width('100%').height(40).margin({ left: 16, right: 16, top: 8 })
-              .enabled(!this.importing).onClick(() => { this.doRefresh(); })
+            // 主按钮
+            Row() {
+              if (this.importing) {
+                LoadingProgress().width(20).height(20).color('#FFFFFF').margin({ right: 8 })
+                Text('导入中...').fontSize(16).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+              } else {
+                Text(this.hasChanged ? '保存并同步' : '无更改')
+                  .fontSize(16).fontWeight(FontWeight.Medium)
+                  .fontColor(this.hasChanged ? '#FFFFFF' : ThemeColors.textHint)
+              }
+            }
+            .width('100%').height(50)
+            .justifyContent(FlexAlign.Center)
+            .backgroundColor(this.hasChanged ? this.accentColor : (ThemeColors.isDark ? '#3A3A3A' : '#E8E8E8'))
+            .borderRadius(14)
+            .shadow(this.hasChanged ? { radius: 4, color: this.accentColor + '40', offsetY: 2 } : { radius: 0, color: Color.Transparent, offsetY: 0 })
+            .margin({ left: 14, right: 14, top: 16 })
+            .enabled(this.hasChanged && !this.importing)
+            .onClick(() => { this.doImport(); })
+
+            // 次要操作
+            Row() {
+              Text('🔄 删除所有日程并重新导入')
+                .fontSize(13).fontColor('#EF5350')
+            }
+            .width('100%').height(40)
+            .justifyContent(FlexAlign.Center)
+            .border({ width: 1, color: '#EF535050' })
+            .borderRadius(12)
+            .margin({ left: 14, right: 14, top: 10 })
+            .enabled(!this.importing)
+            .onClick(() => { this.doRefresh(); })
           }
 
+          // ===== 结果提示 =====
           if (this.resultMsg.length > 0) {
             Row() {
-              Text(this.resultMsg.indexOf('失败') >= 0 ? '⚠️' : '✅').fontSize(14).margin({ right: 6 })
-              Text(this.resultMsg).fontSize(13).fontColor(ThemeColors.textPrimary)
-            }.width('100%').padding(14).borderRadius(12).backgroundColor(ThemeColors.bgCard)
-             .margin({ left: 16, right: 16, top: 12 })
+              Text(this.resultMsg.indexOf('失败') >= 0 ? '⚠️' : '✅').fontSize(16).margin({ right: 8 })
+              Text(this.resultMsg).fontSize(14).fontColor(ThemeColors.textPrimary).layoutWeight(1)
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+            .borderRadius(14)
+            .backgroundColor(this.resultMsg.indexOf('失败') >= 0 ? '#FFEBEE' : (ThemeColors.isDark ? '#1B2E1B' : '#F1F8E9'))
+            .border({ width: 1, color: this.resultMsg.indexOf('失败') >= 0 ? '#FFCDD2' : '#C8E6C9' })
+            .margin({ left: 14, right: 14, top: 12 })
           }
 
+          // ===== 说明区 =====
           Column() {
-            Text('💡 说明').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-              .margin({ bottom: 6 })
-            Text('• 分别选择是否导入课程 / 实验 / 考试\n• 独立设置每节课前的提醒时间\n• 实验和考试支持双重提醒（前一天指定时刻）\n• 下方提供全量重建选项')
-              .fontSize(12).fontColor(ThemeColors.textSecondary).lineHeight(18)
-          }.width('100%').padding(14).borderRadius(12).backgroundColor(ThemeColors.bgCard)
-           .shadow({ radius: 2, color: '#00000008', offsetY: 1 }).margin({ left: 16, right: 16, top: 12 })
+            Row() {
+              Text('💡').fontSize(16).margin({ right: 6 })
+              Text('使用说明').fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+            }.margin({ bottom: 10 })
 
-          Blank().height(100)
+            Row() {
+              Text('1').fontSize(10).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+                .width(18).height(18).borderRadius(9).backgroundColor(this.accentColor)
+              Text('  开启需要导入的类型（课程/实验/考试）').fontSize(12).fontColor(ThemeColors.textSecondary)
+            }.margin({ bottom: 6 })
+
+            Row() {
+              Text('2').fontSize(10).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+                .width(18).height(18).borderRadius(9).backgroundColor(this.accentColor)
+              Text('  设置提醒时间，支持自定义分钟数').fontSize(12).fontColor(ThemeColors.textSecondary)
+            }.margin({ bottom: 6 })
+
+            Row() {
+              Text('3').fontSize(10).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+                .width(18).height(18).borderRadius(9).backgroundColor(this.accentColor)
+              Text('  实验和考试支持双重提醒（前一天）').fontSize(12).fontColor(ThemeColors.textSecondary)
+            }.margin({ bottom: 6 })
+
+            Row() {
+              Text('4').fontSize(10).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+                .width(18).height(18).borderRadius(9).backgroundColor(this.accentColor)
+              Text('  修改设置后点击保存即可增量同步').fontSize(12).fontColor(ThemeColors.textSecondary)
+            }
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 16, bottom: 16 })
+          .borderRadius(14)
+          .backgroundColor(ThemeColors.bgCard)
+          .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+          .margin({ left: 14, right: 14, top: 12 })
+
+          Blank().height(80 + this.navIndicatorHeight)
         }.width(this.isTablet ? '60%' : '100%').alignSelf(ItemAlign.Center)
       }.width('100%').height('100%').layoutWeight(1).scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
     }.title({ builder: this.titleBar(), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
@@ -768,90 +947,162 @@ export struct CalendarExportPage {
   titleBar() {
     Row({ space: 6 }) {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
-        SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([Color.White])
+        SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([AccentColors.textContrast])
       }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
-      Text('导入系统日历').fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White)
+      Text('导入系统日历').fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast)
         .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })
   }
 
   @Builder
-  Card(icon: string, title: string, sub: string, t: string) {
+  TypeCard(t: string) {
     Column() {
+      // 卡片头部：图标 + 标题 + 条数 + Toggle
       Row() {
-        Text(icon).fontSize(20).margin({ right: 10 })
+        // 左侧色块图标
+        Stack() {
+          Circle().width(40).height(40).fill(this.getTypeColor(t) + '18')
+          Text(this.getTypeIcon(t)).fontSize(20)
+        }.width(40).height(40)
+
         Column() {
-          Text(title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-          Text(sub).fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
-        }.layoutWeight(1)
+          Text(this.getTypeTitle(t))
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+          Row() {
+            Text(this.getTypeSub(t)).fontSize(11).fontColor(ThemeColors.textSecondary)
+            Text(' · ').fontSize(11).fontColor(ThemeColors.textHint)
+            Text(String(this.getCount(t)) + ' 条').fontSize(11).fontColor(this.getTypeColor(t))
+          }.margin({ top: 2 })
+        }.layoutWeight(1).margin({ left: 12 })
+
         Toggle({ type: ToggleType.Switch, isOn: this.getEn(t) })
-          .selectedColor(this.accentColor).onChange((v: boolean) => { this.setEn(t, v); })
-      }.width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-      if (this.getEn(t)) {
-        Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 16, right: 16 })
-        this.Capsule(t)
+          .selectedColor(this.accentColor)
+          .onChange((v: boolean) => { this.setEn(t, v); })
       }
-    }.borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
-     .shadow({ radius: 2, color: '#00000008', offsetY: 1 }).margin({ left: 16, right: 16, top: 12 })
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+
+      // 展开内容
+      if (this.getEn(t)) {
+        // 左侧色条分隔
+        Row()
+          .width('100%').height(1)
+          .backgroundColor(this.getTypeColor(t) + '20')
+          .margin({ left: 56, right: 16 })
+
+        this.ReminderSection(t)
+      }
+    }
+    .borderRadius(16).clip(true).backgroundColor(ThemeColors.bgCard)
+    .shadow({ radius: 3, color: '#0000000A', offsetY: 1 })
+    .margin({ left: 14, right: 14, top: 10 })
   }
 
   @Builder
-  Capsule(t: string) {
+  ReminderSection(t: string) {
     Column() {
-      Flex({ wrap: FlexWrap.Wrap }) {
-        Text('提前').fontSize(12).fontColor(ThemeColors.textHint).margin({ right: 6 })
-        ForEach([5, 10, 15, 20, 30], (m: number) => {
-          Text(String(m) + '分钟').fontSize(12).padding({ left: 10, right: 10, top: 5, bottom: 5 }).borderRadius(12)
-            .fontColor(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? '#FFF' : ThemeColors.textPrimary)
-            .fontWeight(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? FontWeight.Medium : FontWeight.Normal)
-            .backgroundColor(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? this.accentColor : ThemeColors.bgPage)
-            .margin({ right: 6, bottom: 6 })
-            .onClick(() => { this.setNone(t, false); this.setCustom(t, false); this.setMin(t, String(m)); })
-        }, (m: number) => String(m))
-        Text('自定义').fontSize(12).padding({ left: 10, right: 10, top: 5, bottom: 5 }).borderRadius(12)
-          .fontColor(this.getCustom(t) && !this.getNone(t) ? '#FFF' : ThemeColors.textPrimary)
-          .fontWeight(this.getCustom(t) && !this.getNone(t) ? FontWeight.Medium : FontWeight.Normal)
-          .backgroundColor(this.getCustom(t) && !this.getNone(t) ? this.accentColor : ThemeColors.bgPage)
-          .margin({ right: 6, bottom: 6 })
-          .onClick(() => { this.setNone(t, false); this.setCustom(t, true); })
-        Text('不提醒').fontSize(12).padding({ left: 10, right: 10, top: 5, bottom: 5 }).borderRadius(12)
-          .fontColor(this.getNone(t) ? '#FFF' : ThemeColors.textPrimary)
-          .fontWeight(this.getNone(t) ? FontWeight.Medium : FontWeight.Normal)
-          .backgroundColor(this.getNone(t) ? '#EF5350' : ThemeColors.bgPage).margin({ right: 6, bottom: 6 })
-          .onClick(() => { this.setNone(t, !this.getNone(t)); if (!this.getNone(t)) { this.setCustom(t, false); } })
-      }.width('100%').padding({ left: 16, right: 16, top: 8 })
+      // 提醒时间标签
+      Text('提前提醒')
+        .fontSize(12).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
+        .padding({ left: 16, top: 12, bottom: 6 })
 
+      // 提醒选项 — 网格布局，4列
+      Grid() {
+        ForEach(REMINDER_OPTIONS, (m: number) => {
+          GridItem() {
+            Text(String(m) + '分')
+              .fontSize(13)
+              .width('100%').textAlign(TextAlign.Center)
+              .padding({ top: 8, bottom: 8 })
+              .borderRadius(10)
+              .fontColor(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? '#FFFFFF' : ThemeColors.textPrimary)
+              .fontWeight(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? FontWeight.Medium : FontWeight.Normal)
+              .backgroundColor(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? this.accentColor : (ThemeColors.isDark ? '#333333' : '#F5F5F5'))
+              .onClick(() => { this.setNone(t, false); this.setCustom(t, false); this.setMin(t, String(m)); })
+          }
+        }, (m: number) => String(m))
+
+        // 自定义
+        GridItem() {
+          Text('自定义')
+            .fontSize(13)
+            .width('100%').textAlign(TextAlign.Center)
+            .padding({ top: 8, bottom: 8 })
+            .borderRadius(10)
+            .fontColor(this.getCustom(t) && !this.getNone(t) ? '#FFFFFF' : ThemeColors.textPrimary)
+            .fontWeight(this.getCustom(t) && !this.getNone(t) ? FontWeight.Medium : FontWeight.Normal)
+            .backgroundColor(this.getCustom(t) && !this.getNone(t) ? this.accentColor : (ThemeColors.isDark ? '#333333' : '#F5F5F5'))
+            .onClick(() => { this.setNone(t, false); this.setCustom(t, true); })
+        }
+
+        // 不提醒
+        GridItem() {
+          Text('不提醒')
+            .fontSize(13)
+            .width('100%').textAlign(TextAlign.Center)
+            .padding({ top: 8, bottom: 8 })
+            .borderRadius(10)
+            .fontColor(this.getNone(t) ? '#FFFFFF' : '#EF5350')
+            .fontWeight(this.getNone(t) ? FontWeight.Medium : FontWeight.Normal)
+            .backgroundColor(this.getNone(t) ? '#EF5350' : (ThemeColors.isDark ? '#333333' : '#F5F5F5'))
+            .onClick(() => { this.setNone(t, !this.getNone(t)); if (!this.getNone(t)) { this.setCustom(t, false); } })
+        }
+      }
+      .columnsTemplate('1fr 1fr 1fr 1fr')
+      .rowsGap(8)
+      .columnsGap(8)
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 4, bottom: 4 })
+
+      // 自定义输入
       if (this.getCustom(t) && !this.getNone(t)) {
         Row() {
-          TextInput({ text: this.getMin(t), placeholder: '分钟数' }).fontSize(13)
-            .type(InputType.Number).maxLength(3).width(64).height(32).borderRadius(8)
-            .backgroundColor(ThemeColors.bgPage).border({ width: 1, color: '#E0E0E0' })
+          TextInput({ text: this.getMin(t), placeholder: '输入分钟数' })
+            .fontSize(13)
+            .type(InputType.Number).maxLength(3)
+            .width(80).height(36).borderRadius(10)
+            .backgroundColor(ThemeColors.bgPage).border({ width: 1, color: this.accentColor + '40' })
             .onChange((v: string) => { this.setMin(t, v); })
-          Text('分钟').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ left: 6 })
-        }.width('100%').padding({ left: 16, right: 16, bottom: 6 })
+          Text('分钟前提醒').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ left: 8 })
+        }.width('100%').padding({ left: 16, right: 16, top: 8 })
       }
 
+      // 双重提醒（仅实验和考试）
       if (t !== 'c') {
+        Row()
+          .width('100%').height(1)
+          .backgroundColor(ThemeColors.isDark ? '#333333' : '#F0F0F0')
+          .margin({ left: 16, right: 16, top: 8 })
+
         Row() {
           Column() {
             Text('双重提醒').fontSize(13).fontColor(ThemeColors.textPrimary)
-            Text('前一天指定时刻提醒').fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+            Text('前一天额外提醒一次').fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
           }.layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.getDbl(t) })
             .selectedColor(this.accentColor).onChange((v: boolean) => { this.setDbl(t, v); })
-        }.width('100%').padding({ left: 16, right: 16 }).margin({ top: 4, bottom: 8 })
+        }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
+
         if (this.getDbl(t)) {
           Row() {
-            Text('前一天').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ right: 8 })
+            Text('前一天').fontSize(12).fontColor(ThemeColors.textSecondary)
             Row() {
-              Text(this.getDbTimeStr(t)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(this.accentColor)
-            }.padding({ left: 10, right: 10, top: 5, bottom: 5 }).borderRadius(8)
-             .backgroundColor(this.accentColor + '12')
-             .border({ width: 1, color: this.accentColor + '40' })
-             .onClick(() => { this.showTimePicker(t); })
+              Text(this.getDbTimeStr(t))
+                .fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.accentColor)
+            }
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .borderRadius(10)
+            .backgroundColor(this.accentColor + '12')
+            .border({ width: 1, color: this.accentColor + '30' })
+            .margin({ left: 8 })
+            .onClick(() => { this.showTimePicker(t); })
             Text('提醒').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ left: 6 })
-          }.width('100%').padding({ left: 16, right: 16, bottom: 12 })
+          }.width('100%').padding({ left: 16, right: 16, bottom: 14 })
+        } else {
+          Blank().height(4)
         }
+      } else {
+        Blank().height(6)
       }
     }
   }

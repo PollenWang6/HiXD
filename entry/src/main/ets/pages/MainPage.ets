@@ -24,7 +24,6 @@ import { FaqPage } from './faq/FaqPage';
 import { AboutPage } from './about/AboutPage';
 import { CalendarExportPage } from './calendar_export/CalendarExportPage';
 import { AttendancePage } from './attendance/AttendancePage';
-import { SchoolCardService } from '../services/SchoolCardService';
 import { DormWaterPage } from './dormwater/DormWaterPage';
 import { SportPage } from './sport/SportPage';
 import { UserInfoService } from '../services/UserInfoService';
@@ -39,6 +38,7 @@ import { image } from '@kit.ImageKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { VersionService, VersionInfo } from '../services/VersionService';
+import { CalendarSyncService, SlimCell } from '../services/CalendarSyncService';
 import networkUtil from '../utils/NetworkUtil';
 
 
@@ -62,16 +62,16 @@ interface ElecData {
 // 节次时间表（与ClassTablePage一致）
 const SECTION_TIMES: string[][] = [
   ['08:30', '09:15'],  // 第1节
-  ['09:25', '10:10'],  // 第2节
-  ['10:30', '11:15'],  // 第3节
-  ['11:25', '12:00'],  // 第4节
+  ['09:20', '10:05'],  // 第2节
+  ['10:25', '11:10'],  // 第3节
+  ['11:15', '12:00'],  // 第4节
   ['14:00', '14:45'],  // 第5节
-  ['14:55', '15:40'],  // 第6节
-  ['16:00', '16:45'],  // 第7节
-  ['16:55', '17:30'],  // 第8节
+  ['14:50', '15:35'],  // 第6节
+  ['15:55', '16:40'],  // 第7节
+  ['16:45', '17:30'],  // 第8节
   ['19:00', '19:45'],  // 第9节
-  ['19:55', '20:40'],  // 第10节
-  ['20:50', '21:25'],  // 第11节
+  ['19:55', '20:35'],  // 第10节
+  ['20:40', '21:25'],  // 第11节
 ];
 
 // 预览卡片用的轻量数据结构
@@ -87,6 +87,8 @@ class PreviewCell {
   isCustom: boolean = false;
   isExam: boolean = false;
   examTimeDesc: string = '';
+  examDate: string = '';        // 考试绝对日期 YYYY-MM-DD（日历同步用）
+  experimentProject: string = ''; // 实验项目名（日历同步用）
   weekNum: number = 0;    // 哪一周
   weekList: boolean[] = []; // 普通课程的周次列表
 }
@@ -161,10 +163,8 @@ struct MainPage {
           router.pushUrl({ url: 'pages/ImageCropPage', params: { path: path } });
         }
       }).catch((err: BusinessError) => {
-        console.error(TAG, 'PhotoViewPicker failed: ' + JSON.stringify(err));
       });
     } catch (error) {
-      console.error(TAG, 'PhotoViewPicker failed: ' + JSON.stringify(error));
     }
   }
   // 保存背景设置
@@ -173,13 +173,18 @@ struct MainPage {
       if (this.bgShow && this.bgOriPath.length > 0) {
         // 裁剪后的图片已在沙箱，直接存路径
         await PreferenceUtil.putString('class_bg_path', this.bgOriPath);
+      } else if (this.bgShow && this.bgOriPath.length === 0) {
+        // 开了自定义背景但没选图，提示用户
+        this.bgToast = '请先选择一张图片';
+        setTimeout(() => { this.bgToast = ''; }, 2000);
+        return;
       } else if (!this.bgShow) {
         // 关闭自定义背景
         await PreferenceUtil.putString('class_bg_path', '');
       }
       await PreferenceUtil.putBool('class_bg_show', this.bgShow);
       await PreferenceUtil.putNumber('class_bg_opacity', this.bgOpacityVal);
-    } catch (_) { console.warn("MainPage", "ignored error"); }
+    } catch (_) {}
     this.closeBgDialog();
   }
 
@@ -248,8 +253,10 @@ struct MainPage {
   pageInfo: NavPathStack = new NavPathStack();
   @StorageLink('electricity_cache') elCache: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
-  @StorageLink('ct_updated') ctUpdated: string = '';
+  @StorageLink('ct_updated') @Watch('onCtUpdated') ctUpdated: string = '';
   private _lastCtUpdated: string = '';
+  // 网络回调绑定引用（startListen/stopListen 须用同一引用才能正确解绑）
+  private onNetworkChangeHandler: (available: boolean) => void = this.onNetworkChange.bind(this);
 
   onClassTableUpdated(): void {
     // @Watch on @StorageLink 在 Navigation 隐藏时不触发，改用定时轮询
@@ -325,6 +332,7 @@ struct MainPage {
   @State hasUpdate: boolean = false;
   @State skipVersion: string = '';
   @State updateToast: string = '';
+  @State bgToast: string = '';
   updateChecked: boolean = false;
   currentVersion: string = '';
 
@@ -446,7 +454,6 @@ struct MainPage {
     } catch (_e) { /* ignore */ }
 
     // 屏幕宽度检测（响应式布局）
-    console.info('MainPage', 'isTablet=' + this.isTablet + ' deviceType=' + deviceInfo.deviceType);
     // 平板：自动选中第一项课表
     if (this.isTablet) {
       this.onMenuClick(0);
@@ -485,7 +492,7 @@ struct MainPage {
       AppStorage.setOrCreate('card_balance', cachedBal);
     }
     // 注册网络状态监听：网络恢复时自动触发重登录
-    networkUtil.startListen(this.onNetworkChange.bind(this));
+    networkUtil.startListen(this.onNetworkChangeHandler);
   }
 
   /**
@@ -493,11 +500,9 @@ struct MainPage {
    * @param available - 网络是否可用
    */
   private onNetworkChange(available: boolean): void {
-    console.info('MainPage', 'Network changed: ' + (available ? 'available' : 'unavailable'));
     if (available) {
       // 网络恢复 → 如果之前是离线状态，自动触发重登录
       if (this.loginStatus === 'offline' || this.loginStatus === 'expired' || this.loginStatus === 'timeout') {
-        console.info('MainPage', 'Network restored, auto re-login');
         this.checkLogin();
       }
     } else {
@@ -516,7 +521,6 @@ struct MainPage {
       this.appCacheDir = moduleContext.cacheDir;
       this.appCacheWebDir = moduleContext.cacheDir + '/web';
     } catch (e) {
-      console.error('MainPage', 'initCacheDirs error: ' + String(e));
     }
   }
 
@@ -541,10 +545,15 @@ struct MainPage {
           setTimeout(() => { this.updateToast = ''; }, 1500);
         }
       }
-    } catch (_) { console.warn("MainPage", "ignored error"); }
+    } catch (_) {}
   }
 
-  aboutToDisappear() { this.stopRetryTimer(); }
+  aboutToDisappear() {
+    this.stopRetryTimer();
+    // 解绑监听，避免页面重建时 handler 累积、或销毁后回调触发空引用
+    networkUtil.stopListen(this.onNetworkChangeHandler);
+    this.getUIContext().getHostContext()?.eventHub.off('cardNavigate');
+  }
 
   // 从后台切回前台时刷新登录状态
   onPageShow(): void {
@@ -573,9 +582,9 @@ struct MainPage {
     }
   }
 
-  private get _previewDirty(): boolean {
+  // ct_updated 变化（@StorageLink + @Watch）时触发预览刷新；替代原先 build() 中轮询 _previewDirty 的自循环
+  private onCtUpdated(): void {
     this.tryRefreshPreview();
-    return true;
   }
 
   private async refreshSessionIfNeeded(): Promise<void> {
@@ -584,7 +593,6 @@ struct MainPage {
       const cas = CasLoginService.getInstance();
       const restored = await cas.tryAutoRestoreLogin();
       if (!restored) {
-        console.info('MainPage', 'TGC expired after background, checking...');
         this.checkLogin();
       }
     } catch (_) { /* TGC check failed, ignore */ }
@@ -633,7 +641,6 @@ struct MainPage {
       // 区分断网和服务器超时
       if (networkUtil.isNetworkAvailable) {
         this.loginStatus = 'timeout';
-        console.warn('MainPage', 'Login timeout (network ok, server slow): ' + String(e));
       } else {
         this.loginStatus = 'offline';
       }
@@ -740,7 +747,6 @@ struct MainPage {
       const a: number = Math.round(dx);
       const b: number = 0;
       const dist: number = (a - this.captchaLastA) * (a - this.captchaLastA)
-        + (b - this.captchaLastB) * (b - this.captchaLastB);
       if (dist < 4) { return; }
       this.captchaTracks.push({ a: a, b: b, c: elapsed });
       this.captchaLastA = a;
@@ -873,8 +879,11 @@ struct MainPage {
   // 登录成功后预加载课表、考试、实验数据
   private startPreload(): void {
     AppStorage.setOrCreate('login_state', String(Date.now()));
-    EhallService.getInstance().preloadAllData().catch((e: Error) => {
-      console.warn('MainPage', 'preload failed: ' + String(e));
+    EhallService.getInstance().preloadAllData().then(() => {
+      // 用最新缓存重建预览 + 更新日历快照，并自动增量同步日历（对齐 Flutter 首页刷新触发）
+      this.loadClassPreview();
+      CalendarSyncService.autoSync(getContext(this) as common.UIAbilityContext);
+    }).catch((e: Error) => {
     });
   }
 
@@ -885,9 +894,6 @@ struct MainPage {
     const rawAvatar: string = PreferenceUtil.getString('user_avatar');
     const rawMajor: string = PreferenceUtil.getString('user_major');
     const rawCollege: string = PreferenceUtil.getString('user_college');
-    console.info(TAG, 'loadUserInfo: raw prefs name=' + rawName +
-      ' college=' + rawCollege + ' major=' + rawMajor +
-      ' avatarLen=' + String(rawAvatar.length));
 
     UserInfoService.getInstance().fetchAll().then((info) => {
       if (info.name) {
@@ -917,13 +923,7 @@ struct MainPage {
       if (info.className) {
         this.userClassName = info.className;
       }
-      console.info(TAG, 'loadUserInfo: OK name=' + this.userDisplayName +
-        ' college=' + this.userCollege + ' major=' + this.userMajor +
-        ' grade=' + this.userGrade + ' gender=' + this.userGender +
-        ' dormitory=' + this.userDormitory + ' studentType=' + this.userStudentType +
-        ' className=' + this.userClassName);
     }).catch((e: Error) => {
-      console.warn(TAG, 'loadUserInfo failed: ' + String(e));
       this.userDisplayName = rawName;
       this.userAvatarUrl = rawAvatar;
       this.userMajor = rawMajor;
@@ -932,7 +932,6 @@ struct MainPage {
 
     // 首次登录时 LoginPage 已拉取并缓存，这里仅读取；若意外未初始化则自动补一次
     if (!rawName && !PreferenceUtil.getBool('user_info_initialized')) {
-      console.info(TAG, 'loadUserInfo: name empty and not initialized, auto refresh');
       setTimeout(() => { this.refreshUserInfo(); }, 2000);
     }
   }
@@ -954,15 +953,11 @@ struct MainPage {
           fileIo.writeSync(dst.fd, buf);
           fileIo.closeSync(dst);
           this.userAvatarUrl = 'file://' + filePath;
-          console.info(TAG, 'downloadAndSetAvatar: OK path=' + filePath);
         } catch (e2) {
-          console.warn(TAG, 'downloadAndSetAvatar: write failed: ' + String(e2));
         }
       } else {
-        console.warn(TAG, 'downloadAndSetAvatar: bad response code=' + resp.responseCode + ' url=' + url);
       }
     }).catch((e: Object): void => {
-      console.warn(TAG, 'downloadAndSetAvatar: download failed: ' + String(e) + ' url=' + url);
     }).finally((): void => {
       req.destroy();
     });
@@ -980,11 +975,9 @@ struct MainPage {
   // 手动刷新用户信息 — 隐藏 WebView 加载 xgxt jbxxapp SPA → JS fetch API 提取
   private refreshUserInfo(): void {
     if (this.userRefreshing) {
-      console.info(TAG, 'refreshUserInfo: already refreshing, skip');
       return;
     }
     this.userRefreshing = true;
-    console.info(TAG, 'refreshUserInfo: START (WebView → xgxt)');
 
     // 清除旧 WebView 状态
     clearTimeout(this.xgxtTimeoutId);
@@ -999,7 +992,6 @@ struct MainPage {
 
     // 超时保护
     this.xgxtTimeoutId = setTimeout(() => {
-      console.warn(TAG, 'xgxt fetch TIMEOUT');
       this.xgxtCleanup();
     }, 25000);
   }
@@ -1017,27 +1009,23 @@ struct MainPage {
       '    body:body' +
       '  }).then(function(r){return r.text();})' +
       '    .then(function(d){console.log("XGXT_INFO:"+d);})' +
-      '    .catch(function(e){console.log("XGXT_ERR:"+e.message);});' +
+      '    .catch(function(e){console.log("XGXT_ERR:"+e);});' +
       '},4000);';
     this.xgxtController.runJavaScript(js);
-    console.info(TAG, 'xgxtInjectFetch: JS injected, waiting for SPA init...');
   }
 
   // 处理 JS fetch 返回的 getStuBaseInfo JSON
   private xgxtProcessResult(raw: string): void {
     try {
-      console.info(TAG, 'xgxtProcessResult: raw[0:500]=' + raw.substring(0, 500));
       const obj: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
       const returnCode: string = String(obj['returnCode'] ?? '');
       if (returnCode !== '#E000000000000') {
         const desc: string = String(obj['description'] ?? JSON.stringify(raw).substring(0, 120));
-        console.warn(TAG, 'xgxt API failed: ' + desc);
         this.xgxtCleanup();
         return;
       }
       const data: Record<string, Object> = obj['data'] as Record<string, Object>;
       if (!data) {
-        console.warn(TAG, 'xgxt result: no data field');
         this.xgxtCleanup();
         return;
       }
@@ -1063,17 +1051,12 @@ struct MainPage {
         stype ? PreferenceUtil.putString('user_student_type', stype) : Promise.resolve(),
       ]).catch(() => {});
       if (stype) PreferenceUtil.putString('user_student_type', stype);
-
-      console.info(TAG, 'xgxt result: OK name=' + name + ' college=' + college +
-        ' major=' + major + ' grade=' + grade + ' gender=' + gender +
-        ' dorm=' + dorm + ' stype=' + stype + ' cls=' + cls);
       this.loadUserInfo();
 
       // 学工数据拿到后，进入阶段2：超星头像提取
       const cachedUid: string = PreferenceUtil.getString('cx_uid');
       if (cachedUid.length > 0 && /^\d+$/.test(cachedUid)) {
         this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + cachedUid + '_80');
-        console.info(TAG, 'xgxt result: using cached uid=' + cachedUid);
         this.xgxtCleanup();
         return;
       }
@@ -1081,7 +1064,6 @@ struct MainPage {
       // 无缓存 → HTTP 走考勤 SSO 入口建超星 session → WebView 直连 i.chaoxing
       this.xgxtPhase = 2;
       const attSvc: AttendanceService = AttendanceService.getInstance();
-      console.info(TAG, 'xgxt result: logging into chaoxing via xdspoc SSO...');
       attSvc.loginToLearning().then(() => {
         const http = HttpUtil.getInstance();
         const srcDomains: string[] = ['fanya.chaoxing.com', 'xdspoc.fanya.chaoxing.com',
@@ -1094,15 +1076,12 @@ struct MainPage {
         }
         CasLoginService.getInstance().syncCookiesToWebView();
         const cxUrl: string = 'https://i.chaoxing.com/base';
-        console.info(TAG, 'xgxt result: chaoxing session ready, nav=' + cxUrl);
         this.xgxtController.loadUrl(cxUrl);
       }).catch((err: Error) => {
-        console.error(TAG, 'xgxt result: loginToLearning failed: ' + err.message);
         this.xgxtCleanup();
       });
       return;
     } catch (e) {
-      console.error(TAG, 'xgxt parse error: ' + JSON.stringify(e));
     }
     this.xgxtCleanup();
   }
@@ -1113,10 +1092,9 @@ struct MainPage {
       '(function(){' +
       '  var s=document.body.innerHTML;' +
       '  var m=s.match(/photo\\.chaoxing\\.com\\/p\\/(\\d+)/);' +
-      '  if(m){console.log("CX_UID:"+m[1]);}else{console.log("CX_UID:none");}' +
+      '  if(m){console.log("CX_UID:"+m[1]);}else{console.log("XGXT_ERR:no chaoxing uid");}' +
       '})();';
     this.xgxtController.runJavaScript(js);
-    console.info(TAG, 'xgxtInjectChaoxing: JS injected');
   }
 
   // 处理提取到的超星 UID
@@ -1124,9 +1102,7 @@ struct MainPage {
     if (uid.length > 0 && uid !== 'none' && /^\d+$/.test(uid)) {
       await PreferenceUtil.putString('cx_uid', uid);
       this.downloadAndSetAvatar('https://photo.chaoxing.com/p/' + uid + '_80');
-      console.info(TAG, 'xgxtChaoxingResult: saved uid=' + uid);
     } else {
-      console.warn(TAG, 'xgxtChaoxingResult: no valid uid found, raw=' + uid);
     }
     this.xgxtCleanup();
   }
@@ -1137,7 +1113,6 @@ struct MainPage {
     this.xgxtPhase = 0;
     this.xgxtActive = false;
     this.userRefreshing = false;
-    console.info(TAG, 'xgxtCleanup: done');
   }
 
 
@@ -1156,7 +1131,6 @@ struct MainPage {
     try {
       web_webview.WebviewController.removeAllCache(true);
     } catch (e) {
-      console.error('MainPage', 'clearCache error: ' + String(e));
     }
     try {
       const moduleContext: common.Context = this.context.createModuleContext('entry');
@@ -1183,9 +1157,40 @@ struct MainPage {
     });
   }
 
+  // 把预览网格(PreviewCell)转成日历同步用的 SlimCell 网格
+  private toSlimGrid(grid: PreviewCell[][][]): SlimCell[][][] {
+    const slim: SlimCell[][][] = [];
+    for (let d = 0; d <= 7; d++) {
+      slim[d] = [];
+      for (let s = 0; s <= 11; s++) {
+        const cells: PreviewCell[] = grid[d]?.[s] ?? [];
+        const slimRow: SlimCell[] = [];
+        for (let i = 0; i < cells.length; i++) {
+          const c: PreviewCell = cells[i];
+          slimRow.push({
+            name: c.name,
+            teacher: c.teacher ?? '',
+            classroom: c.classroom ?? '',
+            day: c.day,
+            startSection: c.startSection,
+            endSection: c.endSection,
+            weekList: c.weekList,
+            isExam: c.isExam,
+            isExperiment: c.isExperiment,
+            experimentProject: c.experimentProject ?? '',
+            examDate: c.examDate ?? '',
+            examTimeDesc: c.examTimeDesc ?? '',
+            examSeat: c.seat ?? ''
+          });
+        }
+        slim[d][s] = slimRow;
+      }
+    }
+    return slim;
+  }
+
   // 加载课表预览数据：读取本地缓存 → 解析classGrid → 提取接下来2节课
   loadClassPreview(): void {
-    console.error('Preview', 'loadClassPreview called');
     try {
       const semesterCode: string = SemesterUtil.getCurrentSemesterCode();
       const filePath: string = this.context.filesDir + '/class_table_' + semesterCode + '.json';
@@ -1193,7 +1198,6 @@ struct MainPage {
         this.previewLoaded = true;
         return;
       }
-      console.error('Preview', 'loadClassPreview filePath=' + filePath);
       const file: fileIo.File = fileIo.openSync(filePath, fileIo.OpenMode.READ_ONLY);
       const stat = fileIo.statSync(filePath);
       const buf = new ArrayBuffer(stat.size);
@@ -1222,7 +1226,6 @@ struct MainPage {
         const endSec: number = parseInt(item.jsjc) || 0;
         if (day < 1 || day > 7 || startSec < 1 || endSec < startSec) continue;
         if (day === 1) {
-          console.error('Preview', 'item: ' + item.kcm + ' skzc=[' + item.skzc + '] weekList11=' + weekList[11]);
         }
         const cell = new PreviewCell();
         cell.name = item.kcm;
@@ -1246,10 +1249,10 @@ struct MainPage {
       this.mergeExamPreview(grid);
       // 提取接下来2节课
       this.previewCells = this.getNextClasses(grid);
-      console.error('Preview', 'previewCells count=' + this.previewCells.length);
+      // 同步更新日历快照（供 CalendarSyncService.autoSync 读取，实现登录后自动同步）
+      CalendarSyncService.saveClassGridSnapshot(this.toSlimGrid(grid));
       this.previewLoaded = true;
     } catch (e) {
-      console.error('MainPage', 'loadClassPreview error: ' + String(e));
       this.previewLoaded = true;
     }
   }
@@ -1306,6 +1309,7 @@ struct MainPage {
         if (weekday < 1 || weekday > 7 || startSec < 1) continue;
         const cell = new PreviewCell();
         cell.name = item['experimentName'] || '实验';
+        cell.experimentProject = item['experimentProject'] || item['experimentName'] || '实验';
         cell.classroom = item['lab'] || '';
         cell.day = weekday;
         cell.startSection = startSec;
@@ -1317,7 +1321,6 @@ struct MainPage {
         }
       }
     } catch (e) {
-      console.error('MainPage', 'mergeExpPreview error: ' + String(e));
     }
   }
 
@@ -1338,6 +1341,7 @@ struct MainPage {
         if (weekday < 1 || weekday > 7 || startSec < 1) continue;
         const cell = new PreviewCell();
         cell.name = item['experimentName'] || '物理实验';
+        cell.experimentProject = item['experimentName'] || '物理实验';
         cell.classroom = item['lab'] || '';
         cell.day = weekday;
         cell.startSection = startSec;
@@ -1349,7 +1353,6 @@ struct MainPage {
         }
       }
     } catch (e) {
-      console.error('MainPage', 'mergePhysicsPreview error: ' + String(e));
     }
   }
 
@@ -1358,9 +1361,7 @@ struct MainPage {
     try {
       const semCode: string = SemesterUtil.getCurrentSemesterCode();
       const customPath: string = this.context.filesDir + '/class_table_' + semCode + '_custom.json';
-      console.error('Preview', 'mergeCustom searchPath=' + customPath);
       if (!fileIo.accessSync(customPath)) {
-        console.error('Preview', 'mergeCustom file not found');
         return;
       }
       const file: fileIo.File = fileIo.openSync(customPath, fileIo.OpenMode.READ_ONLY);
@@ -1371,7 +1372,6 @@ struct MainPage {
       const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
       const text: string = decoder.decodeToString(new Uint8Array(buf));
       const items: Object[] = JSON.parse(text) as Object[];
-      console.error('Preview', 'mergeCustom items.length=' + items.length);
       for (let i = 0; i < items.length; i++) {
         const item: Record<string, Object> = items[i] as Record<string, Object>;
         const day: number = item['day'] as number || 0;
@@ -1398,13 +1398,11 @@ struct MainPage {
         cell.endSection = endSec > startSec ? endSec : startSec;
         cell.isCustom = true;
         cell.weekList = weekList;
-        console.error('Preview', 'mergeCustom item: name=' + cell.name + ' day=' + day + ' sec=' + startSec + '-' + cell.endSection + ' wlLen=' + wl.length + ' wl[13]=' + (wl.length > 13 ? wl[13] : '?'));
         if (day <= 7 && startSec <= 11) {
           grid[day][startSec].push(cell);
         }
       }
     } catch (e) {
-      console.error('MainPage', 'mergeCustomPreview error: ' + String(e));
     }
   }
 
@@ -1446,12 +1444,13 @@ struct MainPage {
         cell.isExam = true;
         cell.weekNum = weekNum;
         cell.examTimeDesc = timeOnly;
+        cell.examDate = ksrq;
+        cell.experimentProject = (item['KCM'] as string) || (item['KSMC'] as string) || '';
         if (weekday <= 7) {
           grid[weekday][0].push(cell);
         }
       }
     } catch (e) {
-      console.error('MainPage', 'mergeExamPreview error: ' + String(e));
       PreferenceUtil.putString('exam_schedule_cache', '');
     }
   }
@@ -1460,7 +1459,7 @@ struct MainPage {
   private getNextClasses(grid: PreviewCell[][][]): PreviewCell[] {
     const candidates: PreviewCell[] = [];
     const now = new Date();
-    const currentWeek: number = SemesterUtil.calcCurrentWeekFromNow();
+    let currentWeek: number = SemesterUtil.calcCurrentWeekFromNow();
     const dayOfWeek: number = now.getDay(); // 0=Sun, 1=Mon...
     const todayDay: number = dayOfWeek === 0 ? 7 : dayOfWeek; // 转为1-7（周一=1）
 
@@ -1476,7 +1475,26 @@ struct MainPage {
       }
     }
 
-    console.error('Preview', 'week=' + currentWeek + ' todayDay=' + todayDay + ' currentSection=' + currentSection);
+
+    // 计算数据实际最大周（普通课最后有课周 与 考试周 的较大值），避免硬编码上限误杀跨周显示
+    let dataMaxWeek = 1;
+    for (let d = 1; d <= 7; d++) {
+      for (let s = 0; s <= 11; s++) {
+        const arr = grid[d]?.[s];
+        if (!arr) continue;
+        for (const c of arr) {
+          if (c.isExam) {
+            if (c.weekNum > dataMaxWeek) dataMaxWeek = c.weekNum;
+          } else {
+            for (let i = 0; i < c.weekList.length; i++) {
+              if (c.weekList[i] && i + 1 > dataMaxWeek) dataMaxWeek = i + 1;
+            }
+          }
+        }
+      }
+    }
+    // 学期已结束（超数据最后周）：钳制到最后一合法周，避免预览空白
+    if (currentWeek > dataMaxWeek) currentWeek = dataMaxWeek;
 
     // 搜索范围：今天 + 明天（最多2天）
     for (let offset = 0; offset < 2; offset++) {
@@ -1486,9 +1504,8 @@ struct MainPage {
         searchDay = 1;
         searchWeek = currentWeek + 1;
       }
-      if (searchWeek > 18) continue;
+      if (searchWeek > dataMaxWeek + 1) continue;  // +1 允许跨周显示明天
 
-      console.error('Preview', 'offset=' + offset + ' searchDay=' + searchDay + ' searchWeek=' + searchWeek);
 
       // 考试（存储在 section 0）
       const examCells: PreviewCell[] = grid[searchDay][0];
@@ -1536,10 +1553,6 @@ struct MainPage {
       const bMin: number = b.isExam ? this.examTimeToMinutes(b.examTimeDesc) : this.sectionToMinutes(b.startSection);
       return aMin - bMin;
     });
-
-    console.error('Preview', 'candidates=' + candidates.length + ' top2: ' +
-      (candidates.length > 0 ? candidates[0].name : 'none') +
-      (candidates.length > 1 ? ', ' + candidates[1].name : ''));
 
     return candidates.slice(0, 2);
   }
@@ -1663,11 +1676,14 @@ struct MainPage {
       if (savedPath.length > 0) {
         try {
           this.bgPath = fileUri.getUriFromPath(savedPath);
+          this.bgOriPath = savedPath;
         } catch (_) {
           this.bgPath = '';
+          this.bgOriPath = '';
         }
       } else {
         this.bgPath = '';
+        this.bgOriPath = '';
       }
       this.showBgDialog = true;
       animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.bgOpacity = 1; this.bgTranslate = 0; });
@@ -1945,16 +1961,12 @@ struct MainPage {
         .position({ x: -400, y: 0 })
         .onPageEnd((event) => {
           if (event && event.url) {
-            console.info(TAG, 'xgxt pageEnd: url=' + event.url.substring(0, 120));
             if (this.xgxtPhase === 1 && event.url.indexOf('xgxt.xidian.edu.cn') >= 0) {
-              console.info(TAG, 'xgxt pageEnd: xgxt page loaded, injecting JS...');
               this.xgxtInjectFetch();
             } else if (this.xgxtPhase === 2 && event.url.indexOf('i.chaoxing.com') >= 0) {
-              console.info(TAG, 'xgxt pageEnd: chaoxing page loaded, extracting uid...');
               this.xgxtInjectChaoxing();
             }
           } else {
-            console.info(TAG, 'xgxt pageEnd: no url in event');
           }
         })
         .onConsole((event): boolean => {
@@ -1962,18 +1974,15 @@ struct MainPage {
             const msg: string = event.message.getMessage();
             if (msg.indexOf('XGXT_INFO:') === 0) {
               const raw: string = msg.substring(10);
-              console.info(TAG, 'xgxt console: XGXT_INFO len=' + String(raw.length));
               this.xgxtProcessResult(raw);
               return true;
             }
             if (msg.indexOf('XGXT_ERR:') === 0) {
-              console.warn(TAG, 'xgxt console: XGXT_ERR ' + msg.substring(10));
               this.xgxtCleanup();
               return true;
             }
             if (msg.indexOf('CX_UID:') === 0) {
               const uid: string = msg.substring(7).trim();
-              console.info(TAG, 'xgxt console: CX_UID=' + uid);
               this.xgxtChaoxingResult(uid);
               return true;
             }
@@ -1981,7 +1990,6 @@ struct MainPage {
           return false;
         })
         .onErrorReceive(() => {
-          console.error(TAG, 'xgxt WebView error');
           this.xgxtCleanup();
         })
         .domStorageAccess(true)
@@ -2443,10 +2451,14 @@ struct MainPage {
             .constraintSize({ maxHeight: 300 })
             .objectFit(ImageFit.Cover)
             .borderRadius(10)
-            .opacity(this.bgPath.length > 0 ? this.bgOpacityVal / 100 : 0.06)
+            .opacity(this.bgPath.length > 0 ? (this.bgShow ? this.bgOpacityVal / 100 : 0.15) : 0.06)
             .interpolation(ImageInterpolation.Medium)
           if (this.bgPath.length === 0) {
             Text('📷 点此选择图片').fontSize(14).fontColor(ThemeColors.textHint)
+          } else if (!this.bgShow) {
+            Text('已关闭').fontSize(13).fontColor('#FFFFFF')
+              .backgroundColor('rgba(0,0,0,0.5)').borderRadius(6)
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
           }
         }
         .width('100%').borderRadius(10)
@@ -2537,7 +2549,7 @@ struct MainPage {
               this.showUpdateDialog = false;
               if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
               if (this.updateInfo) {
-                try { this.context.openLink(this.updateInfo.url); } catch (_) { console.warn("MainPage", "openLink failed"); }
+                try { this.context.openLink(this.updateInfo.url); } catch (_) {}
               }
             })
         }.width('100%')
@@ -2562,6 +2574,15 @@ struct MainPage {
     // 底部提示 Toast
     if (this.updateToast.length > 0) {
       Text(this.updateToast)
+        .fontSize(14).fontColor('#FFFFFF')
+        .backgroundColor('rgba(0,0,0,0.75)')
+        .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+        .borderRadius(20)
+        .position({ x: '50%', y: '90%' }).markAnchor({ x: '50%' })
+        .zIndex(10)
+    }
+    if (this.bgToast.length > 0) {
+      Text(this.bgToast)
         .fontSize(14).fontColor('#FFFFFF')
         .backgroundColor('rgba(0,0,0,0.75)')
         .padding({ left: 20, right: 20, top: 10, bottom: 10 })
@@ -2692,13 +2713,33 @@ struct MainPage {
         .width('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 8 })
 
-        // 课程列表
+        // 课程列表（时间轴样式）
         ForEach(this.previewCells, (cell: PreviewCell, index: number) => {
           Row() {
-            // 左侧色条
-            Column()
-              .width(4).height('100%').borderRadius(2)
-              .backgroundColor(cell.isExam ? '#E91E63' : (cell.isExperiment ? '#FF9800' : (cell.isCustom ? '#66BB6A' : '#2979FF')))
+            // 左侧时间
+            Column() {
+              if (cell.isExam) {
+                Text('考试')
+                  .fontSize(13).fontWeight(FontWeight.Bold).fontColor('#E91E63')
+              } else {
+                Text(SECTION_TIMES[cell.startSection - 1][0])
+                  .fontSize(13).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                Text(SECTION_TIMES[cell.endSection - 1][1])
+                  .fontSize(10).fontColor(ThemeColors.textSecondary)
+              }
+            }
+            .width(46).alignItems(HorizontalAlign.End).padding({ right: 4 })
+
+            // 时间轴节点 + 连线
+            Column() {
+              Circle().width(10).height(10)
+                .fill(cell.isExam ? '#E91E63' : (cell.isExperiment ? '#FF9800' : (cell.isCustom ? '#66BB6A' : '#2979FF')))
+                .margin({ top: 4 })
+              if (index < this.previewCells.length - 1) {
+                Column().width(2).layoutWeight(1).backgroundColor('#E0E0E0').margin({ top: 2 })
+              }
+            }
+            .width(16).height('100%').alignItems(HorizontalAlign.Center)
 
             // 课程信息
             Column() {
@@ -2718,14 +2759,16 @@ struct MainPage {
                   .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   .layoutWeight(1)
                   .margin({ left: cell.isExam || cell.isExperiment || cell.isCustom ? 6 : 0 })
+                Text(cell.day === this.getTodayDay() ? '今天' : '明天')
+                  .fontSize(11).fontColor(cell.day === this.getTodayDay() ? this.accentTextColor() : '#FFFFFF')
+                  .backgroundColor(cell.day === this.getTodayDay() ? this.accentColor : '#43A047')
+                  .borderRadius(10)
+                  .padding({ left: 8, right: 8, top: 2, bottom: 2 })
               }
               Row() {
                 if (cell.isExam && cell.examTimeDesc.length > 0) {
                   Text(cell.examTimeDesc)
                     .fontSize(12).fontColor('#E91E63')
-                } else if (!cell.isExam) {
-                  Text(SECTION_TIMES[cell.startSection - 1][0] + '-' + SECTION_TIMES[cell.endSection - 1][1])
-                    .fontSize(12).fontColor(ThemeColors.textSecondary)
                 }
                 if (cell.teacher.length > 0) {
                   Text('  ' + cell.teacher)
@@ -2745,17 +2788,10 @@ struct MainPage {
             }
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
-            .padding({ left: 12 })
-
-            // 日期标签
-            Text(cell.day === this.getTodayDay() ? '今天' : '明天')
-              .fontSize(12).fontColor(cell.day === this.getTodayDay() ? this.accentTextColor() : '#FFFFFF')
-              .backgroundColor(cell.day === this.getTodayDay() ? this.accentColor : '#43A047')
-              .borderRadius(10)
-              .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+            .padding({ left: 8 })
           }
           .width('100%')
-          .height(56)
+          .height(64)
           .padding({ left: 16, right: 16 })
           .alignItems(VerticalAlign.Center)
         }, (cell: PreviewCell, index: number) => index.toString())
@@ -2770,7 +2806,20 @@ struct MainPage {
     } else if (this.previewLoaded && this.previewCells.length === 0) {
       // 没课
       Column() {
-        Text('🌸 😴 ✨ 🌙 🐢').fontSize(28).padding({ top: 16, bottom: 4 })
+        // 标题行
+        Row() {
+          Text('📅')
+            .fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+          Text('  课程预告')
+            .fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Text('查看课表 >')
+            .fontSize(12).fontColor(this.accentColor)
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+
+        Text('🌸 😴 ✨ 🌙 🐢').fontSize(28).padding({ top: 8, bottom: 4 })
         Text('当前没课，好好休息吧！')
           .fontSize(18).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textSecondary)
           .padding({ bottom: 16 })
@@ -2914,15 +2963,15 @@ struct MainPage {
       .backgroundColor(this.accentColor)
 
       // 课表预览卡片
-      // 课表预览卡片 — ctUpdated 变化时通过 getter 触发刷新
-      if (this._previewDirty) { /* noop */ }
+      // 课表预览卡片（ct_updated 变化时由 @Watch('onCtUpdated') 触发刷新）
       this.ClassPreviewCard()
 
       // 电费查询已移至功能菜单
 
       // 功能菜单列表(始终显示)
       Column() {
-        Refresh({ refreshing: $$this.homeRefreshing }) {
+        Refresh({ refreshing:
+        $$this.homeRefreshing }) {
           List({ space: 8 }) {
           ForEach(this.homeMenuOrder, (name: string, idx: number) => {
             ListItem() {
@@ -3020,33 +3069,61 @@ struct MainPage {
 
       // 用户区域：有缓存数据就显示信息卡片，否则显示登录入口
       if (this.userDisplayName || this.username) {
-        // 用户信息卡片
+        // 用户信息卡片 — 顶部主题色横幅 + 内容区
         Column() {
-          Row() {
-            // 头像
-            Stack() {
-              Circle().width(56).height(56).fill(this.accentColor + '18')
-              if (this.userAvatarUrl) {
-                Image(this.userAvatarUrl).width(56).height(56).borderRadius(28).objectFit(ImageFit.Cover)
-              } else {
-                Text('🎓').fontSize(28)
-              }
-            }.width(56).height(56)
-            .border({ width: 2.5, color: this.accentColor + '40', radius: 28 })
+          // 顶部主题色装饰条
+          Row()
+            .width('100%').height(64)
+            .linearGradient({
+              direction: GradientDirection.Right,
+              colors: [[this.accentColor, 0], [this.accentColor + 'CC', 0.5], [this.accentColor + '66', 1]]
+            })
 
+          // 内容区：头像 overlap 装饰条 + 信息
+          Row() {
+            // 头像 — 大号，带白边
+            Stack() {
+              Circle().width(72).height(72).fill('#FFFFFF')
+              if (this.userAvatarUrl) {
+                Image(this.userAvatarUrl).width(66).height(66).borderRadius(33).objectFit(ImageFit.Cover)
+              } else {
+                Stack() {
+                  Circle().width(66).height(66).fill(this.accentColor + '18')
+                  Text('🎓').fontSize(32)
+                }.width(66).height(66).borderRadius(33)
+              }
+            }
+            .width(72).height(72)
+            .offset({ y: -20 })
+            .margin({ left: 20 })
+
+            // 右侧信息区
             Column() {
-              // 姓名行
+              // 姓名行 + 刷新按钮
               Row() {
                 Text(this.userDisplayName || this.username || '已登录')
                   .fontSize(20).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
                   .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                // 性别符号
                 if (this.userGender && this.userGender !== '') {
                   Text(this.userGender === '男' ? '♂' : '♀')
-                    .fontSize(20).fontWeight(FontWeight.Bold)
+                    .fontSize(18).fontWeight(FontWeight.Bold)
                     .fontColor(this.userGender === '男' ? '#5D9CEC' : '#EC5D8A')
-                    .margin({ left: 8 })
+                    .margin({ left: 6 })
                 }
+                Blank()
+                // 刷新按钮
+                Row() {
+                  if (this.userRefreshing) {
+                    LoadingProgress().width(16).height(16).color(this.accentColor)
+                  } else {
+                    Text('🔄').fontSize(16)
+                  }
+                }
+                .width(32).height(32)
+                .justifyContent(FlexAlign.Center)
+                .borderRadius(16)
+                .backgroundColor(this.accentColor + '10')
+                .onClick(() => { this.refreshUserInfo(); })
               }.width('100%')
 
               // 学院 · 专业
@@ -3062,49 +3139,54 @@ struct MainPage {
                     Text(this.userMajor).fontSize(12).fontColor(ThemeColors.textSecondary)
                       .layoutWeight(1).textOverflow({ overflow: TextOverflow.Ellipsis }).maxLines(1)
                   }
-                }.margin({ top: 6 })
+                }.margin({ top: 4 })
               }
-
-              // 标签行
-              Row() {
-                Text(PreferenceUtil.getBool('role') ? '研究生' : '本科生')
-                  .fontSize(11).fontColor(this.accentColor)
-                  .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                  .backgroundColor(this.accentColor + '14')
-                  .borderRadius(4)
-                if (this.userGrade) {
-                  Text(this.userGrade + '级').fontSize(11).fontColor(ThemeColors.textSecondary)
-                    .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                    .backgroundColor(this.accentColor + '0A')
-                    .borderRadius(4).margin({ left: 6 })
-                }
-                if (this.userClassName) {
-                  Text(this.userClassName + '班').fontSize(11).fontColor(ThemeColors.textSecondary)
-                    .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                    .backgroundColor(this.accentColor + '0A')
-                    .borderRadius(4).margin({ left: 6 })
-                }
-              }.margin({ top: 8 })
-            }.margin({ left: 16 }).layoutWeight(1).alignItems(HorizontalAlign.Start)
-
-            // 刷新按钮
-            Row() {
-              if (this.userRefreshing) {
-                LoadingProgress().width(22).height(22).color(this.accentColor)
-              } else {
-                Text('🔄').fontSize(20)
-              }
-            }.width(40).height(40)
-             .justifyContent(FlexAlign.Center)
-             .borderRadius(20)
-             .backgroundColor(this.accentColor + '10')
-             .onClick(() => { this.refreshUserInfo(); })
+            }
+            .layoutWeight(1).alignItems(HorizontalAlign.Start)
+            .margin({ left: 14, right: 20, top: 8 })
           }.width('100%')
+
+          // 标签行 — 与信息区左对齐（头像左边距20 + 头像72 + 间距14 = 106vp）
+          Row() {
+            if (this.userStudentType) {
+              Text(this.userStudentType)
+                .fontSize(11).fontColor('#FFFFFF')
+                .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+                .backgroundColor(this.accentColor)
+                .borderRadius(10)
+            } else {
+              Text(PreferenceUtil.getBool('role') ? '研究生' : '本科生')
+                .fontSize(11).fontColor('#FFFFFF')
+                .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+                .backgroundColor(this.accentColor)
+                .borderRadius(10)
+            }
+            if (this.userGrade) {
+              Text(this.userGrade + '级')
+                .fontSize(11).fontColor(ThemeColors.textSecondary)
+                .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+                .backgroundColor(this.accentColor + '12')
+                .borderRadius(10)
+                .margin({ left: 8 })
+            }
+            if (this.userClassName) {
+              Text(this.userClassName + '班')
+                .fontSize(11).fontColor(ThemeColors.textSecondary)
+                .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+                .backgroundColor(this.accentColor + '12')
+                .borderRadius(10)
+                .margin({ left: 8 })
+            }
+          }
+          .width('100%')
+          .padding({ left: 106, right: 20, top: 8, bottom: 16 })
         }
-        .width('100%').padding({ left: 18, right: 18, top: 20, bottom: 20 })
+        .width('100%')
         .backgroundColor(ThemeColors.bgCard)
-        .borderRadius(14).shadow({ radius: 4, color: '#0000000C', offsetY: 2 })
-        .margin({ left: 16, right: 16, top: 12 })
+        .borderRadius(16)
+        .shadow({ radius: 6, color: '#00000012', offsetY: 2 })
+        .margin({ left: 14, right: 14, top: 10 })
+        .clip(true)
       } else {
         // 未登录提示
         Button('登录以使用完整功能')

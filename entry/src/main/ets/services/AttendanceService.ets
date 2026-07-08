@@ -72,12 +72,8 @@ export class AttendanceService {
   async loginToLearning(): Promise<void> {
     const casUrl: string = 'https://ids.xidian.edu.cn/authserver/login?service=' +
       encodeURIComponent(LOGIN_URL);
-    console.info(TAG, 'loginToLearning: hitting CAS directly, URL=' + casUrl.substring(0, 100) + '...');
     const resp: HttpResponse = await this.http.get(casUrl);
-    console.info(TAG, 'loginToLearning: done, status=' + String(resp.statusCode) +
-      ' bodyLen=' + String(resp.body.length));
     const sc: string = resp.headers['set-cookie'] || resp.headers['Set-Cookie'] || '';
-    console.info(TAG, 'loginToLearning: set-cookie len=' + String(sc.length));
 
     // 跨子域复制 cookie：超星在 xdspoc.fanya.chaoxing.com 设的 cookie 需同步到 fycourse.fanya.chaoxing.com
     const srcDomains: string[] = ['xdspoc.fanya.chaoxing.com', 'ids.xidian.edu.cn', 'fanya.chaoxing.com'];
@@ -98,10 +94,8 @@ export class AttendanceService {
   // 确保登录状态
   async ensureLogin(): Promise<void> {
     if (await this.isLogin()) {
-      console.info(TAG, 'ensureLogin: already logged in');
       return;
     }
-    console.info(TAG, 'ensureLogin: need login');
     await this.loginToLearning();
   }
 
@@ -125,7 +119,6 @@ export class AttendanceService {
         this.semesterCode = optMatch[1];
       }
     }
-    console.info(TAG, 'parseCourseInfo: semester=' + this.semesterCode);
 
     // 提取每个 myde_course_item div
     const blockRe: RegExp = /<div\b[^>]*myde_course_item[^>]*>([\s\S]*?)(?=<div\b[^>]*myde_course_item|$)/g;
@@ -195,7 +188,6 @@ export class AttendanceService {
       match = blockRe.exec(html);
     }
 
-    console.info(TAG, 'parseCourseInfo: found ' + String(results.length) + ' courses');    console.info(TAG, 'parseCourseInfo: found ' + String(results.length) + ' courses');
     return results;
   }
 
@@ -206,7 +198,6 @@ export class AttendanceService {
     const tbodyRe: RegExp = /<tbody[^>]*>([\s\S]*?)<\/tbody>/;
     const tbodyMatch = html.match(tbodyRe);
     if (tbodyMatch === null) {
-      console.info(TAG, 'parseAttendanceTable: no tbody found');
       return results;
     }
 
@@ -268,7 +259,6 @@ export class AttendanceService {
       results.push(att);
     }
 
-    console.info(TAG, 'parseAttendanceTable: parsed ' + String(results.length) + ' records');
     return results;
   }
 
@@ -277,30 +267,23 @@ export class AttendanceService {
     try {
       await this.ensureLogin();
 
-      console.info(TAG, 'getAttendanceRecords: fetching course list');
       const infoResp: HttpResponse = await this.http.get(COURSE_INFO_URL);
-      console.info(TAG, 'getAttendanceRecords: infoResp status=' + String(infoResp.statusCode) + ' len=' + String(infoResp.body.length));
-      console.info(TAG, 'getAttendanceRecords: body[0:300]=' + infoResp.body.substring(0, 300));
       const courseInfos: CourseInfo[] = this.parseCourseInfo(infoResp.body);
 
       if (courseInfos.length === 0) {
-        console.info(TAG, 'getAttendanceRecords: no courses found');
         return [];
       }
 
-      console.info(TAG, 'getAttendanceRecords: fetching data, semester=' + this.semesterCode);
       const dataUrl: string = buildUrl(COURSE_DATA_URL, {
         'v': '1',
         'semesternum': this.semesterCode
       });
       const dataResp: HttpResponse = await this.http.get(dataUrl);
-      console.info(TAG, 'getAttendanceRecords: dataResp status=' + String(dataResp.statusCode) + ' len=' + String(dataResp.body.length));
       const cleanedHtml: string = dataResp.body.replace(/[\r\n\t]/g, '');
       const attendances: ClassAttendance[] = this.parseAttendanceTable(cleanedHtml, courseInfos);
 
       return attendances;
     } catch (e) {
-      console.error(TAG, 'getAttendanceRecords error: ' + String(e));
       throw new Error('加载考勤数据失败');
     }
   }
@@ -334,7 +317,6 @@ export class AttendanceService {
 
       return results;
     } catch (e) {
-      console.error(TAG, 'getAttendanceDetail error: ' + String(e));
       throw new Error('加载签到详情失败');
     }
   }

@@ -28,7 +28,6 @@ export class ExamService {
    */
   private async activateAppSession(appId: string, force: boolean = false): Promise<void> {
     if (!force && this.appSessionUrl[appId]) {
-      console.info(TAG, 'activateAppSession: using cached for ' + appId);
       return;
     }
 
@@ -37,55 +36,43 @@ export class ExamService {
 
     const cookiesBefore = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (!force && cookiesBefore.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: already have JSESSIONID, skip for ' + appId);
       return;
     }
 
-    console.info(TAG, 'activateAppSession: establishing session for ' + appId);
 
     try {
       const resp = await this.http.get(
         'https://ehall.xidian.edu.cn/appShow?appId=' + appId,
         EHALL_HEADERS
       );
-      console.info(TAG, 'activateAppSession: /appShow resp=' + resp.statusCode);
     } catch (e) {
-      console.warn(TAG, 'activateAppSession: /appShow failed (expected): ' + JSON.stringify(e));
     }
 
     const cookiesAfter1 = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesAfter1.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: JSESSIONID obtained from /appShow');
       return;
     }
 
     try {
       const directUrl = 'https://ehall.xidian.edu.cn' + appPath + '/%2Adefault%2A/index.do';
-      console.info(TAG, 'activateAppSession: trying URL-encoded default page: ' + directUrl);
       const resp2 = await this.http.get(directUrl, EHALL_HEADERS);
-      console.info(TAG, 'activateAppSession: direct page resp=' + resp2.statusCode);
 
       if (resp2.isRedirect && resp2.location) {
         let loc: string = resp2.location;
         if (loc.startsWith('/')) {
           loc = 'https://ehall.xidian.edu.cn' + loc;
         }
-        console.info(TAG, 'activateAppSession: following redirect to ' + loc);
         try {
           await this.http.get(loc, EHALL_HEADERS);
         } catch (e3) {
-          console.warn(TAG, 'activateAppSession: redirect follow failed: ' + JSON.stringify(e3));
         }
       }
     } catch (e2) {
-      console.warn(TAG, 'activateAppSession: direct page failed: ' + JSON.stringify(e2));
     }
 
     const cookiesFinal = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     const hasModAuth = cookiesFinal.toLowerCase().includes('mod_auth_cas');
     const hasJsession = cookiesFinal.toLowerCase().includes('jsessionid');
-    console.info(TAG, 'activateAppSession: final cookies hasMOD_AUTH=' + hasModAuth +
-      ' hasJSESSIONID=' + hasJsession);
   }
 
   private readonly _appCtx: AppPostContext = new AppPostContext(

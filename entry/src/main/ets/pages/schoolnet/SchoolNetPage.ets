@@ -1,8 +1,10 @@
-﻿// SchoolNetPage.ets — 校园网页面（流量概览 + 在线设备 + ZFW详细账单）
+﻿import { AccentColors } from '../../utils/AccentColors';
+// SchoolNetPage.ets — 校园网页面（流量概览 + 在线设备 + ZFW详细账单）
 // 对齐 Flutter: NetworkCardWindow (两个Tab: 自服务平台 + 认证系统)
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { SchoolnetService, ZfwIpEntry, ZfwUsageData } from '../../services/SchoolnetService';
+import { SegmentTab } from '../../components/SegmentTab';
 
 @Component
 export struct SchoolNetPage {
@@ -24,7 +26,7 @@ export struct SchoolNetPage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .layoutWeight(1)
     }
     .width('100%')
@@ -34,12 +36,6 @@ export struct SchoolNetPage {
 
   // Tab 切换
   @State currentTab: number = 0;
-  @State indicatorBase: number = 0;
-  @State indicatorSwipe: number = 0;
-  @State barW: number = 360;
-  private swiperCtrl: SwiperController = new SwiperController();
-  private swiperWidth: number = 360;
-  private perTabW: number = 180;
 
   // === 认证系统 Tab (w.xidian.edu.cn) ===
   @State authLoading: boolean = false;
@@ -261,7 +257,6 @@ export struct SchoolNetPage {
     const local = new Date(d.getTime() + offsetMs + d.getTimezoneOffset() * 60 * 1000);
     const pad = (n: number): string => n < 10 ? '0' + n : '' + n;
     return local.getUTCFullYear() + '-' + pad(local.getUTCMonth() + 1) + '-' + pad(local.getUTCDate())
-      + ' ' + pad(local.getUTCHours()) + ':' + pad(local.getUTCMinutes()) + ':' + pad(local.getUTCSeconds());
   }
 
   private formatDuration(seconds: number): string {
@@ -602,79 +597,15 @@ export struct SchoolNetPage {
   build() {
     NavDestination() {
       Column() {
-        // Tab 栏（单条滑动指示器）
-        Stack({ alignContent: Alignment.BottomStart }) {
-          Row() {
-            Column() {
-              Text('认证系统').fontSize(15)
-                .fontColor(this.currentTab === 0 ? this.accentColor : ThemeColors.textSecondary)
-                .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-            }
-            .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-            .onClick(() => {
-              this.currentTab = 0;
-              animateTo({ duration: 400, curve: Curve.EaseInOut }, () => {
-                this.indicatorBase = 0;
-                this.indicatorSwipe = 0;
-              });
-              this.swiperCtrl.changeIndex(0, true);
-            })
-
-            Column() {
-              Text('自服务平台').fontSize(15)
-                .fontColor(this.currentTab === 1 ? this.accentColor : ThemeColors.textSecondary)
-                .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-            }
-            .layoutWeight(1).height(44).justifyContent(FlexAlign.Center)
-            .onClick(() => {
-              this.currentTab = 1;
-              animateTo({ duration: 400, curve: Curve.EaseInOut }, () => {
-                this.indicatorBase = this.perTabW;
-                this.indicatorSwipe = 0;
-              });
-              this.swiperCtrl.changeIndex(1, true);
-              this.loadZfwIfNeeded();
-            })
-          }
-          .width('100%')
-          .onAreaChange((_old: Area, newArea: Area) => {
-            this.barW = newArea.width as number;
-            this.perTabW = this.barW / 2;
-          })
-
-          // 单条滑动指示器
-          Row()
-            .width(24).height(3)
-            .backgroundColor(this.accentColor).borderRadius(1.5)
-            .margin({ left: this.indicatorBase + this.indicatorSwipe - 12 + this.barW * 0.25 })
-        }
-        .width('100%').padding({ left: 16, right: 16 })
-        .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
-
-        // Swiper 内容区
-        Swiper(this.swiperCtrl) {
+        SegmentTab({
+          tabs: ['认证系统', '自服务平台'],
+          currentIndex: $currentTab,
+          accentColor: this.accentColor,
+          onTabChange: (idx: number) => { if (idx === 1) this.loadZfwIfNeeded(); }
+        }) {
           Column() { this.AuthTab() }.width('100%')
           Column() { this.ZfwTab() }.width('100%')
         }
-        .index(this.currentTab)
-        .indicator(false)
-        .loop(false)
-        .onAreaChange((_old: Area, newArea: Area) => {
-          this.swiperWidth = newArea.width as number;
-        })
-        .onGestureSwipe((index: number, event: SwiperAnimationEvent) => {
-          const offset: number = event.currentOffset as number;
-          const ratio: number = Math.abs(offset) / this.swiperWidth;
-          const move: number = ratio >= 1 ? this.perTabW : this.perTabW * ratio;
-          this.indicatorSwipe = offset < 0 ? move : -move;
-        })
-        .onAnimationStart((_index: number, targetIndex: number, _event: SwiperAnimationEvent) => {
-          this.currentTab = targetIndex;
-          this.indicatorBase = targetIndex === 0 ? 0 : this.perTabW;
-          this.indicatorSwipe = 0;
-          if (targetIndex === 1) { this.loadZfwIfNeeded(); }
-        })
-        .layoutWeight(1)
 
         // 校园网密码弹窗
         if (this.showPwdDialog || this.pwdOpacity > 0) {

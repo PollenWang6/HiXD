@@ -175,9 +175,7 @@ struct LoginPage {
     const ok: boolean = await Promise.race([fetchPromise, timeoutPromise]);
     if (ok) {
       await PreferenceUtil.putBool('user_info_initialized', true);
-      console.info(TAG, 'runXgxtFetch: OK, info cached');
     } else {
-      console.warn(TAG, 'runXgxtFetch: timeout or failed, will retry on MainPage');
     }
   }
 

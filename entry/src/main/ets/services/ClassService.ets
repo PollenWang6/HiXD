@@ -28,7 +28,6 @@ export class ClassService {
    */
   private async activateAppSession(appId: string, force: boolean = false): Promise<void> {
     if (!force && this.appSessionUrl[appId]) {
-      console.info(TAG, 'activateAppSession: using cached for ' + appId);
       return;
     }
 
@@ -37,55 +36,43 @@ export class ClassService {
 
     const cookiesBefore = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (!force && cookiesBefore.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: already have JSESSIONID, skip for ' + appId);
       return;
     }
 
-    console.info(TAG, 'activateAppSession: establishing session for ' + appId);
 
     try {
       const resp = await this.http.get(
         'https://ehall.xidian.edu.cn/appShow?appId=' + appId,
         EHALL_HEADERS
       );
-      console.info(TAG, 'activateAppSession: /appShow resp=' + resp.statusCode);
     } catch (e) {
-      console.warn(TAG, 'activateAppSession: /appShow failed (expected): ' + JSON.stringify(e));
     }
 
     const cookiesAfter1 = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesAfter1.toLowerCase().includes('jsessionid')) {
-      console.info(TAG, 'activateAppSession: JSESSIONID obtained from /appShow');
       return;
     }
 
     try {
       const directUrl = 'https://ehall.xidian.edu.cn' + appPath + '/%2Adefault%2A/index.do';
-      console.info(TAG, 'activateAppSession: trying URL-encoded default page: ' + directUrl);
       const resp2 = await this.http.get(directUrl, EHALL_HEADERS);
-      console.info(TAG, 'activateAppSession: direct page resp=' + resp2.statusCode);
 
       if (resp2.isRedirect && resp2.location) {
         let loc: string = resp2.location;
         if (loc.startsWith('/')) {
           loc = 'https://ehall.xidian.edu.cn' + loc;
         }
-        console.info(TAG, 'activateAppSession: following redirect to ' + loc);
         try {
           await this.http.get(loc, EHALL_HEADERS);
         } catch (e3) {
-          console.warn(TAG, 'activateAppSession: redirect follow failed: ' + JSON.stringify(e3));
         }
       }
     } catch (e2) {
-      console.warn(TAG, 'activateAppSession: direct page failed: ' + JSON.stringify(e2));
     }
 
     const cookiesFinal = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     const hasModAuth = cookiesFinal.toLowerCase().includes('mod_auth_cas');
     const hasJsession = cookiesFinal.toLowerCase().includes('jsessionid');
-    console.info(TAG, 'activateAppSession: final cookies hasMOD_AUTH=' + hasModAuth +
-      ' hasJSESSIONID=' + hasJsession);
   }
 
   /** POST上下文（供 sharedAppPost 委托） */
@@ -119,7 +106,6 @@ export class ClassService {
       try {
         await this.activateAppSession(EHALL_APP_CLASS_TABLE);
       } catch (e) {
-        console.warn(TAG, 'getClassTable: activateAppSession failed, continuing without it: ' + JSON.stringify(e));
       }
 
       const body: Record<string, string> = { 'XNXQDM': semCode };
@@ -131,10 +117,7 @@ export class ClassService {
         '/jwapp/sys/wdkb/modules/xskcb/xskcb.do',
         body
       );
-      console.info(TAG, 'getClassTable: status=' + resp.statusCode +
-        ' bodyLen=' + resp.body.length);
       if (!resp.isOk) {
-        console.warn(TAG, 'getClassTable: unexpected response, bodyLen=' + resp.body.length);
       }
       // 防止 HTML 错误页被缓存 — appPost 重试后仍返回 HTML 时直接抛异常
       const trimmed = resp.body.trimStart();
@@ -152,7 +135,7 @@ export class ClassService {
     return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
       try {
         await this.activateAppSession(EHALL_APP_CLASS_TABLE);
-      } catch (_) { console.warn("ClassService", "ignored error"); }
+      } catch (_) {}
       const resp = await this.appPost(
         '/jwapp/sys/wdkb/modules/xskcb/cxxsllsywpk.do',
         { 'XNXQDM': semCode, 'XH': sid }
@@ -179,7 +162,7 @@ export class ClassService {
           teacher: String(row['SKJS'] ?? '')
         });
       }
-    } catch (_) { console.warn("ClassService", "ignored error"); }
+    } catch (_) {}
     return out;
   }
 
@@ -202,7 +185,7 @@ export class ClassService {
     return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
       try {
         await this.activateAppSession(EHALL_APP_CLASS_TABLE);
-      } catch (_) { console.warn("ClassService", "ignored error"); }
+      } catch (_) {}
       const resp = await this.appPost(
         '/jwapp/sys/wdkb/modules/xskcb/xsdkkc.do',
         { 'XNXQDM': semCode, '*order': '-SQSJ' }
@@ -273,7 +256,7 @@ export class ClassService {
           newTeacher: String(row['XSKJS'] ?? '')
         });
       }
-    } catch (_) { console.warn("ClassService", "ignored error"); }
+    } catch (_) {}
     return out;
   }
 
@@ -302,7 +285,6 @@ export class ClassService {
       'https://yjspt.xidian.edu.cn/gsapp/sys/wdkbapp/modules/xskcb/xspkjgcx.do', classBody);
     const classData: Record<string, Object> = classResp.json<Record<string, Object>>();
     if (classData['code'] as string !== '0') {
-      console.warn(TAG, 'getClassTableYjspt: ' + JSON.stringify(classData));
       return '';
     }
     const datas: Record<string, Object> = classData['datas'] as Record<string, Object>;
@@ -348,11 +330,9 @@ export class ClassService {
       if (rows.length > 0) {
         const r0: Record<string, Object> = rows[0] as Record<string, Object>;
         const date: string = String(r0['XQKSRQ'] ?? '');
-        console.info(TAG, 'getSemesterStartDateFromApi: ' + date);
         return date;
       }
     } catch (e) {
-      console.warn(TAG, 'getSemesterStartDateFromApi failed: ' + String(e));
     }
     return null;
   }

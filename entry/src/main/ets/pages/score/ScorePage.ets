@@ -1,16 +1,18 @@
-﻿// ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
+﻿import { AccentColors } from '../../utils/AccentColors';
+// ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
 import { SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
 import { ScoreService } from '../../services/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { motion } from '@kit.MultimodalAwarenessKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { curves } from '@kit.ArkUI';
 
 @Component
 export struct ScorePage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
-  @State loading: boolean = false;
+  @State loading: boolean = true;  // 初始为 true，避免 waitAndLoad 等待期间显示空状态
   @State errorMsg: string = '';
   @State selectedSemester: string = '';
   @State semesterCodes: string[] = [];
@@ -33,8 +35,11 @@ export struct ScorePage {
 
   // ===== 选择成绩计算 =====
   @State isSelectMode: boolean = false;
-  @State selectedIndexes: Set<number> = new Set();
   @State isLeftHand: boolean = false;
+  @State fabTranslateX: number = 0;  // 悬浮按钮位置：正值靠右，负值靠左
+  private fabInitialized: boolean = false;  // 首次布局完成后才做动画
+  private screenWidth: number = 360;  // 屏幕宽度（vp），onAreaChange 更新
+  @State selectedIndexes: Set<number> = new Set();
   @State selectedGPA: string = '--';
   @State selectedAvg: string = '--';
   @State selectedCredit: string = '0';
@@ -55,7 +60,7 @@ export struct ScorePage {
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
+        .fontColor(AccentColors.textContrast)
         .layoutWeight(1)
     }
     .width('100%')
@@ -80,15 +85,28 @@ export struct ScorePage {
   private startHoldingHandDetection(): void {
     try {
       motion.on('holdingHandChanged', (data: number) => {
+        const wasLeft = this.isLeftHand;
         this.isLeftHand = (data === 1 || data === 3);
+        if (wasLeft !== this.isLeftHand) {
+          this.animateFab();
+        }
       });
     } catch (err) {
       const e = err as BusinessError;
       if (e.code === 801) {
-        console.info('[ScorePage] 智感握持不支持，使用默认右手模式');
       }
       this.isLeftHand = false;
     }
+  }
+
+  private animateFab(): void {
+    if (!this.fabInitialized) return;
+    // 右手：translateX = 0（按钮在右侧 Stack.BottomEnd）
+    // 左手：translateX = -(screenWidth - 80)（滑到左侧）
+    const targetX = this.isLeftHand ? -(this.screenWidth - 80) : 0;
+    animateTo({ duration: 400, curve: curves.springMotion(0.45, 0.85) }, () => {
+      this.fabTranslateX = targetX;
+    });
   }
 
   private async waitAndLoad(): Promise<void> {
@@ -97,7 +115,6 @@ export struct ScorePage {
       await new Promise<void>((r) => { setTimeout(r, 300); });
       waited += 300;
     }
-    console.info('[ScorePage] waitAndLoad done');
     this.loadScores();
   }
 
@@ -107,7 +124,6 @@ export struct ScorePage {
     try {
       const raw: string = await ScoreService.getInstance().getScores('');
       const items: ScoreItemModel[] = ScoreService.parseScores(raw);
-      console.info('[ScorePage] parsed ' + items.length + ' items');
 
       this.allScores = items;
 
@@ -489,140 +505,175 @@ export struct ScorePage {
   build() {
     NavDestination() {
       Stack() {
-        // 第一层：主页面内容（最底层）
         Column() {
 
-          // 筛选栏：学期 + 类型 双下拉
-          Row({ space: 10 }) {
-            // 学期下拉
-            Button() {
-              Row() {
-                Text('学期 ').fontSize(12).fontColor(ThemeColors.textSecondary)
-                Text(this.selectedSemester === '__all__' ? '全部' : SemesterUtil.formatSemester(this.selectedSemester))
-                  .fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                Text(' ▾').fontSize(10).fontColor(ThemeColors.textHint)
+          // ===== 顶部固定区域（始终显示） =====
+          Column() {
+            // 第一行：学期 + 类型
+            Row({ space: 8 }) {
+              Button() {
+                Row() {
+                  Text(this.selectedSemester === '__all__' ? '全部学期' : SemesterUtil.formatSemester(this.selectedSemester))
+                    .fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.accentColor)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(' ▾').fontSize(12).fontColor(this.accentColor)
+                }
               }
-            }
-            .height(36).layoutWeight(1).borderRadius(10)
-            .backgroundColor(ThemeColors.bgInput)
-            .border({ width: 0.5, color: '#E8E8E8' })
-            .bindMenu(this.semesterMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
+              .height(40).layoutWeight(1).borderRadius(20)
+              .backgroundColor(this.themeIsDark ? '#16263D' : '#EEF3FF')
+              .border({ width: 0, color: Color.Transparent })
+              .bindMenu(this.semesterMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
 
-            // 类型下拉
-            Button() {
-              Row() {
-                Text('类型 ').fontSize(12).fontColor(ThemeColors.textSecondary)
-                Text(this.selectedType === '__all__' ? '全部' : this.selectedType)
-                  .fontSize(13).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .constraintSize({ maxWidth: 100 })
-                Text(' ▾').fontSize(10).fontColor(ThemeColors.textHint)
+              Button() {
+                Row() {
+                  Text(this.selectedType === '__all__' ? '全部类型' : this.selectedType)
+                    .fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.accentColor)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .constraintSize({ maxWidth: 90 })
+                  Text(' ▾').fontSize(12).fontColor(this.accentColor)
+                }
               }
+              .height(40).layoutWeight(1).borderRadius(20)
+              .backgroundColor(this.themeIsDark ? '#16263D' : '#EEF3FF')
+              .border({ width: 0, color: Color.Transparent })
+              .bindMenu(this.typeMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
             }
-            .height(36).layoutWeight(1).borderRadius(10)
-            .backgroundColor(ThemeColors.bgInput)
-            .border({ width: 0.5, color: '#E8E8E8' })
-            .bindMenu(this.typeMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
-          }
-          .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-          .width('100%')
-          .backgroundColor(ThemeColors.bgCard)
+            .width('100%').padding({ left: 12, right: 12, top: 8, bottom: 4 })
 
-          Divider().color('#F0F0F0')
-
-          // 搜索框 + GPA 汇总
-          Row() {
-            Row() {
-              Text('\ud83d\udd0d').fontSize(14).margin({ right: 4 })
-              TextInput({ placeholder: '搜索课程名...', text: this.searchWord })
-                .fontSize(13).layoutWeight(1).height(32).backgroundColor('#00000000')
+            // 第二行：搜索框（始终显示）
+            Row({ space: 8 }) {
+              TextInput({ placeholder: '搜索课程名称', text: this.searchWord })
+                .fontSize(13).layoutWeight(1).height(34)
+                .backgroundColor(ThemeColors.bgInput).borderRadius(8)
                 .onChange((v: string) => { this.searchWord = v; this.applyFilter(); })
-            }.layoutWeight(1).height(32).padding({ left: 8, right: 8 })
-            .backgroundColor(ThemeColors.bgInput).borderRadius(16)
+                .onSubmit(() => { this.applyFilter(); })
 
-            if (this.currentScores.length > 0) {
-              Text('GPA ' + this.totalGPA).fontSize(12).fontWeight(FontWeight.Bold).fontColor('#4CAF50')
-                .padding({ left: 4, right: 4 })
-              Text('|').fontSize(12).fontColor(ThemeColors.textHint)
-              Text(this.totalAvg + '分').fontSize(12).fontColor('#1976D2')
-                .padding({ left: 4, right: 4 })
-              Text('|').fontSize(12).fontColor(ThemeColors.textHint)
-              Text(this.totalCredits + '学分').fontSize(12).fontColor('#FF9800')
-                .padding({ left: 4, right: 4 })
+              Button('搜索')
+                .fontSize(13).fontColor('#FFFFFF')
+                .height(34).borderRadius(8)
+                .backgroundColor(this.accentColor)
+                .onClick(() => { this.applyFilter(); })
             }
-          }.width('100%').padding({ left: 16, right: 16, top: 6, bottom: 6 })
+            .width('100%').padding({ left: 12, right: 12, top: 4, bottom: 4 })
+
+            // 第三行：GPA 统计（始终显示，无数据时显示 --）
+            Row() {
+              Row({ space: 0 }) {
+                // GPA
+                Column() {
+                  Text(this.totalGPA || '--').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#43A047')
+                  Text('GPA').fontSize(10).fontColor(ThemeColors.textHint)
+                }.alignItems(HorizontalAlign.Center).margin({ right: 20 })
+
+                Column().width(1).height(30).backgroundColor(ThemeColors.border)
+
+                // 均分
+                Column() {
+                  Text(this.totalAvg || '--').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#1976D2')
+                  Text('均分').fontSize(10).fontColor(ThemeColors.textHint)
+                }.alignItems(HorizontalAlign.Center).margin({ left: 20, right: 20 })
+
+                Column().width(1).height(30).backgroundColor(ThemeColors.border)
+
+                // 学分
+                Column() {
+                  Text(this.totalCredits || '--').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#FF9800')
+                  Text('学分').fontSize(10).fontColor(ThemeColors.textHint)
+                }.alignItems(HorizontalAlign.Center).margin({ left: 20 })
+              }
+              Blank()
+              Text(this.currentScores.length + '门课程')
+                .fontSize(11).fontColor(ThemeColors.textSecondary)
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+          }
           .backgroundColor(ThemeColors.bgCard)
 
+          Divider().color(ThemeColors.border)
+
+          // ===== 列表区域 =====
           if (this.loading) {
             Column() {
-              LoadingProgress().width(40).height(40).color(this.accentColor)
+              LoadingProgress().width(36).height(36).color(this.accentColor)
               Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
             }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else if (this.errorMsg.length > 0) {
             Column() {
-              Text('⚠️').fontSize(40)
+              Text('⚠').fontSize(40).fontColor(ThemeColors.textHint)
               Text(this.errorMsg).fontSize(14).fontColor(ThemeColors.error).margin({ top: 8 })
               Button('重试').margin({ top: 12 }).onClick(() => { this.loadScores(); })
             }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          } else if (this.currentScores.length === 0) {
+            Column() {
+              Text('未找到匹配的课程').fontSize(14).fontColor(ThemeColors.textSecondary)
+              if (this.searchWord.length > 0) {
+                Text('换个关键词试试').fontSize(12).fontColor(ThemeColors.textHint).margin({ top: 4 })
+              }
+            }
+            .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else {
-            List() {
+            List({ space: 0 }) {
               ForEach(this.currentScores, (item: ScoreItemModel, idx?: number) => {
                 ListItem() {
                   Row() {
-                    // 选择模式下的勾选圈
+                    // 选择模式勾选圈
                     if (this.isSelectMode) {
                       Column()
-                        .width(24).height(24).borderRadius(12)
-                        .border({ width: 2, color: this.selectedIndexes.has(idx!) ? '#3B82F6' : '#CCCCCC' })
-                        .backgroundColor(this.selectedIndexes.has(idx!) ? '#3B82F6' : '#00000000')
-                        .justifyContent(FlexAlign.Center)
-                        .margin({ right: 12 })
+                        .width(20).height(20).borderRadius(10)
+                        .border({ width: 1.5, color: this.selectedIndexes.has(idx!) ? this.accentColor : '#CCCCCC' })
+                        .backgroundColor(this.selectedIndexes.has(idx!) ? this.accentColor : '#00000000')
+                        .margin({ right: 10 })
                     }
 
-                    Column() {
+                    // 左侧竖线
+                    Column()
+                      .width(3).height(40).borderRadius(1.5)
+                      .backgroundColor(item.zcj ? this.getScoreColor(item.zcj) : ThemeColors.border)
+                      .margin({ right: 12 })
+
+                    // 科目名 + 标签
+                    Column({ space: 5 }) {
                       Text(item.xskcm)
                         .fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
                         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Row({ space: 6 }) {
+                      Row({ space: 4 }) {
                         if (this.getTagLabel(item)) {
                           Text(this.getTagLabel(item))
-                            .fontSize(10)
-                            .fontColor(this.getTagTextColor(this.getTagLabel(item)))
+                            .fontSize(9).fontColor(this.getTagTextColor(this.getTagLabel(item)))
                             .backgroundColor(this.getTagColor(this.getTagLabel(item)))
-                            .borderRadius(4)
-                            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                            .borderRadius(2).padding({ left: 4, right: 4, top: 1, bottom: 1 })
                         }
                         if (item.cxckdmDisplay && item.cxckdmDisplay !== '初修') {
                           Text(item.cxckdmDisplay)
-                            .fontSize(10).fontColor(ThemeColors.error)
-                            .backgroundColor(ThemeColors.isDark ? '#3E1A1A' : '#FFEBEE').borderRadius(4)
-                            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                            .fontSize(9).fontColor(ThemeColors.error)
+                            .backgroundColor(ThemeColors.isDark ? '#3E1A1A' : '#FFEBEE')
+                            .borderRadius(2).padding({ left: 4, right: 4, top: 1, bottom: 1 })
                         }
                         if (item.xf) {
                           Text(item.xf + '学分')
-                            .fontSize(11).fontColor(ThemeColors.textSecondary)
+                            .fontSize(10).fontColor(ThemeColors.textSecondary)
                         }
-                      }.margin({ top: 6 })
+                      }
                     }.layoutWeight(1).alignItems(HorizontalAlign.Start)
 
+                    // 右侧分数
                     Column() {
                       Text(this.getScoreDisplay(item))
-                        .fontSize(22).fontWeight(FontWeight.Bold)
+                        .fontSize(20).fontWeight(FontWeight.Bold)
                         .fontColor(this.getScoreColor(item.zcj))
                       if (item.zcj) {
                         Text('绩点 ' + this.scoreToGPA(item.zcj, item.djcjlxdmDisplay))
-                          .fontSize(10).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+                          .fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
                       }
-                    }.alignItems(HorizontalAlign.End)
+                    }.alignItems(HorizontalAlign.End).justifyContent(FlexAlign.Center).width(60)
                   }
                   .width('100%')
                   .padding({ left: 16, right: 16, top: 14, bottom: 14 })
                   .alignItems(VerticalAlign.Center)
                   .backgroundColor(this.isSelectMode && this.selectedIndexes.has(idx!) ?
-                    (this.themeIsDark ? '#1A2A40' : '#F0F5FF') : Color.Transparent)
+                    (this.themeIsDark ? '#1A2A40' : '#F0F5FF') : ThemeColors.bgCard)
                   .onClick(() => {
                     if (this.isSelectMode) {
                       if (this.selectedIndexes.has(idx!)) {
@@ -639,61 +690,46 @@ export struct ScorePage {
                 }
               }, (item: ScoreItemModel, idx?: number) => `score_${item.xnxqdm}_${item.xskcm}_${idx}`)
             }
-            .divider({ strokeWidth: 0.5, color: '#F5F5F5' })
+            .divider({ strokeWidth: 0.5, color: ThemeColors.border, startMargin: 16, endMargin: 16 })
             .layoutWeight(1)
-            // 选择模式下底部留空给计算栏
+            .padding({ left: 0, right: 0 })
             .margin({ bottom: this.isSelectMode ? 64 : 0 })
           }
         }
-        .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
-        .zIndex(0) // 明确层级：主页面在最底层
+        .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+        .zIndex(0)
 
-        // 悬浮计算按钮
+        // 悬浮计算按钮（单按钮 + translate 滑动动画）
         if (!this.detailLoading && this.selectedCell === null) {
-          Column() {
-            Blank()
-            Row() {
-              if (this.isLeftHand) {
-                // 左手模式：按钮靠左
-                Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
-                  Image($r('app.media.calculator_1'))
-                    .width(26).height(26)
-                    .fillColor(this.themeIsDark ? '#FFFFFF' : '#333333')
-                }
-                .width(48).height(48)
-                .borderRadius(999)
-                .backdropBlur(18)
-                .backgroundColor(this.themeIsDark ? 'rgba(40,40,45,0.35)' : 'rgba(255,255,255,0.15)')
-                .border({ width: 1, color: 'rgba(255,255,255,0.30)' })
-                .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
-                .onClick(() => { this.toggleSelectMode(); })
-                .margin({ left: 16, bottom: 80 })
-
-                Blank()
-              } else {
-                // 右手模式：按钮靠右
-                Blank()
-
-                Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
-                  Image($r('app.media.calculator_1'))
-                    .width(26).height(26)
-                    .fillColor(this.themeIsDark ? '#FFFFFF' : '#333333')
-                }
-                .width(48).height(48)
-                .borderRadius(999)
-                .backdropBlur(18)
-                .backgroundColor(this.themeIsDark ? 'rgba(40,40,45,0.35)' : 'rgba(255,255,255,0.15)')
-                .border({ width: 1, color: 'rgba(255,255,255,0.30)' })
-                .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
-                .onClick(() => { this.toggleSelectMode(); })
-                .margin({ right: 16, bottom: 80 })
-              }
+          Stack({ alignContent: Alignment.BottomEnd }) {
+            Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
+              Image($r('app.media.calculator_1'))
+                .width(26).height(26)
+                .fillColor(this.themeIsDark ? '#FFFFFF' : '#333333')
             }
-            .width('100%')
+            .width(48).height(48)
+            .borderRadius(999)
+            .backdropBlur(18)
+            .backgroundColor(this.themeIsDark ? 'rgba(40,40,45,0.35)' : 'rgba(255,255,255,0.15)')
+            .border({ width: 1, color: 'rgba(255,255,255,0.30)' })
+            .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
+            .onClick(() => { this.toggleSelectMode(); })
+            .margin({ bottom: 80, right: 16 })
+            .translate({ x: this.fabTranslateX })
           }
           .width('100%').height('100%')
           .hitTestBehavior(HitTestMode.Transparent)
           .zIndex(1)
+          .onAreaChange((oldVal, newVal) => {
+            const w = newVal.width as number;
+            if (w > 0) this.screenWidth = w;
+            if (!this.fabInitialized) {
+              this.fabInitialized = true;
+              // 默认右手模式在右侧，translateX=0；左手模式滑到左侧
+              // 滑动距离 = 屏幕宽 - 按钮宽48 - 右边距16 - 左边距16 = screenWidth - 80
+              this.fabTranslateX = this.isLeftHand ? -(this.screenWidth - 80) : 0;
+            }
+          })
         }
 
         // 底部计算栏（选择模式下）
