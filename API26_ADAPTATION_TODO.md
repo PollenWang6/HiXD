@@ -2,6 +2,8 @@
 
 > 状态：已开工（分支 `feature/api26`，`build-profile.json5` 的 `targetSdkVersion` 已切到 `26.0.0`）。最后更新：2026-07-09
 > 目标：梳理 HarmonyOS 7 / API 26 中与 HiXD 相关的可用新特性，并给出分阶段采纳路线。
+>
+> **本期范围（2026-07-09 收口）**：已落地 = 编译目标切 API26 + 通知设置入口（Tier1 #3）+ 首登课表/主题色/滑块遮罩等修复；**`@Reusable` 复用池（#2）已移出计划**；Tier 2/3 全部为候选 backlog，非本期承诺，按需评估。演示 HAP（feature/api26 构建）已装演示设备。
 
 ---
 
@@ -46,20 +48,20 @@
 - 改造：可选调用 `webview.SecurityParams` 设置网页安全属性（拦截 mixedContent / 不安全资源）。
 - **⚠️ 回归重点（必测）**：CAS 登录依赖 webview cookie 透传；xgxt WebView 注入串（`XGXT_INFO:` / `CX_UID:` / `XGXT_ERR:`）的 JS bridge 是否正常。详见 §4。
 
-#### [ ] 2. `@Reusable` / `@ReusableV2` 全局复用池（课表性能）
+#### [ ] 2. ~~`@Reusable` / `@ReusableV2` 全局复用池（课表性能）~~　**【已移出本期计划】**
 - **价值**：★★★　**代价**：中
 - 收益：`ClassTablePage.ets`（~3009 行）周课表网格大量课程 cell（`CustomCourseItem` type 0/1/2），上全局复用池减少组件创建/GC，滚动更顺——直接治"卡顿"痛点。
 - 改造：给课程 cell 组件加 `@Reusable`，在 `LazyForEach`/`ForEach` 的 `itemGenerator` 中用 `reuseId` + `recycle` 复用。
 - 备注：`@Reusable` 装饰器本身在 API 10+ 即有；**"全局复用池"配置是 26 增强**。即此项在现有 API 23 上也能先做（仅全局池特性需 26）。
-- **状态(2026-07-09)**：待实施。课表格子为 `ForEach` 内联 `Column()`（ClassTablePage.ets:2075），非独立 `@Component`，须先抽成 `@Component struct CourseCellView` 才能加 `@Reusable`+`aboutToReuse`，属中等重构；且点击事件需改 `@Event` 回调上抛父组件。因明天演示在即、需 DevEco 26 充分验证，留演示后实施。
+- **状态(2026-07-09)**：**已移出本期计划**。用户决策——固定周网格本就流畅，抽 `Component` 重构代价大、受益小，且演示前不应冒课表回归风险。后续若确需优化课表滚动，再单独评估。
 
-#### [x] 3. 通知设置入口 `openNotificationSettingsWithResult` + 锁屏通知字段
+#### [x] 3. 通知设置入口 `openNotificationSettingsWithResult`（锁屏字段/实际提醒未做）
 - **价值**：★★　**代价**：小
 - 收益：曾因"通知权限申请不了"删除 `CourseReminderService`。该 API 可**半模态带返回值**地拉起通知设置页，给用户明确入口手动开启；配合引导文案可复活"课前提醒 / 考试提醒"。
-- 改造：在设置/提醒引导页增加"去开启通知"按钮调用该 API；读取返回结果刷新 UI。
-- 备注：本地定时提醒无系统级 schedule API，仍需 `WorkScheduler`/后台任务或改用 Live View（见 Tier 3 #8）自行调度。
+- 改造（**已落地**）：在「我的 → 其他」增加"通知设置"菜单项，调用该 API 半模态拉起系统通知设置页；返回后 `isNotificationEnabled()` 刷新「已开启/点击开启系统通知」状态；守卫改为 `typeof` 运行时存在性判断（非版本硬编码）。
+- **未做**：锁屏通知字段、课前/考试实际提醒推送（原 `CourseReminderService` 仍删，本地定时无系统 schedule API，需 `WorkScheduler`/Live View，见 Tier 3 #8）。
 
-### Tier 2 — 视觉/适配增强，低风险锦上添花
+### Tier 2 — 视觉/适配增强，低风险锦上添花（候选 backlog，非本期承诺）
 
 #### [ ] 4. `systemMaterial` 系统材质 + 组件级沉浸光感
 - **价值**：★★　**代价**：小~中
@@ -77,7 +79,7 @@
 - **价值**：★　**代价**：中
 - 收益：仅在新增"校园图库 / 资讯流"等场景时采用，目前无需求。
 
-### Tier 3 — 前瞻/重投入，按需评估
+### Tier 3 — 前瞻/重投入，按需评估（候选 backlog，非本期承诺）
 
 #### [ ] 8. Live View 实况窗（进度环模板）+ Push Kit 支持 Wearable
 - **价值**：★　**代价**：高
@@ -105,9 +107,11 @@
 
 覆盖你之前的两个痛点（卡顿 / 通知申请不了），且风险最低：
 
-1. **ArkWeb 144**（升 SDK 自动到手，零改造，仅回归测试）→ 治门户兼容性。
-2. **`@Reusable` 课表全局复用池**（性能）→ 治卡顿。
-3. **通知设置入口**（`openNotificationSettingsWithResult` 引导开启）→ 治通知权限。
+1. **ArkWeb 144**（随 SDK 升级自动获得，仅待回归测试）→ 治门户兼容性。
+2. ~~`@Reusable` 课表全局复用池~~（**已移出计划**）。
+3. **通知设置入口**（已落地）→ 治通知权限。
+
+> 本期实际落地组合 = #3 通知入口 + 编译目标切 API26 + 若干修复（首登课表/主题色/滑块遮罩）。Tier 2/3 均为候选 backlog，非本期承诺。
 
 ---
 
