@@ -42,11 +42,16 @@
 
 ### Tier 1 — 高价值、低成本，建议优先
 
-#### [ ] 1. ArkWeb 内核升级 Chromium 132 → 144 + `SecurityParams`
+#### [x] 1. ArkWeb 内核升级 Chromium 132 → 144 + `SecurityParams`（静态回归已完成，运行时回归待演示设备）
 - **价值**：★★★　**代价**：极低（升 SDK 自动获得）
 - 收益：HiXD 有 10+ 门户 WebView（订水/报修/空间预约/Portal/睿思/校园网/校园卡/邮箱/水电缴费/物理计算），新版 Chromium 现代 JS/CSS 兼容性更好，学校老旧门户渲染 bug 更少。
 - 改造：可选调用 `webview.SecurityParams` 设置网页安全属性（拦截 mixedContent / 不安全资源）。
-- **⚠️ 回归重点（必测）**：CAS 登录依赖 webview cookie 透传；xgxt WebView 注入串（`XGXT_INFO:` / `CX_UID:` / `XGXT_ERR:`）的 JS bridge 是否正常。详见 §4。
+- **静态回归结论（2026-07-09，沙箱命令行编译验证）**：
+  - `feature/api26` 多次 `assembleHap` 通过（CompileArkTS 0 错误）→ **所有用到的 Web API 在 SDK 26 均存在且类型匹配**（`.onConsole`/`.onPageEnd`/`.runJavaScript`/`ConsoleMessage.getMessage()`/`WebCookieManager.*`/`WebviewController.removeAllCache`/`incognitoMode`/`onControllerAttached` 等），**无"API 被移除"类回归**。
+  - **⚠️ 发现 `WebCookieManager.setCookie` 在 SDK 26 标记 `@deprecated since 11`**（替代为 `configCookieSync`，已确认存在）。功能仍正常（编译通过+历史栈兼容），属**历史技术债，非阻断项**；CAS cookie 同步链路（setCookie/fetchCookieSync/clearAllCookiesSync + HttpUtil cookieStore）依赖其在 ArkWeb 144 下的**运行时行为**，需真机/演示设备验证。
+  - `clearAllCookiesSync` 未废弃（是 `clearAllCookies` 的替代）；`fetchCookieSync` 未废弃。
+  - xgxt JS bridge 机制已静态确认：隐藏 WebView + `.onPageEnd` 注入 `runJavaScript` + `.onConsole` 捕 `console.log` → 路由 `XGXT_INFO:`/`XGXT_ERR:`/`CX_UID:`。该链路对 ArkWeb 144 行为敏感，是运行时回归重点。
+- **⚠️ 回归重点（运行时必测，见 §4）**：CAS 登录 webview cookie 透传；xgxt JS bridge 三类消息接收；全部门户页渲染。
 
 #### [ ] 2. ~~`@Reusable` / `@ReusableV2` 全局复用池（课表性能）~~　**【已移出本期计划】**
 - **价值**：★★★　**代价**：中
@@ -107,7 +112,7 @@
 
 覆盖你之前的两个痛点（卡顿 / 通知申请不了），且风险最低：
 
-1. **ArkWeb 144**（随 SDK 升级自动获得，仅待回归测试）→ 治门户兼容性。
+1. **ArkWeb 144**（随 SDK 升级自动获得；静态回归已完成，运行时回归待演示设备）→ 治门户兼容性。
 2. ~~`@Reusable` 课表全局复用池~~（**已移出计划**）。
 3. **通知设置入口**（已落地）→ 治通知权限。
 
@@ -117,7 +122,8 @@
 
 ## 4. 升级回归测试清单（必做）
 
-- [ ] **CAS 登录全流程**：webview cookie 跨页透传正常，登录成功写入会话。
+- [x] **命令行编译静态回归（已完成）**：`feature/api26` `assembleHap` CompileArkTS 0 错误，所有 Web API 在 SDK 26 存在且类型匹配。
+- [ ] **CAS 登录全流程**：webview cookie 跨页透传正常，登录成功写入会话。⚠️ 注意代码用的 `WebCookieManager.setCookie` 在 SDK 26 已 `@deprecated`（仍可运行），若透传异常优先排查此处，长期应迁移到 `configCookieSync`。
 - [ ] **xgxt WebView JS bridge**：`XGXT_INFO:` / `CX_UID:` / `XGXT_ERR:` 三类消息能被 `onConsole` 正确接收并处理（个人信息抓取、超星头像）。
 - [ ] **全部门户 WebView 页**：订水/报修/空间预约/Portal/睿思/校园网/校园卡/邮箱/水电缴费/物理计算 渲染无白屏、表单/按钮可交互。
 - [ ] **课表滚动/切换周次**：帧率与卡顿对比升级前是否有改善。
