@@ -3565,11 +3565,11 @@ AppStorage.set('loginStatus', 'not_logged_in');
     .onClick(() => { this.homeMenuItemClick('SchoolCard'); })
   }
 
-  // API26：半模态拉起系统通知设置页（带返回值），用于引导用户手动开启通知
+  // 半模态拉起系统通知设置页（带返回值），用于引导用户手动开启通知
   openNotificationSettings(): void {
-    // 守卫：openNotificationSettingsWithResult 为 API 26 新增，低版本设备无此函数
-    if (deviceInfo.distributionOSApiVersion < 260000) {
-      promptAction.showToast({ message: '通知设置需在 HarmonyOS 7 及以上设备使用' });
+    // 守卫：运行时检查该 API 是否存在（@since 13，但部分系统版本可能缺失，不能用 OS 版本硬编码）
+    if (typeof notificationManager.openNotificationSettingsWithResult !== 'function') {
+      promptAction.showToast({ message: '当前系统版本不支持，请升级系统后重试' });
       return;
     }
     const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
