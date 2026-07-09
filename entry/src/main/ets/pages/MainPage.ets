@@ -31,6 +31,7 @@ import { UserInfoService } from '../services/UserInfoService';
 import { AttendanceService } from '../services/AttendanceService';
 import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo, fileUri, storageStatistics } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
@@ -468,6 +469,10 @@ struct MainPage {
   @State portalSortMode: boolean = false;
 
   aboutToAppear() {
+    // TODO(API26-verify): 临时探针，确认 distributionOSApiVersion 真实编码后删除
+    hilog.info(0x0000, 'API26', 'distributionOSApiVersion=%{public}d (>=60100? %{public}s)',
+      deviceInfo.distributionOSApiVersion,
+      deviceInfo.distributionOSApiVersion >= 60100 ? 'YES' : 'NO');
     this.context = getContext(this) as common.UIAbilityContext;
     this.loadHomeMenuOrder();
     this.loadPortalMenuOrder();
