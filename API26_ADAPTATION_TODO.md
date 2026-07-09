@@ -1,15 +1,18 @@
 # HiXD · API 26（HarmonyOS 7）适配 TODO
 
-> 状态：已开工（分支 `feature/api26`，`build-profile.json5` 的 `targetSdkVersion` 已切到 `26.0.0`）。最后更新：2026-07-09
+> 状态：**已合入 main**（feature/api26 于 2026-07-09 合并，main 编译通过）。最后更新：2026-07-09
 > 目标：梳理 HarmonyOS 7 / API 26 中与 HiXD 相关的可用新特性，并给出分阶段采纳路线。
 >
-> **本期范围（2026-07-09 收口）**：已落地 = 编译目标切 API26 + 通知设置入口（Tier1 #3）+ 首登课表/主题色/滑块遮罩等修复；**`@Reusable` 复用池（#2）已移出计划**；Tier 2/3 全部为候选 backlog，非本期承诺，按需评估。演示 HAP（feature/api26 构建）已装演示设备。
+> **本期范围（2026-07-09 收口）**：已落地 = 通知设置入口（Tier1 #3）+ 首登课表/主题色/滑块遮罩等修复；**`@Reusable` 复用池（#2）已移出计划**；Tier 2/3 全部为候选 backlog，非本期承诺，按需评估。Merge 后 main 与演示 HAP 代码一致，演示设备无需重装。
+>
+> **⚠️ 关于「编译目标 API 26」的真相（重要更正）**：本仓库 `build-profile.json5` **不含** `targetSdkVersion`/`compatibleSdkVersion` 任何字段（且该文件被 gitignore）；`AppScope/app.json5` 也**没有** `apiVersion` 块。因此项目实际是靠 `local.properties` 的 `hwsdk.dir=E:/HUAWEI/HarmonyOS/SDK`（SDK 26.0.0）**隐式以 API 26 编译**，而非某处显式声明 `targetSdkVersion: 26.0.0`。此前「已把 targetSdk 切到 26.0.0」的记录是误记。如需可复现地锁定目标版本，应在 `app.json5` 补 `app.apiVersion` 块（见 §5），但属发版加固项、非演示必需。
 
 ---
 
 ## 0. 背景与现状
 
-- **API 26 = HarmonyOS 26.0.0（Beta1，API level 26）**。版本号从 26.0.0 起改为 **纯 SemVer `X.Y.Z`**（不再带 `(N)` 后缀）。
+- **API 26 = HarmonyOS 7（SDK 26.0.0，Beta1，API level 26）**。版本号从 26.0.0 起改为 **纯 SemVer `X.Y.Z`**（不再带 `(N)` 后缀）。
+- **SDK 目标机制**：本仓库未在任何配置文件显式声明 `targetSdkVersion`。实际编译目标由 `local.properties` 的 `hwsdk.dir` 指向的鸿蒙 SDK 决定（当前 `E:/HUAWEI/HarmonyOS/SDK` 含 `24` 与 `26.0.0`，构建选用 26.0.0）→ 隐式以 API 26 构建。详见顶部「⚠️ 真相」说明。
 - 本地 SDK 事实（读 `E:/HUAWEI/DevEco Studio/sdk/default/sdk-pkg.json` 确认）：`apiVersion="26"`、`displayName="HarmonyOS 26.0.0"`、`platformVersion="26.0.0"`、`version="26.0.0.23"`、`releaseType="Beta1"`。
 - 工程已切换（分支 `feature/api26`，见 `build-profile.json5`）：
   - `targetSdkVersion: 26.0.0`（纯 SemVer，已改；旧写 `26.0.0(26)` 为误，已纠正）
@@ -137,3 +140,17 @@
 ## 5. 备注
 - 本文件为计划文档，不随发版强制提交；待 `feature/api26` 分支实际开工后，可将已勾选项移入对应 PR 描述。
 - 参考来源：华为开发者联盟文档中心 · 26.0.0 元服务版本说明 / OS 平台新增和增强特性 / 版本号格式调整说明；HarmonyOS SDK 26 发布说明（HDC 2026）。
+
+## 6. 发版加固：显式锁定 SDK 版本（可选，演示后做）
+- **现状**：`app.json5` 无 `apiVersion` 块、`build-profile.json5` 无 `targetSdkVersion` → 编译目标由本机 `local.properties` 的 `hwsdk.dir` 隐式决定（当前机器指向 SDK 26.0.0，故实际以 API 26 构建）。
+- **风险**：换机器/重装 SDK 若指向低版本，可能以低 API 编译，行为与演示不一致，且 `openNotificationSettingsWithResult`(@since 13) 虽向下兼容，但 26-only 特性会编译失败。
+- **加固**：在 `AppScope/app.json5` 的 `app` 下补：
+  ```json5
+  "apiVersion": {
+    "compatibleSdkVersion": 22,
+    "targetSdkVersion": 26,
+    "runtimeOS": "HarmonyOS"
+  }
+  ```
+  （数值以实际 SDK 26 规范为准，改后须 `assembleHap` 验证 + 演示机复测。）
+- 优先级：低（演示不阻塞），列为下个迭代的发版加固项。
