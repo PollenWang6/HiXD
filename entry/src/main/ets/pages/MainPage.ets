@@ -9,7 +9,7 @@ import { ClassService } from '../services/ClassService';
 import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, CasFormFields } from '../services/CasLoginService';
 import { CacheService } from '../services/CacheService';
 import { HttpUtil } from '../utils/HttpUtil';
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { ExamPage } from './exam/ExamPage';
 import { ClassTablePage } from './classtable/ClassTablePage';
@@ -33,6 +33,7 @@ import { application, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo, fileUri, storageStatistics } from '@kit.CoreFileKit';
+import notificationManager from '@ohos.notificationManager';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import web_webview from '@ohos.web.webview';
@@ -297,6 +298,7 @@ struct MainPage {
   @State phyPwdStatus: string = '未设置';
   @State schoolnetPwdStatus: string = '未设置';
   @State sportPwdStatus: string = '未设置';
+  @State notificationStatusDesc: string = '点击开启系统通知';
   @State showSchoolnetPwdDialog: boolean = false;
   @State schoolnetPwdOpacity: number = 0;
   @State schoolnetPwdTranslate: number = 30;
@@ -533,6 +535,8 @@ struct MainPage {
     }
     // 注册网络状态监听：网络恢复时自动触发重登录
     networkUtil.startListen(this.onNetworkChangeHandler);
+    // 刷新通知开启状态（API26 可在"我的-其他"引导开启）
+    this.refreshNotificationStatus();
   }
 
   /**
@@ -3439,6 +3443,21 @@ AppStorage.set('loginStatus', 'not_logged_in');
             .onClick(() => { this.pageInfo.clear(); this.pageInfo.pushPath({ name: 'FaqPage' }); })
             Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
             Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
+            // 通知设置（API26：半模态拉起系统通知设置页并返回结果）
+            Row() {
+              Stack({ alignContent: Alignment.Center }) {
+                Circle().width(44).height(44).fill('#F4511E22')
+                Text('🔔').fontSize(22)
+              }.margin({ right: 16 })
+              Column() {
+                Text('通知设置').fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                Text(this.notificationStatusDesc).fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .onClick(() => { this.openNotificationSettings(); })
+            Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
             this.logoutRow()
             Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 60, right: 16 })
             this.cacheRow()
@@ -3544,6 +3563,35 @@ AppStorage.set('loginStatus', 'not_logged_in');
     .borderRadius(12).backgroundColor(ThemeColors.bgCard)
     .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
     .onClick(() => { this.homeMenuItemClick('SchoolCard'); })
+  }
+
+  // API26：半模态拉起系统通知设置页（带返回值），用于引导用户手动开启通知
+  openNotificationSettings(): void {
+    // 守卫：openNotificationSettingsWithResult 为 API 26 新增，低版本设备无此函数
+    if (deviceInfo.distributionOSApiVersion < 260000) {
+      promptAction.showToast({ message: '通知设置需在 HarmonyOS 7 及以上设备使用' });
+      return;
+    }
+    const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    notificationManager.openNotificationSettingsWithResult(ctx)
+      .then(() => {
+        // 设置页返回后，二次确认实际开关状态并刷新 UI
+        this.refreshNotificationStatus();
+      })
+      .catch(() => {
+        promptAction.showToast({ message: '打开通知设置失败' });
+      });
+  }
+
+  // 刷新"通知设置"菜单项的状态描述
+  refreshNotificationStatus(): void {
+    try {
+      notificationManager.isNotificationEnabled()
+        .then((enabled: boolean) => {
+          this.notificationStatusDesc = enabled ? '已开启' : '点击开启系统通知';
+        })
+        .catch(() => { /* 保持默认文案 */ });
+    } catch (_e) { /* ignore */ }
   }
 
   @Builder

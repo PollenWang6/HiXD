@@ -51,8 +51,9 @@
 - 收益：`ClassTablePage.ets`（~3009 行）周课表网格大量课程 cell（`CustomCourseItem` type 0/1/2），上全局复用池减少组件创建/GC，滚动更顺——直接治"卡顿"痛点。
 - 改造：给课程 cell 组件加 `@Reusable`，在 `LazyForEach`/`ForEach` 的 `itemGenerator` 中用 `reuseId` + `recycle` 复用。
 - 备注：`@Reusable` 装饰器本身在 API 10+ 即有；**"全局复用池"配置是 26 增强**。即此项在现有 API 23 上也能先做（仅全局池特性需 26）。
+- **状态(2026-07-09)**：待实施。课表格子为 `ForEach` 内联 `Column()`（ClassTablePage.ets:2075），非独立 `@Component`，须先抽成 `@Component struct CourseCellView` 才能加 `@Reusable`+`aboutToReuse`，属中等重构；且点击事件需改 `@Event` 回调上抛父组件。因明天演示在即、需 DevEco 26 充分验证，留演示后实施。
 
-#### [ ] 3. 通知设置入口 `openNotificationSettingsWithResult` + 锁屏通知字段
+#### [x] 3. 通知设置入口 `openNotificationSettingsWithResult` + 锁屏通知字段
 - **价值**：★★　**代价**：小
 - 收益：曾因"通知权限申请不了"删除 `CourseReminderService`。该 API 可**半模态带返回值**地拉起通知设置页，给用户明确入口手动开启；配合引导文案可复活"课前提醒 / 考试提醒"。
 - 改造：在设置/提醒引导页增加"去开启通知"按钮调用该 API；读取返回结果刷新 UI。
