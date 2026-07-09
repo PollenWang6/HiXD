@@ -926,12 +926,39 @@ AppStorage.set('loginStatus', 'expired');
   // 登录成功后预加载课表、考试、实验数据
   private startPreload(): void {
     AppStorage.setOrCreate('login_state', String(Date.now()));
-    EhallService.getInstance().preloadAllData().then(() => {
+    EhallService.getInstance().preloadAllData().then(async () => {
+      // 首登/缓存缺失时，把课表从内部 CacheService 落盘到 filesDir/class_table_<学期>.json：
+      // 首页预览只读该文件，而 preloadAllData 仅填充 ClassService 内部 CacheService，不会写这个文件，
+      // 否则首页课表预览会一直空白，直到用户手动打开课表页（writeLocalClassTable）才生成。
+      await this.ensureClassTableFile();
       // 用最新缓存重建预览 + 更新日历快照，并自动增量同步日历（对齐 Flutter 首页刷新触发）
       this.loadClassPreview();
       CalendarSyncService.autoSync(getContext(this) as common.UIAbilityContext);
     }).catch((e: Error) => {
     });
+  }
+
+  // 确保 filesDir/class_table_<学期>.json 存在：首页课表预览只读此文件。
+  // preloadAllData 已通过 ClassService 内部 CacheService 拉取课表，这里命中缓存写出文件即可，
+  // 使首页预览无需用户手动打开课表页就能显示（修复首登后课表不主动加载）。
+  private async ensureClassTableFile(): Promise<void> {
+    const sid: string = PreferenceUtil.getString('ids_account');
+    if (sid.length === 0) return;
+    const semCode: string = SemesterUtil.getCurrentSemesterCode();
+    const filePath: string = this.context.filesDir + '/class_table_' + semCode + '.json';
+    try {
+      if (fileIo.accessSync(filePath)) return; // 文件已存在，无需重复拉取
+    } catch (_) { /* accessSync 抛异常表示文件不存在，继续 */ }
+    try {
+      const raw: string = await ClassService.getInstance().getClassTable(semCode, sid);
+      if (!raw || raw.length < 100) return;
+      const encoder = new util.TextEncoder();
+      const encoded: Uint8Array = encoder.encodeInto(raw);
+      const file: fileIo.File = fileIo.openSync(filePath,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.WRITE_ONLY);
+      fileIo.writeSync(file.fd, encoded.buffer);
+      fileIo.closeSync(file);
+    } catch (_) { /* 拉取/写盘失败不影响首页其它模块 */ }
   }
 
   // 异步加载用户信息（名字/头像/专业），失败用缓存兜底
