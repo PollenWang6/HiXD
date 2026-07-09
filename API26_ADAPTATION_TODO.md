@@ -71,9 +71,17 @@
 
 ### Tier 2 — 视觉/适配增强，低风险锦上添花（候选 backlog，非本期承诺）
 
-#### [ ] 4. `systemMaterial` 系统材质 + 组件级沉浸光感
+#### [x] 4. `systemMaterial` 系统材质 + 组件级沉浸光感（Toast 部分已落地，Chip/Segment 未接入）
 - **价值**：★★　**代价**：小~中
 - 收益：贴合现有 `ThemeColors` 主题系统，将卡片/弹窗/Toast/Tips 换成系统材质，获得 HarmonyOS 7 毛玻璃沉浸质感，统一视觉风格。
+- **已落地（2026-07-10，分支 `feature/api26-material`，提交 `b9bf9af`）**：
+  - 新增 `MaterialKit.ets`：`IS_MATERIAL_API` 运行时守卫（`deviceInfo.distributionOSApiVersion >= 260000`），`toastMaterial()` 返回 `new uiMaterial.ImmersiveMaterial({ style: REGULAR })`，老设备返回 `undefined` 跳过。
+  - 新增 `ToastUtil.ets`：封装 `promptAction.showToast` 并附加 `systemMaterial`，已收口 **6 个页面共 22 处** `promptAction.showToast` → `ToastUtil.show(...)`。
+  - 效果：API26 上**所有 Toast 自动带 HarmonyOS 7 沉浸材质**，老设备（API<26）自动降级为普通 Toast，无崩。
+- **未接入 / 不适用**：
+  - advanced `Chip` / `SegmentButton` 的 `backgroundSystemMaterial`：本工程筛选标签为**自定义组件**（`ElectricityPage.buildPresetChip` 等），未使用 advanced `Chip`/`SegmentButton`，故该属性无挂载点。
+  - 通用卡片容器：SDK 26 的 `backgroundSystemMaterial` 仅暴露给 advanced `Chip`/`SegmentButton`，普通 `Column/Row/Stack` 不支持，故"卡片毛玻璃"暂无法用此 API 实现（已有 `backgroundBlurStyle` 可替代，非 API26 新特性）。
+  - ⚠️ `uiMaterial` 为 `@since 26.0.0` 静态导入，老设备若该模块未注册存在导入崩溃风险；当前由 `IS_MATERIAL_API` 守卫确保构造不被调用，但导入本身的安全性待真机/老设备验证。
 
 #### [ ] 5. `ContainerReader` 容器断点自适应
 - **价值**：★★　**代价**：中
