@@ -1,3 +1,4 @@
+import { ToastUtil } from '../utils/ToastUtil';
 ﻿// MainPage.ets - 底部Tab栏主页(主页·更多功能·我的)
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
@@ -9,7 +10,7 @@ import { ClassService } from '../services/ClassService';
 import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, CasFormFields } from '../services/CasLoginService';
 import { CacheService } from '../services/CacheService';
 import { HttpUtil } from '../utils/HttpUtil';
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { ExamPage } from './exam/ExamPage';
 import { ClassTablePage } from './classtable/ClassTablePage';
@@ -43,14 +44,12 @@ import { VersionService, VersionInfo } from '../services/VersionService';
 import { CalendarSyncService, SlimCell } from '../services/CalendarSyncService';
 import networkUtil from '../utils/NetworkUtil';
 
-
 // 每日用电数据模型
 interface DailyItem {
   date: string;     // 本次抄读日期 YYYY-MM-DD
   prevDate: string; // 上次抄读日期
   use: string;      // 两次抄读间用电 kWh
 }
-
 
 const TAG: string = 'MainPage';
 
@@ -458,7 +457,6 @@ struct MainPage {
       if (arr.length === 9) { this.portalMenuOrder = arr; }
     }
   }
-
 
   private tabsController: HdsTabsController = new HdsTabsController();
   private context!: common.UIAbilityContext;
@@ -1193,7 +1191,6 @@ AppStorage.set('loginStatus', 'expired');
     this.userRefreshing = false;
   }
 
-
   // ==================== 缓存管理 ====================
   private formatBytes(bytes: number): string {
     if (bytes < 1024) return bytes + ' B';
@@ -1553,7 +1550,6 @@ AppStorage.set('loginStatus', 'expired');
       }
     }
 
-
     // 计算数据实际最大周（普通课最后有课周 与 考试周 的较大值），避免硬编码上限误杀跨周显示
     let dataMaxWeek = 1;
     for (let d = 1; d <= 7; d++) {
@@ -1583,7 +1579,6 @@ AppStorage.set('loginStatus', 'expired');
         searchWeek = currentWeek + 1;
       }
       if (searchWeek > dataMaxWeek + 1) continue;  // +1 允许跨周显示明天
-
 
       // 考试（存储在 section 0）
       const examCells: PreviewCell[] = grid[searchDay][0];
@@ -3564,7 +3559,7 @@ AppStorage.set('loginStatus', 'not_logged_in');
   openNotificationSettings(): void {
     // 守卫：运行时检查该 API 是否存在（@since 13，但部分系统版本可能缺失，不能用 OS 版本硬编码）
     if (typeof notificationManager.openNotificationSettingsWithResult !== 'function') {
-      promptAction.showToast({ message: '当前系统版本不支持，请升级系统后重试' });
+      ToastUtil.show('当前系统版本不支持，请升级系统后重试');
       return;
     }
     const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
@@ -3574,7 +3569,7 @@ AppStorage.set('loginStatus', 'not_logged_in');
         this.refreshNotificationStatus();
       })
       .catch(() => {
-        promptAction.showToast({ message: '打开通知设置失败' });
+        ToastUtil.show('打开通知设置失败');
       });
   }
 

@@ -1,3 +1,4 @@
+import { ToastUtil } from '../../utils/ToastUtil';
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // ElectricityPage.ets — 电费查询（HTTP + cryptoFramework AES，WebView 仅做 SSO 拿 code）
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -7,7 +8,6 @@ import cryptoFramework from '@ohos.security.cryptoFramework';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService } from '../../services/CasLoginService';
-import { promptAction } from '@kit.ArkUI';
 import { SegmentTab } from '../../components/SegmentTab';
 
 const TAG: string = 'ElectricityPage';
@@ -110,7 +110,6 @@ export struct ElectricityPage {
   private ssoDone: boolean = false;
   private cachedApiHeaders: Record<string, string> = {};
   private cachedMetID: string = '';
-
 
   async aboutToAppear(): Promise<void> {
     await CasLoginService.getInstance().syncCookiesToWebView();
@@ -351,7 +350,7 @@ export struct ElectricityPage {
 
   private async queryStep5(startStr: string, endStr: string): Promise<void> {
     if (this.cachedApiHeaders['timestamp'] === undefined || this.cachedMetID.length === 0) {
-      promptAction.showToast({ message: '请等待数据加载完成', duration: 2000 });
+      ToastUtil.show('请等待数据加载完成', 2000);
       return;
     }
     this.customQuerying = true;
@@ -361,7 +360,7 @@ export struct ElectricityPage {
       const url: string = 'https://ignypt.xidian.edu.cn/estManage/api/WeChat/V2/GetMetRead?content=' + encodeURIComponent(enc);
       const resp = await this.http.get(url, this.cachedApiHeaders);
       if (!resp.isOk) {
-        promptAction.showToast({ message: '查询失败', duration: 2000 });
+        ToastUtil.show('查询失败', 2000);
         this.customQuerying = false;
         return;
       }
@@ -384,7 +383,7 @@ export struct ElectricityPage {
       this.dailyItems = items;
       this.displayDaily = items.slice(0, 7);
     } catch (e) {
-      promptAction.showToast({ message: '查询失败', duration: 2000 });
+      ToastUtil.show('查询失败', 2000);
     }
     this.customQuerying = false;
   }
@@ -399,11 +398,11 @@ export struct ElectricityPage {
 
   private doCustomQuery(): void {
     if (this.customStartStr.length === 0 || this.customEndStr.length === 0) {
-      promptAction.showToast({ message: '请选择开始和结束日期', duration: 2000 });
+      ToastUtil.show('请选择开始和结束日期', 2000);
       return;
     }
     if (this.customStartStr > this.customEndStr) {
-      promptAction.showToast({ message: '开始日期不能晚于结束日期', duration: 2000 });
+      ToastUtil.show('开始日期不能晚于结束日期', 2000);
       return;
     }
     this.queryStep5(this.customStartStr, this.customEndStr);
