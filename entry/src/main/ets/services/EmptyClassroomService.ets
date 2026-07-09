@@ -91,11 +91,12 @@ export class EmptyClassroomService {
   async getEmptyClassroomBuildings(): Promise<BuildingInfo[]> {
     await this.init();
     return this.cache.getOrFetch<BuildingInfo[]>('er_buildings', async (): Promise<BuildingInfo[]> => {
-      await this.activateAppSession('4768402106681759');
-      const resp = await this.http.get(
-        'https://ehall.xidian.edu.cn/jwapp/sys/kxjas/modules/kxjas/jxlcx.do?*order=%2BXXXQDM%2C%2BPX%2C%2BJXLDM',
-        EHALL_HEADERS
-      );
+      // 注意：jxlcx.do 必须 POST，且 *order 要放在 body 里。
+      // 原实现用 GET 把 *order 拼进 URL 查询串（含未编码的 *），
+      // 会触发 NETSTACK 参数校验 401，导致楼栋列表拉取失败。
+      const resp = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/jxlcx.do', {
+        '*order': '+XXXQDM,+PX,+JXLDM',
+      });
       const raw: object[] = EmptyClassroomService.extractRaw(resp.body);
       const out: BuildingInfo[] = [];
       for (const row of raw) {
@@ -153,6 +154,13 @@ export class EmptyClassroomService {
         { name: 'XQJ', value: xqj, linkOpt: 'AND', builder: 'equal' },
       ]);
       const resp2 = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/cxjsqk.do', {
+        'XNXQDM': weekRange + '-' + weekPart,
+        'ZC': zc,
+        'XQ': xqj,
+        'querySetting': querySetting,
+        '*order': '+LC,+JASMC',
+        'pageSize': '999',
+        'pageNumber': '1',
       });
       return resp2.body;
     }, 10 * 60 * 1000);
@@ -166,7 +174,15 @@ export class EmptyClassroomService {
 
     const semCode = SemesterUtil.getCurrentSemesterCode();
     const semParts = semCode.split('-');
+    const xn = semParts[0] + '-' + semParts[1];
+    const xq = semParts[2];
+    const xnxqdm = xn + '-' + xq;
+
+    // 1) 用日期换周次 / 星期
     const resp1 = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/rqzhzcjc.do', {
+      'RQ': dateStr,
+      'XN': xn,
+      'XQ': xq,
     });
     let zc = '';
     let xqj = '';
@@ -182,13 +198,21 @@ export class EmptyClassroomService {
       }
     } catch { /* fallback */ }
 
-
+    // 2) 查询空闲教室（必须带上 querySetting 等参数，否则服务端收不到过滤条件）
     const querySetting = JSON.stringify([
       { name: 'JXLDM', caption: '教学楼代码', builder: 'equal', linkOpt: 'AND', value: buildingCode },
+      { name: 'XNXQDM', value: xnxqdm, linkOpt: 'AND', builder: 'equal' },
       { name: 'ZC', value: zc, linkOpt: 'AND', builder: 'equal' },
       { name: 'XQJ', value: xqj, linkOpt: 'AND', builder: 'equal' },
     ]);
     const resp = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/cxjsqk.do', {
+      'XNXQDM': xnxqdm,
+      'ZC': zc,
+      'XQ': xqj,
+      'querySetting': querySetting,
+      '*order': '+LC,+JASMC',
+      'pageSize': '999',
+      'pageNumber': '1',
     });
     return resp.body;
   }

@@ -127,7 +127,11 @@ export struct ExamPage {
       } else {
       }
     } catch (e) {
-      this.errorMsg = (e as Error).message?.includes('未登录') ? '登录已过期' : '加载失败';
+      // 用 MainPage 同步到 AppStorage 的 loginStatus 准确判断是否登录过期，
+      // 不再依赖脆弱的「未登录」字符串匹配。
+      const st: string = AppStorage.get('loginStatus') as string ?? '';
+      const expired: boolean = st === 'expired' || (e as Error).message?.includes('未登录');
+      this.errorMsg = expired ? '登录已过期' : '加载失败';
       // 尝试从缓存加载
       const cached: string = PreferenceUtil.getString('exam_schedule_cache', '');
       if (cached.length > 0) {
@@ -187,6 +191,13 @@ export struct ExamPage {
         if (this.loading) {
           Column() { LoadingProgress().width(40).height(40).color(this.accentColor); Text('加载中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else if (this.errorMsg.length > 0) {
+          Column() {
+            Text('⚠').fontSize(40).fontColor(ThemeColors.textHint)
+            Text(this.errorMsg).fontSize(14).fontColor(ThemeColors.error).margin({ top: 8 })
+            Button('重试').margin({ top: 12 }).onClick(() => { this.loadExams(); })
+          }
+          .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.arranged.length === 0 && this.notArranged.length === 0) {
           Column() { Text('🎉').fontSize(48); Text('暂无考试安排').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); Text('本学期暂未发布考试信息').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 }); }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
