@@ -71,17 +71,48 @@
 
 ### Tier 2 — 视觉/适配增强，低风险锦上添花（候选 backlog，非本期承诺）
 
-#### [x] 4. `systemMaterial` 系统材质 + 组件级沉浸光感（Toast 部分已落地，Chip/Segment 未接入）
+#### [~] 4. `systemMaterial` 系统材质 + 组件级沉浸光感（Toast / 菜单已落地，卡片待用户挑选）
 - **价值**：★★　**代价**：小~中
-- 收益：贴合现有 `ThemeColors` 主题系统，将卡片/弹窗/Toast/Tips 换成系统材质，获得 HarmonyOS 7 毛玻璃沉浸质感，统一视觉风格。
-- **已落地（2026-07-10，分支 `feature/api26-material`，提交 `b9bf9af`）**：
-  - 新增 `MaterialKit.ets`：`IS_MATERIAL_API` 运行时守卫（`deviceInfo.distributionOSApiVersion >= 260000`），`toastMaterial()` 返回 `new uiMaterial.ImmersiveMaterial({ style: REGULAR })`，老设备返回 `undefined` 跳过。
-  - 新增 `ToastUtil.ets`：封装 `promptAction.showToast` 并附加 `systemMaterial`，已收口 **6 个页面共 22 处** `promptAction.showToast` → `ToastUtil.show(...)`。
-  - 效果：API26 上**所有 Toast 自动带 HarmonyOS 7 沉浸材质**，老设备（API<26）自动降级为普通 Toast，无崩。
-- **未接入 / 不适用**：
-  - advanced `Chip` / `SegmentButton` 的 `backgroundSystemMaterial`：本工程筛选标签为**自定义组件**（`ElectricityPage.buildPresetChip` 等），未使用 advanced `Chip`/`SegmentButton`，故该属性无挂载点。
-  - 通用卡片容器：SDK 26 的 `backgroundSystemMaterial` 仅暴露给 advanced `Chip`/`SegmentButton`，普通 `Column/Row/Stack` 不支持，故"卡片毛玻璃"暂无法用此 API 实现（已有 `backgroundBlurStyle` 可替代，非 API26 新特性）。
-  - ⚠️ `uiMaterial` 为 `@since 26.0.0` 静态导入，老设备若该模块未注册存在导入崩溃风险；当前由 `IS_MATERIAL_API` 守卫确保构造不被调用，但导入本身的安全性待真机/老设备验证。
+- 收益：贴合现有 `ThemeColors` 主题系统，将卡片/弹窗/菜单/Toast 换成系统材质，获得 HarmonyOS 7 毛玻璃沉浸质感，统一视觉风格。
+- **已落地**：
+  - （提交 `b9bf9af`，分支 `feature/api26-material`）**Toast 系统材质**：`MaterialKit.toastMaterial()` + `ToastUtil` 收口 6 页面共 22 处。
+  - （本次提交，同分支）**菜单沉浸材质**：`MaterialKit.menuOptions()` 统一返回 `systemMaterial`（API26）/ 回退 `BlurStyle.COMPONENT_THICK`（老设备），已接入 **4 处 `bindMenu`**——课表右上角四点菜单、门户 WebView 菜单、成绩页「学期」「类型」两个筛选菜单。
+  - **关键更正**：`CommonMethod.systemMaterial(material)` 是 **所有组件的通用方法**（`@since 26.0.0`，`@form` 桌面卡片亦可用），故"卡片毛玻璃"可用此 API 实现；此前"通用容器不支持"的判断有误，已纠正。
+- **待用户挑选（卡片清单见下「卡片清单」）**：工程内大量圆角卡片（`bgCard`+`shadow`），是否铺 `systemMaterial` 由用户决定；整页背景（无圆角）不建议做。
+- ⚠️ `uiMaterial` 为 `@since 26.0.0` 静态导入，老设备导入崩溃风险待真机/老设备验证（守卫确保构造不被调用）。
+
+##### 卡片清单（`systemMaterial` 候选挂载点，按类别归类）
+> 工程统一用 `ThemeColors.bgCard` + 圆角 + `shadow` 表达卡片。下面按"是否值得做"归类，行号均为 `entry/src/main/ets/pages/**`。
+
+- **A 类 · 菜单行卡片（`shadow({radius:2,...})`，列表项，毛玻璃最明显 → 强烈建议做）**
+  - `MainPage.ets`：3310 / 3395 / 3456（功能菜单行）、3554 / 3601（`MenuItemBuilder` 行）
+  - `schoolnet/SchoolNetPage.ets`：317 / 354 / 399 / 410 / 490 / 530 / 559
+  - `library/LibraryPage.ets`：491 / 615
+  - `schoolcard/SchoolCardPage.ets`：236 / 325
+  - `electricity/ElectricityPage.ets`：593 / 636
+  - `about/AboutPage.ets`：79 / 91
+  - `attendance/AttendancePage.ets`：271
+  - `dormwater/DormWaterPage.ets`：426
+  - `emptyclassroom/EmptyClassroomPage.ets`：234
+  - `faq/FaqPage.ets`：117
+  - `login/LoginPage.ets`：263
+  - `calendar_export/CalendarExportPage.ets`：935
+
+- **B 类 · 弹窗 / 半模态体（`shadow r20/r24`、宽 80~90%，API26 招牌毛玻璃 → 建议做）**
+  - `MainPage.ets`：2117 / 2164 / 2211 / 2249 / 2318 / 2350 / 2448 / 2512 / 2599 / 2662（各类对话框 / Sheet 内容体）
+  - `login/LoginPage.ets`：357
+  - `about/AboutPage.ets`：149
+  - `classtable/ClassTablePage.ets`：1514 / 1591
+  - `dormwater/DormWaterPage.ets`：452
+
+- **C 类 · 内容卡片（`bgCard`+圆角、普通内容块，铺材质有"整片过透/文字对比"风险 → 可选，建议先小批试）**
+  - `MainPage.ets`：916（滑块遮罩卡）/ 2725 / 2748 / 2989 / 3281 / 3309 / 3394 / 3455 / 3553（各内容卡）
+  - `classtable/ClassTablePage.ets`：1401 / 1466 / 1513 / 1590
+  - `library/LibraryPage.ets`：490 / 614
+  - `emptyclassroom/EmptyClassroomPage.ets`：164 / 233
+  - `schoolcard`、`score`、`exam`、`electricity`、`attendance`、`calendar_export`、`dormwater`、`about`、`login` 内若干 `bgCard`+圆角内容块
+
+- **D 类 · 整页背景（仅 `bgCard` 无圆角 → 不做）**：`Index.ets:23`、`MainPage.ets:1695/2896/2924/3281`、`library:449`、`login:278/409/420`、`faq:115`、`classtable:1969/1990/2026` 等。
 
 #### [ ] 5. `ContainerReader` 容器断点自适应
 - **价值**：★★　**代价**：中

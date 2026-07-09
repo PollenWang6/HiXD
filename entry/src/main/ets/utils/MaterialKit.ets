@@ -32,3 +32,16 @@ export function componentMaterial(): uiMaterial.Material | undefined {
   }
   return new uiMaterial.ImmersiveMaterial({ style: uiMaterial.ImmersiveStyle.REGULAR });
 }
+
+/**
+ * 菜单 / 长按菜单（bindMenu）的沉浸材质选项。
+ * - API 26+：挂系统材质（systemMaterial），获得 HarmonyOS 7 毛玻璃质感；
+ * - 老设备：回退到 backgroundBlurStyle（保持原 COMPONENT_THICK 毛玻璃）。
+ * 返回对象字面量，调用处直接 `bindMenu(builder, menuOptions())` 即可。
+ */
+export function menuOptions(): MenuOptions {
+  if (!IS_MATERIAL_API) {
+    return { backgroundBlurStyle: BlurStyle.COMPONENT_THICK };
+  }
+  return { systemMaterial: toastMaterial() };
+}
