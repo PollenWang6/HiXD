@@ -1,19 +1,18 @@
 # HiXD · API 26（HarmonyOS 7）适配 TODO
 
-> 状态：调研完成，未实施（仅记录计划）。最后更新：2026-07-09
+> 状态：已开工（分支 `feature/api26`，`build-profile.json5` 的 `targetSdkVersion` 已切到 `26.0.0`）。最后更新：2026-07-09
 > 目标：梳理 HarmonyOS 7 / API 26 中与 HiXD 相关的可用新特性，并给出分阶段采纳路线。
 
 ---
 
 ## 0. 背景与现状
 
-- **API 26 = HarmonyOS 7（26.0.0 Beta1，2026-06-12，API level 26）**。
-- 从 26.0.0 起，API 版本号格式由旧的 `X.Y.Z(N)` 改为 **语义化版本 SemVer `X.Y.Z`**（主/次/修订），更符合行业惯例。
-- **工程当前锁定**（见 `build-profile.json5`）：
-  - `targetSdkVersion: 6.1.0(23)`
-  - `compatibleSdkVersion: 6.0.2(22)`
-  - → 实际运行在 **API 23**，尚未使用任何 API 26 特性。
-- 本地已安装 **HarmonyOS SDK 26.0.0**（路径 `E:/HUAWEI/DevEco Studio/sdk`），但工程未切换。
+- **API 26 = HarmonyOS 26.0.0（Beta1，API level 26）**。版本号从 26.0.0 起改为 **纯 SemVer `X.Y.Z`**（不再带 `(N)` 后缀）。
+- 本地 SDK 事实（读 `E:/HUAWEI/DevEco Studio/sdk/default/sdk-pkg.json` 确认）：`apiVersion="26"`、`displayName="HarmonyOS 26.0.0"`、`platformVersion="26.0.0"`、`version="26.0.0.23"`、`releaseType="Beta1"`。
+- 工程已切换（分支 `feature/api26`，见 `build-profile.json5`）：
+  - `targetSdkVersion: 26.0.0`（纯 SemVer，已改；旧写 `26.0.0(26)` 为误，已纠正）
+  - `compatibleSdkVersion: 6.0.2(22)`（保持低位，兼容老设备；⚠️ 新旧格式混用，DevEco 26 首编若报格式错，按报错把 compatible 也升到 SemVer 或对齐 `26.0.0`，但会缩小支持设备范围）
+  - → 编译目标 **API 26**，新特性用 `canIUse` / `API_VERSION >= 26` 守卫。
 
 ### 升级前置条件
 - 需 **DevEco Studio 26.0.0 Beta1**（26.0.0.461）方可编译目标 API 26。
@@ -23,11 +22,11 @@
 
 ## 1. 升级步骤（一次性）
 
-1. 从 `master` 切出分支 `feature/api26`。
+1. 从 `main` 切出分支 `feature/api26`（✅ 已完成；当前 9 个 API23 修复随分支带出）。
 2. 使用 DevEco Studio 26.0.0 Beta1 打开工程。
-3. 修改 `build-profile.json5`：
-   - `targetSdkVersion` 提到 `26.0.0(26)`（确切字符串以 DevEco 26 新建工程的默认值为准）。
-   - **`compatibleSdkVersion` 保持低位**（如 `6.0.2(22)`）以兼容老设备；新 API 用 `canIUse('SystemCapability.xxx')` 或 `API_VERSION >= 26` 守卫后再调用。
+3. 修改 `build-profile.json5`（✅ `targetSdkVersion` 已完成）：
+   - `targetSdkVersion` 改为 `26.0.0`（纯 SemVer，已确认；非 `26.0.0(26)`）。
+   - **`compatibleSdkVersion` 保持低位** `6.0.2(22)` 以兼容老设备；新 API 用 `canIUse('SystemCapability.xxx')` 或 `API_VERSION >= 26` 守卫后再调用。
 4. 升级后**必须先清构建缓存**再编译（否则会命中旧缓存的幽灵错误）：
    - `Python shutil.rmtree` 删除 `E:/HiXD/entry/build`、`E:/HiXD/.hvigor`、`C:/Users/花粉WJL/.hvigor/project_caches`。
    - 命令行：`hvigorw.bat assembleHap --mode module -p product=default`（`DEVECO_SDK_HOME=E:/HUAWEI/DevEco Studio/sdk`）。
