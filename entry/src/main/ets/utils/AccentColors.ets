@@ -3,7 +3,6 @@ import { PreferenceUtil } from './PreferenceUtil';
 
 // 预设主题色：[浅色模式颜色, 深色模式颜色, 名称]
 export const ACCENT_PRESETS: string[][] = [
-  ['#FFFFFF', '#FFFFFF', '雪峰白'],
   ['#2979FF', '#6699DD', '西电蓝'],
   ['#1565C0', '#5599CC', '深海蓝'],
   ['#00ACC1', '#55B8C4', '青碧'],
@@ -23,6 +22,7 @@ export const ACCENT_PRESETS: string[][] = [
   ['#78909C', '#8899A0', '雾灰'],
   ['#795548', '#886650', '可可色'],
   ['#424242', '#888888', '墨黑'],
+  ['#FFFFFF', '#FFFFFF', '雪峰白'],
 ];
 
 const KEY = 'accent_color';
@@ -31,15 +31,42 @@ const CUSTOM_KEY = 'accent_custom';
 export class AccentColors {
   // 初始化（应用启动时调用一次）
   static init(): void {
+    AccentColors.migrateOrderV2();
     const custom: string = PreferenceUtil.getString(CUSTOM_KEY);
     if (custom.length === 7 && custom.startsWith('#')) {
       AppStorage.setOrCreate('accent_color', custom);
       AppStorage.setOrCreate('accent_index', -1);
       return;
     }
-    const saved: number = PreferenceUtil.getNumber(KEY, 1);
+    const saved: number = PreferenceUtil.getNumber(KEY, 0);
     const idx: number = (saved >= 0 && saved < ACCENT_PRESETS.length) ? saved : 0;
     AccentColors.apply(idx);
+  }
+
+  /**
+   * 一次性顺序迁移：雪峰白由首位(0)移到末位，其余预设 index 整体前移一位。
+   * 避免老用户已保存的 accent_color index 因数组重排而错位。
+   */
+  private static migrateOrderV2(): void {
+    const FLAG = 'accent_order_v2';
+    if (PreferenceUtil.getBool(FLAG, false)) return;
+    // 哨兵值区分「从未保存」与「保存了 0」，避免把全新用户误迁移
+    const old: number = PreferenceUtil.getNumber(KEY, -999);
+    if (old === -999) {
+      // 全新用户：无历史 index，无需迁移，仅打标记
+      PreferenceUtil.putBool(FLAG, true);
+      return;
+    }
+    let mapped: number;
+    if (old === 0) {
+      mapped = ACCENT_PRESETS.length - 1; // 旧雪峰白 → 末尾
+    } else if (old > 0) {
+      mapped = old - 1;                    // 其余前移一位
+    } else {
+      mapped = old;                        // -1 自定义，保持
+    }
+    PreferenceUtil.putNumber(KEY, mapped);
+    PreferenceUtil.putBool(FLAG, true);
   }
 
   // 根据当前主题模式获取颜色

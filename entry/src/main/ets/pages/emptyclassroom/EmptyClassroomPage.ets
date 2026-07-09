@@ -210,13 +210,17 @@ export struct EmptyClassroomPage {
             ForEach(this.filteredRooms, (room: EmptyClassroomItem) => {
               ListItem() {
                 Column() {
-                  Row() {
-                    Text(room.roomName).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
-                    if (room.floor) {
-                      Text('  ' + room.floor + '层').fontSize(11).fontColor(ThemeColors.textSecondary)
-                    }
-                    Blank()
-                    // 节次状态标签
+                  Column() {
+                    // 第一行：教室名 + 楼层，允许自动换行，保证名字完整
+                    Row() {
+                      Text(room.roomName).fontSize(15).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+                        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+                      if (room.floor) {
+                        Text(room.floor + '层').fontSize(11).fontColor(ThemeColors.textSecondary).margin({ left: 8 })
+                      }
+                    }.width('100%').alignItems(VerticalAlign.Top)
+
+                    // 第二行：节次状态标签，独立成行，不再被名字挤出
                     Row({ space: 2 }) {
                       ForEach(room.isUsed, (free: boolean, idx: number) => {
                         Text(free ? '空' : '占').fontSize(11)
@@ -224,7 +228,7 @@ export struct EmptyClassroomPage {
                           .backgroundColor(free ? '#E8F5E9' : '#FFEBEE')
                           .borderRadius(4).padding({ left: 5, right: 5, top: 2, bottom: 2 })
                       }, (free: boolean, idx: number) => 'sec_' + String(idx))
-                    }
+                    }.width('100%').margin({ top: 8 })
                   }.width('100%')
                 }.width('100%').padding(10).borderRadius(12).backgroundColor(ThemeColors.bgCard)
                 .shadow({ radius: 2, color: '#00000008', offsetY: 1 }).margin({ bottom: 8 })

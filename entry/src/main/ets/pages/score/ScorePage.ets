@@ -14,6 +14,7 @@ export struct ScorePage {
   pageInfo: NavPathStack = new NavPathStack();
   @State loading: boolean = true;  // 初始为 true，避免 waitAndLoad 等待期间显示空状态
   @State errorMsg: string = '';
+  @State staleTip: string = '';     // 非空时表示当前显示的是离线/过期缓存数据，附「重试」
   @State selectedSemester: string = '';
   @State semesterCodes: string[] = [];
   @State selectedType: string = '__all__';
@@ -156,9 +157,22 @@ export struct ScorePage {
         this.selectedSemester = semSet[0];
         this.applyFilter();
       }
+      // 判断展示的是否为「离线/过期缓存」：CacheService.getOrFetch 已自动回退过期缓存，
+      // 因此即便网络失败也可能拿到数据；用「未过期缓存」是否存在来区分，给出离线提示。
+      const fresh: boolean = await ScoreService.getInstance().isScoreCacheFresh('');
+      if (fresh) {
+        this.staleTip = '';
+      } else {
+        const st: string = AppStorage.get('loginStatus') as string ?? '';
+        this.staleTip = st === 'expired' ? '登录已过期，已显示缓存数据' : '网络异常，已显示缓存数据';
+      }
     } catch (e) {
       const msg = (e as Error).message || '';
-      this.errorMsg = msg.includes('未登录') ? '登录已过期，请重新登录' : '加载成绩失败';
+      // 用 MainPage 同步到 AppStorage 的 loginStatus 准确判断是否登录过期，
+      // 不再依赖脆弱的「未登录」字符串匹配（NETSTACK 401 报错里不含该词）。
+      const st: string = AppStorage.get('loginStatus') as string ?? '';
+      const expired: boolean = st === 'expired' || msg.includes('未登录');
+      this.errorMsg = expired ? '登录已过期，请重新登录' : '加载成绩失败';
     } finally {
       this.loading = false;
     }
@@ -588,6 +602,21 @@ export struct ScorePage {
             .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
           }
           .backgroundColor(ThemeColors.bgCard)
+
+          // 离线/过期缓存提示条：显示缓存数据的同时允许用户主动「重试」
+          if (this.staleTip.length > 0) {
+            Row() {
+              Text('📦 ' + this.staleTip)
+                .fontSize(12).fontColor('#E65100').layoutWeight(1)
+              Text('重试')
+                .fontSize(12).fontColor(this.accentColor)
+                .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                .border({ width: 1, color: this.accentColor, radius: 4 })
+                .onClick(() => { this.loadScores(); })
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+            .backgroundColor(ThemeColors.isDark ? '#3A2A12' : '#FFF3E0')
+          }
 
           Divider().color(ThemeColors.border)
 

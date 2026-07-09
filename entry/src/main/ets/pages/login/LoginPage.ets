@@ -19,6 +19,7 @@ struct LoginPage {
   @State statusText: string = '';
   @State isSubmitting: boolean = false;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
 
   // 滑块验证码状态
   @State showCaptcha: boolean = false;
@@ -257,7 +258,7 @@ struct LoginPage {
             LoadingProgress().width(24).height(24).color('#2979FF')
           }
         }
-        .width('100%').height(56).padding({ left: 16, right: 16 })
+        .width('100%').height(56 + this.statusBarHeight).padding({ left: 16, right: 16, top: this.statusBarHeight })
         .backgroundColor(ThemeColors.bgCard)
         .shadow({ radius: 2, color: '#00000010', offsetY: 1 })
 
@@ -277,74 +278,83 @@ struct LoginPage {
       .width('100%').height('100%').backgroundColor(ThemeColors.bgCard)
 
       if (this.showCaptcha) {
-        Column() {
-          Stack() {
-            Column() {
-              Row() {
-                Blank()
-                Text('✕')
-                  .fontSize(20).fontColor('#999999')
-                  .onClick(() => { this.toForm(); })
-              }.width('100%').margin({ bottom: 16 })
+        Stack({ alignContent: Alignment.Center }) {
+          // 全屏遮罩层：真正占满屏幕的半透明黑，整数 AARRGGBB 无歧义
+          // 0xCC = 80% 不透明度，深色主题下也能明显压暗背景
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(0xCC000000)
 
-              if (this.isSubmitting) {
-                LoadingProgress().width(48).height(48).color('#2979FF').margin({ top: 60, bottom: 60 })
-                Text(this.statusText || '请稍候...').fontSize(14).fontColor(ThemeColors.textSecondary)
-                Blank()
-              } else {
-                Stack({ alignContent: Alignment.TopStart }) {
-                  if (this.puzzleBigPm) {
-                    Image(this.puzzleBigPm).width(280).height(155).objectFit(ImageFit.Fill)
-                  } else {
-                    Row().width(280).height(155).backgroundColor('#F5F5F5')
-                  }
-                  if (this.puzzleSmallPm) {
-                    Image(this.puzzleSmallPm).width(44).height(155).objectFit(ImageFit.Fill)
-                      .offset({ x: this.sliderLeftPx, y: 0 })
-                  }
-                }
-                .width(280).height(155).borderRadius(4)
-                .clip(true).backgroundColor('#F0F0F0')
+          // 滑块验证码卡片（位于遮罩之上）
+          Column() {
+            Row() {
+              Blank()
+              Text('✕')
+                .fontSize(20).fontColor('#999999')
+                .onClick(() => { this.toForm(); })
+            }.width('100%').margin({ bottom: 16 })
 
-                Stack({ alignContent: Alignment.TopStart }) {
-                  Row().width(280).height(10).backgroundColor('#E0E0E0').borderRadius(5)
-                  Row().width(Math.min(this.sliderLeftPx + 4, 280)).height(10)
-                    .backgroundColor('#4CAF50').borderRadius(5)
-                  Row() {
-                    Text('→').fontSize(18).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
-                  }
-                  .width(this.THUMB_SIZE).height(this.THUMB_SIZE)
-                  .borderRadius(21).backgroundColor('#4CAF50')
-                  .justifyContent(FlexAlign.Center)
-                  .shadow({ radius: 6, color: '#00000030', offsetY: 2 })
-                  .offset({ x: this.thumbOffset(), y: -16 })
+            if (this.isSubmitting) {
+              LoadingProgress().width(48).height(48).color('#2979FF').margin({ top: 60, bottom: 60 })
+              Text(this.statusText || '请稍候...').fontSize(14).fontColor(ThemeColors.textSecondary)
+              Blank()
+            } else {
+              Stack({ alignContent: Alignment.TopStart }) {
+                if (this.puzzleBigPm) {
+                  Image(this.puzzleBigPm).width(280).height(155).objectFit(ImageFit.Fill)
+                } else {
+                  Row().width(280).height(155).backgroundColor('#F5F5F5')
                 }
-                .width(280).height(this.THUMB_SIZE + 10).margin({ top: 33 })
-                .hitTestBehavior(HitTestMode.Default)
-                .onTouch((event: TouchEvent) => { this.handleTouch(event); })
-
-                if (this.captchaError.length > 0) {
-                  Text(this.captchaError).fontSize(13).fontColor('#FF6B6B').margin({ top: 12 })
+                if (this.puzzleSmallPm) {
+                  Image(this.puzzleSmallPm).width(44).height(155).objectFit(ImageFit.Fill)
+                    .offset({ x: this.sliderLeftPx, y: 0 })
                 }
-                Text(this.statusText || '请按住滑块拖动到合适位置').fontSize(12).fontColor('#999999').margin({ top: 16 })
               }
+              .width(280).height(155).borderRadius(4)
+              .clip(true).backgroundColor('#F0F0F0')
+
+              Stack({ alignContent: Alignment.TopStart }) {
+                Row().width(280).height(10).backgroundColor('#E0E0E0').borderRadius(5)
+                Row().width(Math.min(this.sliderLeftPx + 4, 280)).height(10)
+                  .backgroundColor('#4CAF50').borderRadius(5)
+                Row() {
+                  Text('→').fontSize(18).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
+                }
+                .width(this.THUMB_SIZE).height(this.THUMB_SIZE)
+                .borderRadius(21).backgroundColor('#4CAF50')
+                .justifyContent(FlexAlign.Center)
+                .shadow({ radius: 6, color: '#00000030', offsetY: 2 })
+                .offset({ x: this.thumbOffset(), y: -16 })
+              }
+              .width(280).height(this.THUMB_SIZE + 10).margin({ top: 33 })
+              .hitTestBehavior(HitTestMode.Default)
+              .onTouch((event: TouchEvent) => { this.handleTouch(event); })
+
+              if (this.captchaError.length > 0) {
+                Text(this.captchaError).fontSize(13).fontColor('#FF6B6B').margin({ top: 12 })
+              }
+              Text(this.statusText || '请按住滑块拖动到合适位置').fontSize(12).fontColor('#999999').margin({ top: 16 })
             }
-            .width(320).padding(20)
-            .backgroundColor(ThemeColors.bgCard).borderRadius(16)
-            .alignItems(HorizontalAlign.Center)
           }
-          .width('100%').height('100%')
-          .alignContent(Alignment.Center)
+          .width(320).padding(20)
+          .backgroundColor(ThemeColors.bgCard).borderRadius(16)
+          .alignItems(HorizontalAlign.Center)
         }
         .width('100%').height('100%')
-        .backgroundColor('#00000080')
       }
     }
     .width('100%').height('100%')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   @Builder buildLoginForm() {
     Column() {
+      Image($r('app.media.hixd_icon'))
+        .width(96).height(96).borderRadius(20).objectFit(ImageFit.Contain)
+        .margin({ bottom: 24 })
+        .alignSelf(ItemAlign.Center)
+        .shadow({ radius: 12, color: '#0000001A', offsetY: 4 })
       Column() {
         Text('西电统一身份认证').fontSize(24).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
           .margin({ bottom: 8 })

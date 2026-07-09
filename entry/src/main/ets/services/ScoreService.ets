@@ -99,10 +99,27 @@ export class ScoreService {
     const key = 'score_' + sid;
     return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
       await this.activateAppSession(EHALL_APP_SCORE);
+      // 对齐 Flutter getScoreFromEhall：xscjcx.do 必须带完整查询参数，
+      // 否则 ehall 返回 302 重定向，NETSTACK 自动跟随重定向链时 URL 校验失败(parameter error / 401)
+      // querySetting 对应 Flutter json.encode({name:'SFYX',value:'1',linkOpt:'and',builder:'m_value_equal'})
+      const querySetting: string = '[{"name":"SFYX","value":"1","linkOpt":"and","builder":"m_value_equal"}]';
       const body: Record<string, string> = {
+        '*json': '1',
+        'querySetting': querySetting,
+        '*order': '+XNXQDM,KCH,KXH',
+        'pageSize': '1000',
+        'pageNumber': '1',
       };
       return (await this.appPost('/jwapp/sys/cjcx/modules/cjcx/xscjcx.do', body)).body;
     }, 5 * 60 * 1000);
+  }
+
+  // 判断成绩缓存是否为【未过期】的（用于区分「实时数据」与「离线缓存」）
+  // CacheService.getOrFetch 在网络失败时已自动回退到过期缓存，
+  // 因此 getScores 即便离线也可能返回数据；此函数用「未过期缓存」来判断数据是否新鲜，
+  // 让页面在显示缓存数据时给出「离线/登录过期」提示而非假装实时。
+  async isScoreCacheFresh(sid: string): Promise<boolean> {
+    return (await this.cache.get('score_' + sid)) !== null;
   }
 
   async getScoreDetail(jxbid: string, semesterCode: string): Promise<ComposeDetail[]> {

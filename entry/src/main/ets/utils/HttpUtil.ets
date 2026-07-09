@@ -394,6 +394,7 @@ export class HttpUtil {
             return;
           }
           if (err !== undefined && err.code !== 0) {
+            console.error('[HiXD] HTTP noRedirect failed code=' + err.code + ' msg=' + err.message + ' url=' + url);
             req.destroy();
             reject(new Error('HTTP ' + err.code + ': ' + err.message));
             return;
@@ -506,6 +507,7 @@ export class HttpUtil {
           },
           async (err: BusinessError | undefined, data: http.HttpResponse) => {
             if (err !== undefined && err.code !== 0) {
+              console.error('[HiXD] HTTP req failed code=' + err.code + ' msg=' + err.message + ' url=' + url);
               reject(new Error('HTTP ' + err.code + ': ' + err.message));
               req.destroy();
               return;
@@ -549,6 +551,7 @@ export class HttpUtil {
           },
           async (err: BusinessError | undefined, data: http.HttpResponse) => {
             if (err !== undefined && err.code !== 0) {
+              console.error('[HiXD] HTTP req failed code=' + err.code + ' msg=' + err.message + ' url=' + url);
               reject(new Error('HTTP ' + err.code + ': ' + err.message));
               req.destroy();
               return;

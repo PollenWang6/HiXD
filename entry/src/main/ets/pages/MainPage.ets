@@ -7,6 +7,7 @@ import { ConfigurationConstant } from '@kit.AbilityKit';
 import { EhallService, SemesterUtil, ClassItemModel } from '../services/EhallService';
 import { ClassService } from '../services/ClassService';
 import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, CasFormFields } from '../services/CasLoginService';
+import { CacheService } from '../services/CacheService';
 import { HttpUtil } from '../utils/HttpUtil';
 import { router } from '@kit.ArkUI';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
@@ -143,6 +144,32 @@ struct MainPage {
   closeLogoutDialog(): void {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.logoutOpacity = 0; this.logoutTranslate = 30; });
     setTimeout(() => { this.showLogoutDialog = false; }, 200);
+  }
+
+  // 清理业务缓存：对齐 Flutter 退登删缓存，换账号不残留
+  private async clearBusinessCache(): Promise<void> {
+    // 1. CacheService 内容缓存（课表/成绩/考试/空教室等）
+    try {
+      await CacheService.getInstance().init();
+      await CacheService.getInstance().clear();
+    } catch (_) {}
+    // 2. filesDir 下课表原始数据 + 自定义课程文件（通配删除）
+    try {
+      const dir: string = this.context.filesDir;
+      const files: string[] = fileIo.listFileSync(dir);
+      for (const f of files) {
+        if (f.startsWith('class_table_') && f.endsWith('.json')) {
+          try { fileIo.unlinkSync(dir + '/' + f); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    // 3. Preference 中账号关联的业务缓存
+    await PreferenceUtil.putString('exam_schedule_cache', '');
+    await PreferenceUtil.putString('sysj_exp_cache', '');
+    await PreferenceUtil.putString('physics_exp_cache', '');
+    await PreferenceUtil.putString('class_grid_snapshot', '');
+    await PreferenceUtil.putString('calendar_bound', ''); // 避免换账号串系统日历
+    AppStorage.setOrCreate('electricity_cache', '');
   }
   closeBgDialog(): void {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => { this.bgOpacity = 0; this.bgTranslate = 30; });
@@ -458,21 +485,29 @@ struct MainPage {
     if (this.isTablet) {
       this.onMenuClick(0);
     }
-    // 立即显示界面，后台检查登录
-    this.username = PreferenceUtil.getString('ids_account');
-    this.updateCacheSize();
     // 基于 ids_account 判断登录状态（无 is_logged_in 标记）
+    this.username = PreferenceUtil.getString('ids_account');
     this.isLoggedIn = this.username.length > 0;
-    this.phyPwdStatus = PreferenceUtil.getString('physics_pwd').length > 0 ? '已设置' : '未设置';
-    this.schoolnetPwdStatus = PreferenceUtil.getString('schoolnet_password').length > 0 ? '已设置' : '未设置';
-    this.sportPwdStatus = PreferenceUtil.getString('sport_password').length > 0 ? '已设置' : '未设置';
+
+    // 主题初始化（LoginPage 也依赖全局主题，提前初始化）
     const savedMode: number = PreferenceUtil.getNumber('theme_color_mode',
       ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     ThemeColors.init(savedMode, getContext());
     AccentColors.init();
-    // 同步初始标签
     this.currentThemeLabel = this.buildThemeLabel(savedMode);
     AppStorage.setOrCreate('currentColorMode', savedMode);
+
+    // ===== 门禁：未登录直接进登录页，绝不在 MainPage 触发自动登录/滑块 =====
+    if (!this.isLoggedIn) {
+      router.replaceUrl({ url: 'pages/login/LoginPage' });
+      return;
+    }
+
+    // ===== 以下仅已登录态执行 =====
+    this.updateCacheSize();
+    this.phyPwdStatus = PreferenceUtil.getString('physics_pwd').length > 0 ? '已设置' : '未设置';
+    this.schoolnetPwdStatus = PreferenceUtil.getString('schoolnet_password').length > 0 ? '已设置' : '未设置';
+    this.sportPwdStatus = PreferenceUtil.getString('sport_password').length > 0 ? '已设置' : '未设置';
     this.loginStatus = 'checking';
     // TGC 优先 → 密码兜底，一步完成
     this.checkLogin();
@@ -509,6 +544,7 @@ struct MainPage {
       // 网络断开 → 更新状态（但不弹窗，避免打扰用户）
       if (this.loginStatus === 'checking' || this.loginStatus === 'online') {
         this.loginStatus = 'offline';
+AppStorage.set('loginStatus', 'offline');
         this.isLoggedIn = false;
       }
     }
@@ -611,6 +647,7 @@ struct MainPage {
         if (reallyLoggedIn) {
           this.isLoggedIn = true;
           this.loginStatus = 'ok';
+AppStorage.set('loginStatus', 'ok');
           await PreferenceUtil.putBool('is_logged_in', true);
           await cas.syncCookiesToWebView();
           this.loadUserInfo();  // 异步获取名字/头像/专业
@@ -627,13 +664,16 @@ struct MainPage {
         if (hasCred) {
           // 保留 isLoggedIn = true，"我的"页面继续显示菜单，滑块 overlay 在顶层
           this.loginStatus = 'expired';
+AppStorage.set('loginStatus', 'expired');
           await this.doRelogin();
           return;
         }
         this.isLoggedIn = false;
         this.loginStatus = 'not_logged_in';
+AppStorage.set('loginStatus', 'not_logged_in');
       } catch (_netErr) {
         this.loginStatus = 'offline';
+AppStorage.set('loginStatus', 'offline');
         this.isLoggedIn = false;
         this.startRetryTimer();
       }
@@ -643,6 +683,7 @@ struct MainPage {
         this.loginStatus = 'timeout';
       } else {
         this.loginStatus = 'offline';
+AppStorage.set('loginStatus', 'offline');
       }
       this.isLoggedIn = false;
       this.startRetryTimer();
@@ -674,6 +715,7 @@ struct MainPage {
         if (reallyLoggedIn) {
           this.isLoggedIn = true;
           this.loginStatus = 'ok';
+AppStorage.set('loginStatus', 'ok');
           await PreferenceUtil.putBool('is_logged_in', true);
           await cas.syncCookiesToWebView();
           this.loadUserInfo();
@@ -691,6 +733,7 @@ struct MainPage {
         if (reallyLoggedIn) {
           this.isLoggedIn = true;
           this.loginStatus = 'ok';
+AppStorage.set('loginStatus', 'ok');
           await PreferenceUtil.putBool('is_logged_in', true);
           await cas.syncCookiesToWebView();
           this.loadUserInfo();
@@ -709,9 +752,11 @@ struct MainPage {
       this.captchaTracks = [];
       this.captchaErr = '';
       this.showCaptcha = true;
-      this.loginStatus = 'expired';  // 对应 HiXD 标题下显示「登录已过期」
+      this.loginStatus = 'expired';
+AppStorage.set('loginStatus', 'expired');  // 对应 HiXD 标题下显示「登录已过期」
     } catch (e) {
       this.loginStatus = 'offline';
+AppStorage.set('loginStatus', 'offline');
     }
   }
 
@@ -787,6 +832,7 @@ struct MainPage {
         this.showCaptcha = false;
         this.isLoggedIn = true;
         this.loginStatus = 'ok';
+AppStorage.set('loginStatus', 'ok');
         this.loadUserInfo();
         // warmup disabled
         this.startPreload();
@@ -809,6 +855,7 @@ struct MainPage {
   private closeCaptcha(): void {
     this.showCaptcha = false;
     this.loginStatus = 'expired';
+AppStorage.set('loginStatus', 'expired');
   }
 
   // ====== 滑块验证码 Overlay ======
@@ -868,7 +915,7 @@ struct MainPage {
       .alignItems(HorizontalAlign.Center)
     }
     .width('100%').height('100%')
-    .backgroundColor('#00000080')
+    .backgroundColor(0xCC000000)
     .alignContent(Alignment.Center)
   }
 
@@ -1871,8 +1918,12 @@ struct MainPage {
     return this.currentThemeLabel;
   }
 
+  // 未登录时由 aboutToAppear 直接 router.replaceUrl 到 LoginPage，
+  // 不再保留本地登录引导页（LoginPage 本身已是完整登录界面）
+
   build() {
     Stack() {
+    if (this.isLoggedIn) {
     Navigation(this.pageInfo) {
       if (deviceInfo.distributionOSApiVersion >= 60100) {
         HdsTabs({ controller: this.tabsController }) {
@@ -1994,6 +2045,11 @@ struct MainPage {
         })
         .domStorageAccess(true)
         .javaScriptAccess(true)
+    }
+    }
+    else {
+      // 未登录瞬时占位：aboutToAppear 已 replaceUrl 到 LoginPage，这里仅避免黑屏
+      Column() { }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
     }
     // 滑块验证码 overlay（原地弹窗，不跳页）—— 必须在 Navigation 之后，确保显示在最上层
     if (this.showCaptcha) {
@@ -2402,6 +2458,17 @@ struct MainPage {
               await PreferenceUtil.putString('user_gender', '');
               await PreferenceUtil.putString('user_avatar', '');
               await HttpUtil.getInstance().clearCookies();
+              // 必须清掉 mod_auth_cas 偏好：getCookiesForDomain 对 ehall 域会把它当
+              // cookie 冗余注入，否则退登后重进仍会被 tryAutoRestoreLogin 判定为已登录
+              await PreferenceUtil.delete('mod_auth_cas');
+              await PreferenceUtil.putBool('is_logged_in', false);
+              // 清理业务缓存（对齐 Flutter 退登删缓存，换账号不残留）
+              await this.clearBusinessCache();
+              // 一并退出独立的宿舍水机(iLife798)与校园网(ZFW)会话，实现"完全退出"
+              await PreferenceUtil.putString('dorm_water_token', '');
+              await PreferenceUtil.putString('dorm_water_uid', '');
+              await PreferenceUtil.putString('dorm_water_eid', '');
+              await HttpUtil.getInstance().clearCookies('zfw.xidian.edu.cn');
               this.userDisplayName = '';
               this.username = '';
               this.userMajor = '';
@@ -2409,6 +2476,9 @@ struct MainPage {
               this.userAvatarUrl = '';
               this.isLoggedIn = false;
               this.loginStatus = 'not_logged_in';
+AppStorage.set('loginStatus', 'not_logged_in');
+              // 退登后直接进入登录页（不再依赖本地引导页占位）
+              router.replaceUrl({ url: 'pages/login/LoginPage' });
             })
         }.width('100%')
       }
