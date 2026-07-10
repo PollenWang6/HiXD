@@ -13,12 +13,17 @@ export struct WeekChip {
     Column() {
       Text(String(this.week))
         .fontSize(13)
-        .fontColor(this.selected ? '#FFFFFF' : (this.current === this.week ? this.accent : ThemeColors.textSecondary))
-        .fontWeight((this.selected || this.current === this.week) ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.selected ? '#FFFFFF' : ThemeColors.textSecondary)
+        .fontWeight(this.selected ? FontWeight.Medium : FontWeight.Normal)
     }
     .justifyContent(FlexAlign.Center)
     .width(36).height(36)
     .borderRadius(18)
+    .border({
+      width: (this.current === this.week && !this.selected) ? 2 : 0,
+      color: this.accent,
+      style: BorderStyle.Solid
+    })
     .backgroundColor(this.selected ? this.accent : ThemeColors.bgInput)
     .onClick(() => { if (this.onToggle) { this.onToggle(); } })
   }
