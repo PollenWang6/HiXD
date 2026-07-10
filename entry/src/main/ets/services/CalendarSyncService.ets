@@ -3,8 +3,12 @@ import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { SemesterUtil } from './EhallService';
 import { calendarManager } from '@kit.CalendarKit';
 import { common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const TAG: string = 'CalendarSyncService';
+const DOMAIN: number = 0xFF00;
+// [DIAG] 诊断日志开关：排查学校课表重复课导致的日历重复/删不掉问题（排查完可关）
+const DIAG: boolean = true;
 
 export interface SlimCell {
   name: string; teacher: string; classroom: string; day: number;
@@ -34,6 +38,7 @@ export class CalendarSyncService {
     if (grid.length === 0) {
       return;
     }
+    if (DIAG) { CalendarSyncService.diagScanGridDup(grid); }
 
     const mgr: calendarManager.CalendarManager = calendarManager.getCalendarManager(ctx);
     let cal: calendarManager.Calendar | null = null;
@@ -48,13 +53,27 @@ export class CalendarSyncService {
     }
 
     const existMap: Record<string, number> = {};
+    let evTotalRaw: number = 0;   // [DIAG] 日历事件原始总数
+    let evDupCount: number = 0;   // [DIAG] 被覆盖（重复 key）的孤儿事件数
     try {
       const evts: calendarManager.Event[] = await cal.getEvents();
+      evTotalRaw = evts.length;
       for (let i = 0; i < evts.length; i++) {
         const ev: calendarManager.Event = evts[i];
         if (ev.id !== undefined && ev.title && ev.startTime) {
-          existMap[ev.title + '|' + String(ev.startTime)] = ev.id;
+          const k: string = ev.title + '|' + String(ev.startTime);
+          if (DIAG && existMap[k] !== undefined) {
+            evDupCount++;
+            hilog.warn(DOMAIN, TAG, '[DIAG] 日历已存在重复事件 key=' + k
+              + ' 旧id=' + existMap[k] + ' 新id=' + ev.id
+              + '（existMap 覆盖旧id → 旧id 变孤儿，删除环节遍历不到、永久残留）');
+          }
+          existMap[k] = ev.id;
         }
+      }
+      if (DIAG) {
+        hilog.info(DOMAIN, TAG, '[DIAG] 日历现有事件：原始总数=' + evTotalRaw
+          + ' 去重后key数=' + Object.keys(existMap).length + ' 重复(孤儿)数=' + evDupCount);
       }
     } catch (_e) { return; }
 
@@ -89,15 +108,60 @@ export class CalendarSyncService {
     // 清理过期
     let deleted: number = 0;
     const oldKeys: string[] = Object.keys(existMap);
+    if (DIAG) {
+      hilog.info(DOMAIN, TAG, '[DIAG] ----- autoSync 删除阶段 existMap key数=' + oldKeys.length
+        + ' needed key数=' + Object.keys(needed).length + ' -----');
+    }
     for (let i = 0; i < oldKeys.length; i++) {
       const k: string = oldKeys[i];
       if (!needed[k]) {
-        try { await cal.deleteEvent(existMap[k]); deleted++; } catch (_e) { /* ignore */ }
+        try {
+          await cal.deleteEvent(existMap[k]);
+          deleted++;
+          if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 删除成功 key=' + k + ' id=' + existMap[k]); }
+        } catch (_e) {
+          if (DIAG) { hilog.warn(DOMAIN, TAG, '[DIAG] 删除失败 key=' + k + ' id=' + existMap[k]); }
+        }
       }
+    }
+
+    if (DIAG) {
+      hilog.info(DOMAIN, TAG, '[DIAG] ===== autoSync 结束 新增=' + added + ' 删除=' + deleted
+        + '（日历重复孤儿数=' + evDupCount + ' 无法通过本流程删除）=====');
     }
 
     if (added > 0 || deleted > 0) {
     }
+  }
+
+  // [DIAG] 扫描课表源数据，检测"同一天同一节次排了多门同名课"的学校侧重复（bug 根源确认）
+  static diagScanGridDup(grid: SlimCell[][][]): void {
+    let dupTotal: number = 0;
+    let cellTotal: number = 0;
+    for (let d = 1; d <= DC; d++) {
+      for (let s = 1; s <= SC; s++) {
+        const slot: SlimCell[][] | undefined = grid[d];
+        const cells: SlimCell[] = (slot !== undefined && slot[s] !== undefined) ? slot[s] : [];
+        const seen: Record<string, number> = {};
+        for (let ci = 0; ci < cells.length; ci++) {
+          const c: SlimCell = cells[ci];
+          if (c.startSection !== s) { continue; }
+          cellTotal++;
+          const kind: string = c.isExam ? 'X' : (c.isExperiment ? 'E' : 'C');
+          const sig: string = kind + ':' + c.name + '#' + c.startSection + '-' + c.endSection;
+          seen[sig] = (seen[sig] === undefined ? 0 : seen[sig]) + 1;
+        }
+        const sigKeys: string[] = Object.keys(seen);
+        for (let i = 0; i < sigKeys.length; i++) {
+          if (seen[sigKeys[i]] > 1) {
+            dupTotal++;
+            hilog.warn(DOMAIN, TAG, '[DIAG] 课表源数据重复 day=' + d + ' section=' + s
+              + ' 课程=' + sigKeys[i] + ' 出现' + seen[sigKeys[i]] + '次（学校侧 bug，将导致日历重复/删不掉）');
+          }
+        }
+      }
+    }
+    hilog.info(DOMAIN, TAG, '[DIAG] 课表源数据扫描完成：有效cell=' + cellTotal + ' 检出重复格=' + dupTotal);
   }
 
   // 把合并网格写入 class_grid_snapshot（供 autoSync / 桌面卡片读取）

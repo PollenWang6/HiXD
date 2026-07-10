@@ -5,8 +5,12 @@ import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { SemesterUtil } from '../../services/EhallService';
 import { calendarManager } from '@kit.CalendarKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const TAG: string = 'CalendarExportPage';
+const DOMAIN: number = 0xFF00;
+// [DIAG] 诊断日志开关：排查学校课表重复课导致的日历重复/删不掉问题（排查完可关）
+const DIAG: boolean = true;
 
 interface SlimCell {
   name: string;
@@ -263,6 +267,38 @@ export struct CalendarExportPage {
     return cell.name + '|' + String(startMs);
   }
 
+  // [DIAG] 扫描课表源数据，检测"同一天同一节次排了多门同名课"的学校侧重复（bug 根源确认）
+  diagScanGridDup(): void {
+    if (!DIAG) { return; }
+    let dupTotal: number = 0;
+    let cellTotal: number = 0;
+    for (let d = 1; d <= DC; d++) {
+      for (let s = 1; s <= SC; s++) {
+        const slot: SlimCell[][] | undefined = this.gridCells[d];
+        const cells: SlimCell[] = (slot !== undefined && slot[s] !== undefined) ? slot[s] : [];
+        const seen: Record<string, number> = {};
+        for (let ci = 0; ci < cells.length; ci++) {
+          const c: SlimCell = cells[ci];
+          if (c.startSection !== s) { continue; }
+          cellTotal++;
+          const kind: string = c.isExam ? 'X' : (c.isExperiment ? 'E' : 'C');
+          // 签名：类型 + 课名 + 起止节 —— 同签名多次即"同格重复课"
+          const sig: string = kind + ':' + c.name + '#' + c.startSection + '-' + c.endSection;
+          seen[sig] = (seen[sig] === undefined ? 0 : seen[sig]) + 1;
+        }
+        const sigKeys: string[] = Object.keys(seen);
+        for (let i = 0; i < sigKeys.length; i++) {
+          if (seen[sigKeys[i]] > 1) {
+            dupTotal++;
+            hilog.warn(DOMAIN, TAG, '[DIAG] 课表源数据重复 day=' + d + ' section=' + s
+              + ' 课程=' + sigKeys[i] + ' 出现' + seen[sigKeys[i]] + '次（学校侧 bug，将导致日历重复/删不掉）');
+          }
+        }
+      }
+    }
+    hilog.info(DOMAIN, TAG, '[DIAG] 课表源数据扫描完成：有效cell=' + cellTotal + ' 检出重复格=' + dupTotal);
+  }
+
   calcDbMins(startTime: Date, dbH: number, dbM: number): number {
     const db: Date = new Date(startTime);
     db.setDate(db.getDate() - 1);
@@ -281,6 +317,11 @@ export struct CalendarExportPage {
     }
     this.importing = true;
     this.resultMsg = '';
+    if (DIAG) {
+      hilog.info(DOMAIN, TAG, '[DIAG] ===== doImport 开始 forceRebuild=' + this.forceRebuild
+        + ' cEnabled=' + this.cEnabled + ' eEnabled=' + this.eEnabled + ' xEnabled=' + this.xEnabled + ' =====');
+      this.diagScanGridDup();
+    }
     try {
       const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
       const atManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
@@ -340,16 +381,30 @@ export struct CalendarExportPage {
       mon.setDate(sd.getDate() + (sd.getDay() === 0 ? -6 : 1 - sd.getDay()) + sw * 7);
 
       const existMap: Record<string, number> = {};
+      let evTotalRaw: number = 0;   // [DIAG] 日历事件原始总数
+      let evDupCount: number = 0;   // [DIAG] 被覆盖（重复 key）的事件数 = 无法删除的孤儿数
       try {
         const evts: calendarManager.Event[] = await cal.getEvents();
+        evTotalRaw = evts.length;
         for (let i = 0; i < evts.length; i++) {
           const ev: calendarManager.Event = evts[i];
           if (ev.id !== undefined && ev.title && ev.startTime) {
-            existMap[ev.title + '|' + String(ev.startTime)] = ev.id;
+            const k: string = ev.title + '|' + String(ev.startTime);
+            if (DIAG && existMap[k] !== undefined) {
+              evDupCount++;
+              hilog.warn(DOMAIN, TAG, '[DIAG] 日历已存在重复事件 key=' + k
+                + ' 旧id=' + existMap[k] + ' 新id=' + ev.id
+                + '（existMap 覆盖旧id → 旧id 变孤儿，删除环节遍历不到、永久残留）');
+            }
+            existMap[k] = ev.id;
           }
         }
       } catch (_e) {
         // ignore
+      }
+      if (DIAG) {
+        hilog.info(DOMAIN, TAG, '[DIAG] 日历现有事件：原始总数=' + evTotalRaw
+          + ' 去重后key数=' + Object.keys(existMap).length + ' 重复(孤儿)数=' + evDupCount);
       }
 
       const needed: Record<string, boolean> = {};
@@ -383,16 +438,27 @@ export struct CalendarExportPage {
       this.forceRebuild = false;
 
       const oldKeys: string[] = Object.keys(existMap);
+      if (DIAG) {
+        hilog.info(DOMAIN, TAG, '[DIAG] ----- 删除阶段开始 existMap key数=' + oldKeys.length
+          + ' needed key数=' + Object.keys(needed).length + ' -----');
+      }
       for (let i = 0; i < oldKeys.length; i++) {
         const k: string = oldKeys[i];
         if (!needed[k]) {
           try {
             await cal.deleteEvent(existMap[k]);
             st.delCount++;
+            if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 删除成功 key=' + k + ' id=' + existMap[k]); }
           } catch (e) {
             st.failCount++;
+            if (DIAG) { hilog.warn(DOMAIN, TAG, '[DIAG] 删除失败 key=' + k + ' id=' + existMap[k] + ' err=' + JSON.stringify(e)); }
           }
         }
+      }
+      if (DIAG) {
+        hilog.info(DOMAIN, TAG, '[DIAG] ===== doImport 结束 新增=' + st.newCount
+          + ' 删除=' + st.delCount + ' 失败=' + st.failCount
+          + '（注意：日历重复孤儿数=' + evDupCount + ' 无法通过本流程删除）=====');
       }
 
       let msg: string = '';
@@ -437,6 +503,10 @@ export struct CalendarExportPage {
             const desc: string = (cell.classroom ? '教室: ' + cell.classroom : '') +
               (cell.teacher ? (cell.classroom ? ' | ' : '') + '教师: ' + cell.teacher : '');
             const key: string = this.cellKey(cell, stT.getTime());
+            if (DIAG && needed[key]) {
+              hilog.warn(DOMAIN, TAG, '[DIAG] impC 同一key重复写入 key=' + key + ' day=' + d + ' section=' + s
+                + '（源数据重复课 → 日历将出现重复事件）');
+            }
             needed[key] = true;
             const oldId: number | undefined = existMap[key];
             if (oldId !== undefined) {
@@ -591,6 +661,10 @@ export struct CalendarExportPage {
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
               parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
             const key: string = this.cellKey(cell, stT.getTime());
+            if (DIAG && needed[key]) {
+              hilog.warn(DOMAIN, TAG, '[DIAG] synC 同一key重复命中 key=' + key + ' day=' + d + ' section=' + s
+                + '（源数据重复课；existMap 未回填 → 可能重复写入日历）');
+            }
             needed[key] = true;
             if (existMap[key] !== undefined) { continue; }
             const title: string = cell.name;
