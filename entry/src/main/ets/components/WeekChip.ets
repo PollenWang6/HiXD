@@ -16,6 +16,7 @@ export struct WeekChip {
         .fontColor(this.selected ? '#FFFFFF' : (this.current === this.week ? this.accent : ThemeColors.textSecondary))
         .fontWeight((this.selected || this.current === this.week) ? FontWeight.Medium : FontWeight.Normal)
     }
+    .justifyContent(FlexAlign.Center)
     .width(36).height(36)
     .borderRadius(18)
     .backgroundColor(this.selected ? this.accent : ThemeColors.bgInput)
