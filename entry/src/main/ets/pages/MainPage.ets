@@ -1445,10 +1445,45 @@ AppStorage.set('loginStatus', 'expired');
       const items: Object[] = JSON.parse(text) as Object[];
       for (let i = 0; i < items.length; i++) {
         const item: Record<string, Object> = items[i] as Record<string, Object>;
+        const type: number = (item['type'] as number) || 0;
         const day: number = item['day'] as number || 0;
+        if (day < 1 || day > 7) continue;
+
+        if (type === 1) {
+          // 手动考试：与 mergeExamPreview / ClassTablePage.loadCustomCourses 一致处理
+          const examDate: string = (item['examDate'] as string) || '';
+          const examTimeStart: string = (item['examTimeStart'] as string) || '';
+          const examTimeEnd: string = (item['examTimeEnd'] as string) || '';
+          if (examDate.length === 0) continue;
+          const exDate = new Date(examDate + 'T00:00:00');
+          if (isNaN(exDate.getTime())) continue;
+          // 由 examDate 反推学期周次（与 calcCurrentWeekFromNow 同公式，含 week_swift 偏移）
+          const semStart = SemesterUtil.getSemesterStartDate(semCode);
+          const swift: number = PreferenceUtil.getNumber('week_swift', 0);
+          const dayMs: number = 86400000;
+          const weekNum: number = Math.max(1,
+            Math.floor((exDate.getTime() - semStart.getTime() - swift * 7 * dayMs) / dayMs / 7) + 1);
+          const cell = new PreviewCell();
+          cell.name = (item['name'] as string) || '考试';
+          cell.classroom = (item['classroom'] as string) || '';
+          cell.seat = (item['examSeat'] as string) || '';
+          cell.day = day;
+          cell.startSection = 0;
+          cell.endSection = 0;
+          cell.isCustom = true;
+          cell.isExam = true;
+          cell.weekNum = weekNum;
+          cell.examDate = examDate;
+          cell.examTimeDesc = (examTimeStart && examTimeEnd) ? (examTimeStart + '-' + examTimeEnd) : '';
+          cell.weekList = [];
+          for (let w = 0; w < 26; w++) cell.weekList.push(false);
+          grid[day][0].push(cell);
+          continue;
+        }
+
         const startSec: number = item['startSection'] as number || 0;
         const endSec: number = item['endSection'] as number || 0;
-        if (day < 1 || day > 7 || startSec < 1) continue;
+        if (startSec < 1) continue;
         const wl: number[] = item['weekList'] as number[] || [];
         // 1-indexed: week w → list[w] = true（与 parseWeekList 和 getNextClasses 一致）
         // 旧数据用 0-indexed（week w → list[w-1]），长度 < 25 时做兼容迁移
