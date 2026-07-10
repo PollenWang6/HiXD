@@ -281,6 +281,7 @@ struct MainPage {
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @StorageLink('ct_updated') @Watch('onCtUpdated') ctUpdated: string = '';
   private _lastCtUpdated: string = '';
+  private _ctPollId: number = 0;
   // 网络回调绑定引用（startListen/stopListen 须用同一引用才能正确解绑）
   private onNetworkChangeHandler: (available: boolean) => void = this.onNetworkChange.bind(this);
 
@@ -510,6 +511,10 @@ struct MainPage {
     // TGC 优先 → 密码兜底，一步完成
     this.checkLogin();
     this.loadClassPreview();
+    // 课表子页（课程表）编辑后返回时，onPageShow/@Watch 不会触发（@Entry 宿主在 NavDestination 之上不重入生命周期），
+    // 故用轻量轮询 ct_updated：tryRefreshPreview 仅在 ct_updated 变化时重载预览+快照，无变化则空转（字符串比较）。
+    this._lastCtUpdated = AppStorage.get('ct_updated') as string || '';
+    this._ctPollId = setInterval(() => { this.tryRefreshPreview(); }, 1000);
     this.initCacheDirs();
     // 后台检查版本更新（不阻塞 UI）
     this.checkVersionUpdate();
@@ -583,6 +588,7 @@ AppStorage.set('loginStatus', 'offline');
   }
 
   aboutToDisappear() {
+    if (this._ctPollId !== 0) { clearInterval(this._ctPollId); this._ctPollId = 0; }
     this.stopRetryTimer();
     // 解绑监听，避免页面重建时 handler 累积、或销毁后回调触发空引用
     networkUtil.stopListen(this.onNetworkChangeHandler);
@@ -1503,6 +1509,12 @@ AppStorage.set('loginStatus', 'expired');
         cell.startSection = startSec;
         cell.endSection = endSec > startSec ? endSec : startSec;
         cell.isCustom = true;
+        // 自定义 type=2 为实验：与 ClassTablePage.loadCustomCourses 对齐，必须打 isExperiment 标记
+        // （否则预览会误判为 isCustom 显示「📌自定」，且日历快照/导出按 isExperiment 计数与导入都会漏掉）
+        cell.isExperiment = (type === 2);
+        if (type === 2) {
+          cell.experimentProject = (item['experimentProject'] as string) || '';
+        }
         cell.weekList = weekList;
         if (day <= 7 && startSec <= 11) {
           grid[day][startSec].push(cell);
