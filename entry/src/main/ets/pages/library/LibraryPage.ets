@@ -607,6 +607,9 @@ export struct LibraryPage {
             LoadingProgress().width(40).height(40).color(this.accentColor)
             Text('搜索中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          .onClick(() => {
+            this.hideHistory();
+          })
         } else if (this.books.length > 0) {
           // 有数据：显示列表（翻页时列表保留，底部追加 loading）
           List({ space: 4 }) {
@@ -681,12 +684,18 @@ export struct LibraryPage {
               this.hideHistory();
             }
           })
+          .onClick(() => {
+            this.hideHistory();
+          })
         } else {
           Column() {
             Text('📚').fontSize(48)
             Text(this.searchPage > 0 ? '未找到相关图书' : '搜索图书试试吧')
               .fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          .onClick(() => {
+            this.hideHistory();
+          })
         }
       } else {
         if (this.borrowList.length > 0) {
@@ -787,6 +796,9 @@ export struct LibraryPage {
               this.hideHistory();
             }
           })
+          .onClick(() => {
+            this.hideHistory();
+          })
           }.layoutWeight(1)
         } else {
           Column() {
@@ -801,6 +813,9 @@ export struct LibraryPage {
                 .onClick(() => { this.errorMsg = ''; this.loadBorrowList(); })
             }
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          .onClick(() => {
+            this.hideHistory();
+          })
         }
       }
         }
