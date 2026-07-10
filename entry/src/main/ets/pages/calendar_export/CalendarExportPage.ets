@@ -26,6 +26,7 @@ interface SlimCell {
   examDate: string;
   examTimeDesc: string;
   examSeat: string;
+  weekNum: number; // 实验/考试所属周（普通课程为 0，跨多周不填）
 }
 interface ExportStats {
   newCount: number;
@@ -106,6 +107,7 @@ export struct CalendarExportPage {
           } else if (cell.isExperiment) {
             let w = 0;
             for (let i = 0; i < cell.weekList.length; i++) { if (cell.weekList[i]) w++; }
+            if (w === 0 && cell.weekNum > 0) w = 1; // 兜底：weekList 空但 weekNum 有效（如服务器单周实验）
             ec += w;
           } else {
             if (s === cell.startSection) {
@@ -558,8 +560,14 @@ export struct CalendarExportPage {
           const cell: SlimCell = cells[ci];
           if (!cell.isExperiment) { continue; }
           if (cell.startSection !== s) { continue; }
+          // 收集需导出的周（index 形式，0=第1周）。优先 weekList；若为空但 weekNum 有效，则单周兜底。
+          const expWeeks: number[] = [];
           for (let w = 0; w < cell.weekList.length; w++) {
-            if (!cell.weekList[w]) { continue; }
+            if (cell.weekList[w]) expWeeks.push(w);
+          }
+          if (expWeeks.length === 0 && cell.weekNum > 0) expWeeks.push(cell.weekNum);
+          for (let wi = 0; wi < expWeeks.length; wi++) {
+            const w: number = expWeeks[wi];
             const dt: Date = new Date(mon);
             dt.setDate(mon.getDate() + w * 7 + (d - 1));
             const sp: string[] = ST[cell.startSection].split('-');
@@ -723,8 +731,14 @@ export struct CalendarExportPage {
           const cell: SlimCell = cells[ci];
           if (!cell.isExperiment) { continue; }
           if (cell.startSection !== s) { continue; }
+          // 收集需导出的周（index 形式，0=第1周）。优先 weekList；若为空但 weekNum 有效，则单周兜底。
+          const expWeeks: number[] = [];
           for (let w = 0; w < cell.weekList.length; w++) {
-            if (!cell.weekList[w]) { continue; }
+            if (cell.weekList[w]) expWeeks.push(w);
+          }
+          if (expWeeks.length === 0 && cell.weekNum > 0) expWeeks.push(cell.weekNum);
+          for (let wi = 0; wi < expWeeks.length; wi++) {
+            const w: number = expWeeks[wi];
             const dt: Date = new Date(mon);
             dt.setDate(mon.getDate() + w * 7 + (d - 1));
             const sp: string[] = ST[cell.startSection].split('-');

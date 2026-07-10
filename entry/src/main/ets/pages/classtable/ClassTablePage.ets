@@ -652,7 +652,8 @@ export struct ClassTablePage {
             experimentProject: c.experimentProject ?? '',
             examDate: c.examDate ?? '',
             examTimeDesc: c.examTimeDesc ?? '',
-            examSeat: c.examSeat ?? ''
+            examSeat: c.examSeat ?? '',
+            weekNum: 0
           });
         }
         slim[d][s] = slimRow;

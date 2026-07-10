@@ -15,6 +15,7 @@ export interface SlimCell {
   startSection: number; endSection: number; weekList: boolean[];
   isExam: boolean; isExperiment: boolean;
   experimentProject: string; examDate: string; examTimeDesc: string; examSeat: string;
+  weekNum: number; // 实验/考试所属周（普通课程为 0，跨多周不填）
 }
 
 const ST: string[] = ['', '8:30-9:15', '9:20-10:05', '10:25-11:10', '11:15-12:00',
@@ -208,6 +209,17 @@ export class CalendarSyncService {
             const exDate = new Date(c.examDate + 'T00:00:00');
             if (!isNaN(exDate.getTime())) {
               weekNum = Math.floor((exDate.getTime() - semStart.getTime()) / 86400000 / 7) + 1;
+            }
+          } else if (c.isExperiment) {
+            // 实验：优先用生产者填好的 weekNum（服务器单周实验 / 自定义实验首周），
+            // 否则从 weekList 推导首个有课周，确保快照里的 weekNum 不为 0。
+            if ((c.weekNum ?? 0) > 0) {
+              weekNum = c.weekNum;
+            } else {
+              const wl = c.weekList ?? [];
+              for (let i = 0; i < wl.length; i++) {
+                if (wl[i]) { weekNum = i + 1; break; }
+              }
             }
           }
           sc['weekNum'] = weekNum;

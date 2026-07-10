@@ -1257,7 +1257,8 @@ AppStorage.set('loginStatus', 'expired');
             experimentProject: c.experimentProject ?? '',
             examDate: c.examDate ?? '',
             examTimeDesc: c.examTimeDesc ?? '',
-            examSeat: c.seat ?? ''
+            examSeat: c.seat ?? '',
+            weekNum: c.weekNum
           });
         }
         slim[d][s] = slimRow;
@@ -1392,7 +1393,13 @@ AppStorage.set('loginStatus', 'expired');
         cell.startSection = startSec;
         cell.endSection = endSec > startSec ? endSec : startSec;
         cell.isExperiment = true;
-        cell.weekNum = parseInt(item['week']) || 0;
+        const expWeek: number = parseInt(item['week']) || 0;
+        cell.weekNum = expWeek;
+        // 与预览选择器(getNextClasses, 按 weekNum) 和导出计数(calcCounts/impE, 按 weekList) 保持一致：
+        // 服务器实验为单周，同时填充 weekNum 与 weekList[week]=true，两路消费都不会漏。
+        cell.weekList = [];
+        for (let w = 0; w < 26; w++) cell.weekList.push(false);
+        if (expWeek >= 1 && expWeek <= 25) cell.weekList[expWeek] = true;
         if (weekday <= 7 && startSec <= 11) {
           grid[weekday][startSec].push(cell);
         }
@@ -1424,7 +1431,11 @@ AppStorage.set('loginStatus', 'expired');
         cell.startSection = startSec;
         cell.endSection = endSec > startSec ? endSec : startSec;
         cell.isExperiment = true;
-        cell.weekNum = parseInt(item['week']) || 0;
+        const phyWeek: number = parseInt(item['week']) || 0;
+        cell.weekNum = phyWeek;
+        cell.weekList = [];
+        for (let w = 0; w < 26; w++) cell.weekList.push(false);
+        if (phyWeek >= 1 && phyWeek <= 25) cell.weekList[phyWeek] = true;
         if (weekday <= 7 && startSec <= 11) {
           grid[weekday][startSec].push(cell);
         }
@@ -1516,6 +1527,14 @@ AppStorage.set('loginStatus', 'expired');
           cell.experimentProject = (item['experimentProject'] as string) || '';
         }
         cell.weekList = weekList;
+        // 实验需要 weekNum 兜底：部分消费方（预览选择器 getNextClasses）按 weekNum 匹配；
+        // 取 weekList 中首个有课周作代表（多周实验以首周代表，getNextClasses 已改为同时匹配 weekList）。
+        // 普通课程 weekNum 保持 0（与 ClassTablePage.loadCustomCourses 一致）。
+        if (type === 2) {
+          for (let w = 1; w < weekList.length; w++) {
+            if (weekList[w]) { cell.weekNum = w; break; }
+          }
+        }
         if (day <= 7 && startSec <= 11) {
           grid[day][startSec].push(cell);
         }
@@ -1606,6 +1625,8 @@ AppStorage.set('loginStatus', 'expired');
             for (let i = 0; i < c.weekList.length; i++) {
               if (c.weekList[i] && i + 1 > dataMaxWeek) dataMaxWeek = i + 1;
             }
+            // 实验兜底：weekNum 单独参与最大周计算（防止 weekList 缺漏时跨周显示被截断）
+            if (c.isExperiment && c.weekNum > dataMaxWeek) dataMaxWeek = c.weekNum;
           }
         }
       }
@@ -1641,7 +1662,9 @@ AppStorage.set('loginStatus', 'expired');
           // 今天：跳过已全部结束的课程
           if (offset === 0 && cell.endSection < currentSection) continue;
           if (cell.isExperiment || cell.isExam) {
-            if (cell.weekNum === searchWeek) {
+            // 实验/考试按 weekNum 匹配；同时兼容 weekList（多周自定义实验、服务器单周实验均命中）
+            if (cell.weekNum === searchWeek ||
+                (cell.weekList.length > searchWeek && cell.weekList[searchWeek])) {
               cell.day = searchDay;
               candidates.push(cell);
             }
