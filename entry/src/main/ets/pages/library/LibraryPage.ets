@@ -496,25 +496,23 @@ export struct LibraryPage {
     this.searchBooks();
   }
 
+  // 覆盖式搜索历史浮层：半透明遮罩 + 搜索框下方的卡片，盖在结果之上
   @Builder historyPanel() {
-    Column() {
-      Row() {
-        Text('搜索历史').fontSize(14).fontColor(ThemeColors.textSecondary)
-        Blank()
-        if (this.searchHistory.length > 0) {
-          Text('清空')
-            .fontSize(12)
-            .fontColor(this.accentColor)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .onClick(() => { this.clearSearchHistory(); })
-        }
-      }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
+    Stack({ alignContent: Alignment.Top }) {
+      // 历史卡片（下移贴到搜索框下方）
+      Column() {
+        Row() {
+          Text('搜索历史').fontSize(14).fontColor(ThemeColors.textSecondary)
+          Blank()
+          if (this.searchHistory.length > 0) {
+            Text('清空')
+              .fontSize(12)
+              .fontColor(this.accentColor)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .onClick(() => { this.clearSearchHistory(); })
+          }
+        }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 8 })
 
-      if (this.searchHistory.length === 0) {
-        Text('暂无搜索历史')
-          .fontSize(13).fontColor('#BBBBBB')
-          .width('100%').padding({ left: 16, top: 16 })
-      } else {
         Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignItems: ItemAlign.Center }) {
           ForEach(this.searchHistory, (item: SearchHistoryItem) => {
             Row({ space: 4 }) {
@@ -533,9 +531,24 @@ export struct LibraryPage {
             .margin({ right: 8, bottom: 8 })
             .onClick(() => { this.applyHistory(item); })
           }, (item: SearchHistoryItem, idx?: number) => `hist_${idx}_${item.w}`)
-        }.width('100%').padding({ left: 16, right: 8, top: 4, bottom: 8 })
+        }.width('100%').padding({ left: 16, right: 8, top: 4, bottom: 12 })
       }
-    }.width('100%').layoutWeight(1).alignItems(HorizontalAlign.Start)
+      .width('100%')
+      .margin({ top: 52 + this.statusBarHeight + 56 })
+      .backgroundColor(ThemeColors.bgCard)
+      .borderRadius(12)
+      .border({ width: 1, color: '#EEEEEE' })
+      .zIndex(1)
+
+      // 半透明遮罩：点击空白处收起历史
+      Column()
+        .width('100%').layoutWeight(1)
+        .backgroundColor('#000000').opacity(0.06)
+        .onClick(() => { this.searchInputController.stopEditing(); this.searchFocused = false; })
+    }
+    .width('100%').height('100%')
+    .position({ x: 0, y: 0 })
+    .zIndex(100)
   }
 
   build() {
@@ -643,8 +656,6 @@ export struct LibraryPage {
               this.searchBooks(this.searchPage + 1);
             }
           })
-        } else if (this.searchFocused && this.searchWord.trim() === '' && this.searchHistory.length > 0) {
-          this.historyPanel()
         } else {
           Column() {
             Text('📚').fontSize(48)
@@ -762,6 +773,10 @@ export struct LibraryPage {
       }
         }
         .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+
+        if (this.searchFocused && this.searchHistory.length > 0) {
+          this.historyPanel()
+        }
 
         if (this.selectedBook !== null) {
           // 背景遮罩
