@@ -54,7 +54,7 @@ interface DailyItem {
 const TAG: string = 'MainPage';
 const DOMAIN: number = 0xFF00;
 // [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
-const DIAG2: boolean = true;
+const DIAG2: boolean = false;
 
 interface ElecData {
   remain?: string;
@@ -2940,7 +2940,7 @@ AppStorage.set('loginStatus', 'not_logged_in');
             // 时间轴节点 + 连线
             Column() {
               Circle().width(10).height(10)
-                .fill(cell.isExam ? '#E91E63' : (cell.isExperiment ? '#FF9800' : (cell.isCustom ? '#66BB6A' : '#2979FF')))
+                .fill(cell.isExam ? '#E91E63' : (cell.isExperiment ? '#2979FF' : (cell.isCustom ? '#66BB6A' : '#2979FF')))
                 .margin({ top: 4 })
               if (index < this.previewCells.length - 1) {
                 Column().width(2).layoutWeight(1).backgroundColor('#E0E0E0').margin({ top: 2 })
@@ -2956,7 +2956,7 @@ AppStorage.set('loginStatus', 'not_logged_in');
                     .fontSize(12).fontColor('#E91E63')
                 } else if (cell.isExperiment) {
                   Text('🧪实验')
-                    .fontSize(12).fontColor(ThemeColors.warning)
+                    .fontSize(12).fontColor('#2979FF')
                 } else if (cell.isCustom) {
                   Text('📌自定')
                     .fontSize(12).fontColor('#66BB6A')

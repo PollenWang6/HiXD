@@ -23,7 +23,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 const CT_TAG: string = 'ClassTablePage';
 const CT_DOMAIN: number = 0xFF00;
 // [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
-const CT_DIAG2: boolean = true;
+const CT_DIAG2: boolean = false;
 
 // 课程卡片背景色（降低饱和度，白色文字）
 const CLASS_COLORS: string[] = ['#559BD6', '#AA68B8', '#E87F5A', '#6EAE6E', '#D86687', '#3EA8BC', '#D6B23E', '#82AD5A', '#8E6EBB', '#3EA6D6'];
@@ -1150,7 +1150,9 @@ export struct ClassTablePage {
                         } else if (!cell.isExam) {
                           this.DetailRow('🕐 节次', '第' + cell.startSection + '-' + cell.endSection + '节')
                         }
-                        this.DetailRow('📆 周次', cell.weekDesc || '未设置')
+                        if (!cell.isExperiment) {
+                          this.DetailRow('📆 周次', cell.weekDesc || '未设置')
+                        }
                         if (cell.isExam) {
                           this.DetailRow('📅 日期', cell.examDate)
                           this.DetailRow('⏰ 时间', cell.examTimeDesc)
@@ -1744,16 +1746,13 @@ export struct ClassTablePage {
     }
   }
 
-  // 统一颜色获取方法：考试→红色系，实验→橙色系，课程→蓝色系
+  // 统一颜色获取方法：考试→红色系，实验/课程→蓝色系（实验与课程配色一致）
   private getCellColor(cell: ClassCell): string {
     if (cell.isExam) {
       const arr: string[] = ThemeColors.isDark ? EXAM_COLORS_DK : EXAM_COLORS;
       return arr[cell.colorIndex % arr.length];
     }
-    if (cell.isExperiment) {
-      const arr: string[] = ThemeColors.isDark ? EXP_COLORS_DK : EXP_COLORS;
-      return arr[cell.colorIndex % arr.length];
-    }
+    // 实验与普通课程使用同一套蓝色系配色
     const arr: string[] = ThemeColors.isDark ? CLASS_COLORS_DK : CLASS_COLORS;
     return arr[cell.colorIndex % arr.length];
   }

@@ -12,7 +12,7 @@ const DOMAIN: number = 0xFF00;
 // [DIAG] 诊断日志开关：排查学校课表重复课导致的日历重复/删不掉问题（排查完可关）
 const DIAG: boolean = false;
 // [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
-const DIAG2: boolean = true;
+const DIAG2: boolean = false;
 
 interface SlimCell {
   name: string;
