@@ -95,6 +95,7 @@ class PreviewCell {
   experimentProject: string = ''; // 实验项目名（日历同步用）
   weekNum: number = 0;    // 哪一周
   weekList: boolean[] = []; // 普通课程的周次列表
+  cellKey: string = '';   // 内容指纹 key，供 ForEach 稳定识别、内容变化时强制重建节点
 }
 
 @Entry
@@ -1346,11 +1347,14 @@ AppStorage.set('loginStatus', 'expired');
       this.previewLoaded = true;
       if (DIAG2) {
         let expN = 0, examN = 0, cusN = 0, couN = 0;
+        let keyList: string = '';
         for (const c of this.previewCells) {
           if (c.isExam) examN++; else if (c.isExperiment) expN++; else if (c.isCustom) cusN++; else couN++;
+          if (keyList.length > 0) keyList += ', ';
+          keyList += ('[' + c.cellKey + ']');
         }
         hilog.info(DOMAIN, TAG, '[DIAG2] loadClassPreview 完成 预览条数=' + this.previewCells.length
-          + ' (课程' + couN + ' 实验' + expN + ' 考试' + examN + ' 自定义' + cusN + ')');
+          + ' (课程' + couN + ' 实验' + expN + ' 考试' + examN + ' 自定义' + cusN + ') keys=' + keyList);
       }
     } catch (e) {
       this.previewLoaded = true;
@@ -1725,6 +1729,15 @@ AppStorage.set('loginStatus', 'expired');
       return aMin - bMin;
     });
 
+    // 为每个候选注入稳定且内容感知的 key：ForEach 用 index 作 key 时会复用旧节点、
+    // 不更新内部内容（导致编辑后课程预告 UI 不刷新，须重进 App 才刷新）。
+    // 改用内容指纹 key，类型/周次/名字等发生变化时 key 改变 → 旧节点销毁、新节点重建 → 必然重渲染。
+    for (let i = 0; i < candidates.length; i++) {
+      const c: PreviewCell = candidates[i];
+      const typeFlag: string = c.isExam ? 'E' : (c.isExperiment ? 'X' : (c.isCustom ? 'C' : 'N'));
+      c.cellKey = c.name + '#' + c.day + '#' + c.startSection + '#' + c.endSection + '#'
+        + typeFlag + '#' + c.weekNum + '#' + c.classroom + '#' + c.teacher;
+    }
     return candidates.slice(0, 2);
   }
 
@@ -2988,7 +3001,7 @@ AppStorage.set('loginStatus', 'not_logged_in');
           .height(64)
           .padding({ left: 16, right: 16 })
           .alignItems(VerticalAlign.Center)
-        }, (cell: PreviewCell, index: number) => index.toString())
+        }, (cell: PreviewCell) => cell.cellKey)
       }
       .width('100%')
       .backgroundColor(ThemeColors.bgCard)
