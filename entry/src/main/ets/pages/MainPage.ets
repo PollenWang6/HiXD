@@ -606,7 +606,14 @@ AppStorage.set('loginStatus', 'offline');
       this.lastForegroundCheck = now;
       this.refreshSessionIfNeeded();
     }
-    this.tryRefreshPreview();
+    // [FIX] 页面重新可见（含从课表页 NavDestination 返回）时无条件重载预览。
+    // 原先仅 tryRefreshPreview（有 ct_updated 变化守卫），编辑后唯一一次重赋发生在主页不可见时，
+    // 返回后 onPageShow 因 ct_updated 已相等而不重载 → UI 停留旧帧，须重进 App 才刷新。
+    // 这里改为可见即重载，确保 previewCells 在可见态重赋、触发重渲染。
+    if (DIAG2) {
+      hilog.info(DOMAIN, TAG, '[DIAG2] onPageShow → loadClassPreview(可见重载)');
+    }
+    this.loadClassPreview();
     // 检查裁剪页面返回的图片
     const croppedPath: string = AppStorage.get<string>('cropped_bg_path') ?? '';
     if (croppedPath.length > 0) {
@@ -1337,6 +1344,14 @@ AppStorage.set('loginStatus', 'expired');
       // 同步更新日历快照（供 CalendarSyncService.autoSync 读取，实现登录后自动同步）
       CalendarSyncService.saveClassGridSnapshot(this.toSlimGrid(grid), 'MainPage.loadClassPreview');
       this.previewLoaded = true;
+      if (DIAG2) {
+        let expN = 0, examN = 0, cusN = 0, couN = 0;
+        for (const c of this.previewCells) {
+          if (c.isExam) examN++; else if (c.isExperiment) expN++; else if (c.isCustom) cusN++; else couN++;
+        }
+        hilog.info(DOMAIN, TAG, '[DIAG2] loadClassPreview 完成 预览条数=' + this.previewCells.length
+          + ' (课程' + couN + ' 实验' + expN + ' 考试' + examN + ' 自定义' + cusN + ')');
+      }
     } catch (e) {
       this.previewLoaded = true;
     }
@@ -2981,7 +2996,11 @@ AppStorage.set('loginStatus', 'not_logged_in');
       .margin({ left: 16, right: 16, top: 12 })
       .shadow({ radius: 4, color: '#1A000000', offsetX: 0, offsetY: 2 })
       .onClick(() => { this.pageInfo.clear();
-        this.pageInfo.pushPath({ name: 'ClassTablePage' }); })
+        this.pageInfo.pushPath({ name: 'ClassTablePage', onPop: () => {
+          // 课表页弹出、主页已可见：同步重载预览（不可用 setTimeout，@State 赋值在定时器中不触发重渲染）
+          if (DIAG2) { hilog.info(DOMAIN, TAG, '[DIAG2] ClassTablePage.onPop → loadClassPreview(可见重载)'); }
+          this.loadClassPreview();
+        } }); })
     } else if (this.previewLoaded && this.previewCells.length === 0) {
       // 没课
       Column() {
@@ -3009,7 +3028,11 @@ AppStorage.set('loginStatus', 'not_logged_in');
       .margin({ left: 16, right: 16, top: 12 })
       .shadow({ radius: 4, color: '#1A000000', offsetX: 0, offsetY: 2 })
       .onClick(() => { this.pageInfo.clear();
-        this.pageInfo.pushPath({ name: 'ClassTablePage' }); })
+        this.pageInfo.pushPath({ name: 'ClassTablePage', onPop: () => {
+          // 课表页弹出、主页已可见：同步重载预览（不可用 setTimeout，@State 赋值在定时器中不触发重渲染）
+          if (DIAG2) { hilog.info(DOMAIN, TAG, '[DIAG2] ClassTablePage.onPop → loadClassPreview(可见重载)'); }
+          this.loadClassPreview();
+        } }); })
     }
   }
 
