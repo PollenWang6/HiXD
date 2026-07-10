@@ -42,6 +42,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { VersionService, VersionInfo } from '../services/VersionService';
 import { CalendarSyncService, SlimCell } from '../services/CalendarSyncService';
 import networkUtil from '../utils/NetworkUtil';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 // 每日用电数据模型
 interface DailyItem {
@@ -51,6 +52,9 @@ interface DailyItem {
 }
 
 const TAG: string = 'MainPage';
+const DOMAIN: number = 0xFF00;
+// [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
+const DIAG2: boolean = true;
 
 interface ElecData {
   remain?: string;
@@ -617,6 +621,9 @@ AppStorage.set('loginStatus', 'offline');
   private tryRefreshPreview(): void {
     const current: string = AppStorage.get('ct_updated') as string || '';
     if (current !== this._lastCtUpdated && current.length > 0) {
+      if (DIAG2) {
+        hilog.info(DOMAIN, TAG, '[DIAG2] tryRefreshPreview 触发重载 ct_updated: ' + this._lastCtUpdated + ' -> ' + current);
+      }
       this._lastCtUpdated = current;
       this.loadClassPreview();
     }
@@ -1328,7 +1335,7 @@ AppStorage.set('loginStatus', 'expired');
       // 提取接下来2节课
       this.previewCells = this.getNextClasses(grid);
       // 同步更新日历快照（供 CalendarSyncService.autoSync 读取，实现登录后自动同步）
-      CalendarSyncService.saveClassGridSnapshot(this.toSlimGrid(grid));
+      CalendarSyncService.saveClassGridSnapshot(this.toSlimGrid(grid), 'MainPage.loadClassPreview');
       this.previewLoaded = true;
     } catch (e) {
       this.previewLoaded = true;
@@ -1460,6 +1467,16 @@ AppStorage.set('loginStatus', 'expired');
       const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
       const text: string = decoder.decodeToString(new Uint8Array(buf));
       const items: Object[] = JSON.parse(text) as Object[];
+      // [DIAG2] 统计自定义列表里各类型数量（type 0=课程 1=考试 2=实验），确认编辑 exp->course 是否真的落盘为 type=0
+      if (DIAG2) {
+        let t0: number = 0, t1: number = 0, t2: number = 0;
+        for (let i = 0; i < items.length; i++) {
+          const it: Record<string, Object> = items[i] as Record<string, Object>;
+          const tp: number = (it['type'] as number) || 0;
+          if (tp === 1) t1++; else if (tp === 2) t2++; else t0++;
+        }
+        hilog.info(DOMAIN, TAG, '[DIAG2] mergeCustomPreview 读自定义列表 总数=' + items.length + ' 课程(0)=' + t0 + ' 考试(1)=' + t1 + ' 实验(2)=' + t2);
+      }
       for (let i = 0; i < items.length; i++) {
         const item: Record<string, Object> = items[i] as Record<string, Object>;
         const type: number = (item['type'] as number) || 0;

@@ -9,6 +9,8 @@ const TAG: string = 'CalendarSyncService';
 const DOMAIN: number = 0xFF00;
 // [DIAG] 诊断日志开关：排查学校课表重复课导致的日历重复/删不掉问题（排查完可关）
 const DIAG: boolean = true;
+// [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
+const DIAG2: boolean = true;
 
 export interface SlimCell {
   name: string; teacher: string; classroom: string; day: number;
@@ -180,7 +182,7 @@ export class CalendarSyncService {
 
   // 把合并网格写入 class_grid_snapshot（供 autoSync / 桌面卡片读取）
   // 抽自 ClassTablePage，使首页刷新/登录后也能统一更新快照
-  static saveClassGridSnapshot(grid: SlimCell[][][]): void {
+  static saveClassGridSnapshot(grid: SlimCell[][][], source: string = '?'): void {
     const slim: object[][] = [];
     const semStart: Date = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
     for (let d = 0; d <= DC; d++) {
@@ -227,6 +229,30 @@ export class CalendarSyncService {
         }
         slim[d][s] = slimRow;
       }
+    }
+    // [DIAG2] 统计本次写入快照的实验/考试/课程数量，识别是哪个写入者、写了多少实验（排查 0/4 抖动）
+    if (DIAG2) {
+      let expN: number = 0, examN: number = 0, courseN: number = 0;
+      let expSample: string = '';
+      for (let d = 0; d <= DC; d++) {
+        for (let s = 0; s <= SC; s++) {
+          const cells: SlimCell[] = grid[d]?.[s] ?? [];
+          for (let i = 0; i < cells.length; i++) {
+            const c: SlimCell = cells[i];
+            if (c.isExam) { examN++; }
+            else if (c.isExperiment) {
+              expN++;
+              let wlCount: number = 0;
+              const wl = c.weekList ?? [];
+              for (let k = 0; k < wl.length; k++) { if (wl[k]) wlCount++; }
+              if (expSample.length < 200) {
+                expSample += ('[' + c.name + ' d=' + d + ' s=' + s + ' wn=' + (c.weekNum ?? 0) + ' wlN=' + wlCount + ']');
+              }
+            } else { courseN++; }
+          }
+        }
+      }
+      hilog.info(DOMAIN, TAG, '[DIAG2] 写快照 source=' + source + ' 实验=' + expN + ' 考试=' + examN + ' 课程=' + courseN + ' 实验明细=' + expSample);
     }
     const json: string = JSON.stringify(slim);
     PreferenceUtil.putString('class_grid_snapshot', json);

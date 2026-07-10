@@ -11,6 +11,8 @@ const TAG: string = 'CalendarExportPage';
 const DOMAIN: number = 0xFF00;
 // [DIAG] 诊断日志开关：排查学校课表重复课导致的日历重复/删不掉问题（排查完可关）
 const DIAG: boolean = false;
+// [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
+const DIAG2: boolean = true;
 
 interface SlimCell {
   name: string;
@@ -122,6 +124,25 @@ export struct CalendarExportPage {
     this.cCount = cc;
     this.eCount = ec;
     this.xCount = xc;
+    // [DIAG2] 打印本次导出页读到的计数 + 快照里的实验明细（对照写入日志判断是哪个 source 覆盖）
+    if (DIAG2) {
+      let expDetail: string = '';
+      for (let d = 1; d <= DC; d++) {
+        for (let s = 0; s <= SC; s++) {
+          const cells: SlimCell[] = this.gridCells[d]?.[s] ?? [];
+          for (const cell of cells) {
+            if (cell.isExperiment) {
+              let wlN: number = 0;
+              for (let i = 0; i < cell.weekList.length; i++) { if (cell.weekList[i]) wlN++; }
+              if (expDetail.length < 300) {
+                expDetail += ('[' + cell.name + ' d=' + d + ' s=' + s + ' wn=' + (cell.weekNum ?? 0) + ' wlN=' + wlN + ']');
+              }
+            }
+          }
+        }
+      }
+      hilog.info(DOMAIN, TAG, '[DIAG2] calcCounts 读快照 hasData=' + this.hasData + ' 课程=' + cc + ' 实验=' + ec + ' 考试=' + xc + ' 实验明细=' + expDetail);
+    }
   }
 
   takeSnapshot(): void {
