@@ -103,6 +103,8 @@ export struct LibraryPage {
   @State bookMaskOpacity: number = 0;
   @State bookSheetOffset: number = 100;
   @State searchHistory: SearchHistoryItem[] = [];
+  @State searchFocused: boolean = false;
+  private searchInputController: TextInputController = new TextInputController();
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   private http = HttpUtil.getInstance();
@@ -482,6 +484,15 @@ export struct LibraryPage {
   private applyHistory(item: SearchHistoryItem): void {
     this.searchField = item.f;
     this.searchWord = item.w;
+    this.searchInputController.stopEditing();
+    this.searchFocused = false;
+    this.searchBooks();
+  }
+
+  // 统一搜索入口：收起键盘与历史面板后执行搜索
+  private doSearch(): void {
+    this.searchInputController.stopEditing();
+    this.searchFocused = false;
     this.searchBooks();
   }
 
@@ -538,12 +549,14 @@ export struct LibraryPage {
               .value(this.fieldLabel())
               .onSelect((idx: number) => { this.searchField = this.indexToField(idx); })
               .width(100)
-            TextInput({ placeholder: '搜索图书...', text: this.searchWord })
+            TextInput({ placeholder: '搜索图书...', text: this.searchWord, controller: this.searchInputController })
           .layoutWeight(1).height(40).borderRadius(20).backgroundColor(ThemeColors.bgInput).padding({ left: 16, right: 16 })
           .onChange((v: string) => { this.searchWord = v; })
-          .onSubmit(() => { this.searchBooks(); })
+          .onSubmit(() => { this.doSearch(); })
+          .onFocus(() => { this.searchFocused = true; })
+          .onBlur(() => { this.searchFocused = false; })
         Button('搜索').height(40).borderRadius(20).backgroundColor('#8E24AA').fontColor('#FFFFFF')
-          .onClick(() => { this.searchBooks(); })
+          .onClick(() => { this.doSearch(); })
       }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
 
       Row() {
@@ -630,7 +643,7 @@ export struct LibraryPage {
               this.searchBooks(this.searchPage + 1);
             }
           })
-        } else if (this.searchWord.trim() === '') {
+        } else if (this.searchFocused && this.searchWord.trim() === '' && this.searchHistory.length > 0) {
           this.historyPanel()
         } else {
           Column() {
