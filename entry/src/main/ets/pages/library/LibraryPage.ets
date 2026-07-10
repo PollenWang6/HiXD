@@ -534,6 +534,7 @@ export struct LibraryPage {
     .border({ width: 1, color: ThemeColors.border })
     .shadow({ radius: 18, color: '#0000002E', offsetY: 8 })
     .zIndex(100)
+    .transition({ type: TransitionType.Insert | TransitionType.Delete, opacity: 0, scale: { x: 0.96, y: 0.96 } })
   }
 
   build() {
@@ -644,6 +645,13 @@ export struct LibraryPage {
               this.searchBooks(this.searchPage + 1);
             }
           })
+          .onScroll(() => {
+            // 滚动结果列表时收起搜索框键盘与历史浮层
+            if (this.searchFocused) {
+              this.searchInputController.stopEditing();
+              this.searchFocused = false;
+            }
+          })
         } else {
           Column() {
             Text('📚').fontSize(48)
@@ -743,6 +751,13 @@ export struct LibraryPage {
                 .margin({ left: 14, right: 14, bottom: 8 })
             }, (borrow: BorrowItem, idx?: number) => `borrow_${idx}_${borrow.imageUrl.length > 0 ? '1' : '0'}`)
           }.layoutWeight(1)
+          .onScroll(() => {
+            // 滚动借阅列表时同样收起搜索框键盘与历史浮层
+            if (this.searchFocused) {
+              this.searchInputController.stopEditing();
+              this.searchFocused = false;
+            }
+          })
           }.layoutWeight(1)
         } else {
           Column() {
