@@ -245,8 +245,15 @@ export class CalendarSyncService {
               let wlCount: number = 0;
               const wl = c.weekList ?? [];
               for (let k = 0; k < wl.length; k++) { if (wl[k]) wlCount++; }
+              // 打印“序列化后”的 weekNum（与下方推导逻辑一致），而非源 cell.weekNum，避免误判
+              let serWn: number = 0;
+              if ((c.weekNum ?? 0) > 0) {
+                serWn = c.weekNum;
+              } else {
+                for (let k = 0; k < wl.length; k++) { if (wl[k]) { serWn = k + 1; break; } }
+              }
               if (expSample.length < 200) {
-                expSample += ('[' + c.name + ' d=' + d + ' s=' + s + ' wn=' + (c.weekNum ?? 0) + ' wlN=' + wlCount + ']');
+                expSample += ('[' + c.name + ' d=' + d + ' s=' + s + ' wn=' + serWn + ' wlN=' + wlCount + ']');
               }
             } else { courseN++; }
           }

@@ -9,7 +9,7 @@ import { UnscheduledCourse, ClassChange } from '../../services/Models';
 import { ExamService } from '../../services/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { HttpUtil } from '../../utils/HttpUtil';
-import { CalendarSyncService, SlimCell } from '../../services/CalendarSyncService';
+import { CalendarSyncService } from '../../services/CalendarSyncService';
 import { WeekChip } from '../../components/WeekChip';
 
 import { fileIo, fileUri } from '@kit.CoreFileKit';
@@ -636,36 +636,17 @@ export struct ClassTablePage {
     this.saveClassGridSnapshot();
   }
 
+  // [FIX] 不再由课表页写入 class_grid_snapshot。
+  // 该快照现由 MainPage.loadClassPreview 作为【唯一权威写入者】：它合并学校课表/实验/自定义，
+  // 周次 weekNum 正确。课表页此前是“第二写入者”，且在异步缓存未就绪时会写出 实验=0 或 wn=0 的
+  // 残缺快照，最后写入者覆盖 → 导入日历页实验数在 0/4 间抖动（日志实锤：ClassTablePage 写出
+  // 实验=0 后立刻被导出页读到）。课表页编辑后已通过 ct_updated 通知 MainPage 轮询重写快照，
+  // 无需本页再写。保留 7 处调用点不动，仅此处不再落盘，避免误覆盖。
   private saveClassGridSnapshot(): void {
-    const slim: SlimCell[][][] = [];
-    for (let d = 0; d <= DAY_COUNT; d++) {
-      slim[d] = [];
-      for (let s = 0; s <= SECTION_COUNT; s++) {
-        const cells: ClassCell[] = this.classGrid[d]?.[s] ?? [];
-        const slimRow: SlimCell[] = [];
-        for (let i = 0; i < cells.length; i++) {
-          const c: ClassCell = cells[i];
-          slimRow.push({
-            name: c.name,
-            teacher: c.teacher ?? '',
-            classroom: c.classroom ?? '',
-            day: c.day,
-            startSection: c.startSection,
-            endSection: c.endSection,
-            weekList: c.weekList,
-            isExam: c.isExam,
-            isExperiment: c.isExperiment,
-            experimentProject: c.experimentProject ?? '',
-            examDate: c.examDate ?? '',
-            examTimeDesc: c.examTimeDesc ?? '',
-            examSeat: c.examSeat ?? '',
-            weekNum: 0
-          });
-        }
-        slim[d][s] = slimRow;
-      }
+    if (CT_DIAG2) {
+      hilog.info(CT_DOMAIN, CT_TAG,
+        '[DIAG2] ClassTablePage.saveClassGridSnapshot 已禁用 → 快照改由 MainPage 唯一写入(避免 0/4 抖动)');
     }
-    CalendarSyncService.saveClassGridSnapshot(slim, 'ClassTablePage.saveClassGridSnapshot');
   }
 
   // 获取真实日历周次（不受用户滑动切换影响）
