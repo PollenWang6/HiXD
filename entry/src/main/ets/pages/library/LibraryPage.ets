@@ -610,6 +610,9 @@ export struct LibraryPage {
                 .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
                 .margin({ left: 14, right: 14, bottom: 8 })
                 .onClick(() => {
+                  // 点书先强制收起搜索框键盘与历史浮层（书籍项不可获焦，不会触发 onBlur）
+                  this.searchInputController.stopEditing();
+                  this.searchFocused = false;
                   this.selectedBook = book;
                   animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
                     this.bookMaskOpacity = 1;
