@@ -71,14 +71,17 @@
 
 ### Tier 2 — 视觉/适配增强，低风险锦上添花（候选 backlog，非本期承诺）
 
-#### [~] 4. `systemMaterial` 系统材质 + 组件级沉浸光感（Toast / 菜单已落地，卡片待用户挑选）
+#### [x] 4. `systemMaterial` 系统材质 + 组件级沉浸光感（Toast / 菜单 / 卡片均落地）
 - **价值**：★★　**代价**：小~中
 - 收益：贴合现有 `ThemeColors` 主题系统，将卡片/弹窗/菜单/Toast 换成系统材质，获得 HarmonyOS 7 毛玻璃沉浸质感，统一视觉风格。
 - **已落地**：
   - （提交 `b9bf9af`，分支 `feature/api26-material`）**Toast 系统材质**：`MaterialKit.toastMaterial()` + `ToastUtil` 收口 6 页面共 22 处。
   - （本次提交，同分支）**菜单沉浸材质**：`MaterialKit.menuOptions()` 统一返回 `systemMaterial`（API26）/ 回退 `BlurStyle.COMPONENT_THICK`（老设备），已接入 **4 处 `bindMenu`**——课表右上角四点菜单、门户 WebView 菜单、成绩页「学期」「类型」两个筛选菜单。
   - **关键更正**：`CommonMethod.systemMaterial(material)` 是 **所有组件的通用方法**（`@since 26.0.0`，`@form` 桌面卡片亦可用），故"卡片毛玻璃"可用此 API 实现；此前"通用容器不支持"的判断有误，已纠正。
-- **待用户挑选（卡片清单见下「卡片清单」）**：工程内大量圆角卡片（`bgCard`+`shadow`），是否铺 `systemMaterial` 由用户决定；整页背景（无圆角）不建议做。
+- **最终落点（2026-07-10 用户验收）**：
+  - 菜单 4 处 `bindMenu`（`MaterialKit.menuOptions()`）+ Toast 22 处（`ToastUtil` + `MaterialKit.toastMaterial()`）的组件级 `.systemMaterial()` 保留，并经 `module.json5` 补 `ohos.arkui.UIMaterial.state: enable` 总开关后**真正生效**（此前缺该开关等于没加）。
+  - **A 类菜单行（MenuItemBuilder）、B 类弹窗体（dialogMaterial）经用户真机/模拟器实测后均否掉**（视觉不佳），已全撤、未保留。
+  - **桌面卡片改走官方接口**：4 张卡片（课程预告 2x2/4x2、考试倒计时 2x2/4x2）撤掉组件级 `.systemMaterial()`，改在 `form_config.json` 各卡加 `"enableBlurBackground": true`（华为给第三方桌面卡片的官方模糊背板，智慧生活同款、旗舰机生效）。`WidgetMaterial.ets` 已删。
 - ⚠️ `uiMaterial` 为 `@since 26.0.0` 静态导入，老设备导入崩溃风险待真机/老设备验证（守卫确保构造不被调用）。
 
 ##### 卡片清单（`systemMaterial` 候选挂载点，按类别归类）
@@ -180,16 +183,15 @@
 - 本文件为计划文档，不随发版强制提交；待 `feature/api26` 分支实际开工后，可将已勾选项移入对应 PR 描述。
 - 参考来源：华为开发者联盟文档中心 · 26.0.0 元服务版本说明 / OS 平台新增和增强特性 / 版本号格式调整说明；HarmonyOS SDK 26 发布说明（HDC 2026）。
 
-## 6. 发版加固：显式锁定 SDK 版本（可选，演示后做）
-- **现状**：`app.json5` 无 `apiVersion` 块、`build-profile.json5` 无 `targetSdkVersion` → 编译目标由本机 `local.properties` 的 `hwsdk.dir` 隐式决定（当前机器指向 SDK 26.0.0，故实际以 API 26 构建）。
-- **风险**：换机器/重装 SDK 若指向低版本，可能以低 API 编译，行为与演示不一致，且 `openNotificationSettingsWithResult`(@since 13) 虽向下兼容，但 26-only 特性会编译失败。
-- **加固**：在 `AppScope/app.json5` 的 `app` 下补：
+## 6. 发版加固：显式锁定 SDK 版本（✅ 已完成，2026-07-10）
+- **现状（改前）**：`app.json5` 无 `apiVersion` 块、`build-profile.json5` 无 `targetSdkVersion` → 编译目标由本机 `local.properties` 的 `hwsdk.dir` 隐式决定（当前机器指向 SDK 26.0.0，故实际以 API 26 构建）。
+- **风险**：换机器/重装 SDK 若指向低版本，可能以低 API 编译，行为与演示不一致，且 26-only 特性会编译失败。
+- **加固（已落地）**：在 `AppScope/app.json5` 的 `app` 对象下**平铺**三个字段（⚠️ 不是嵌套 `apiVersion` 块，也不是 `build-profile.json5` 的 `compatibleSdkVersion`/`targetSdkVersion`/`runtimeOS` 写法）：
   ```json5
-  "apiVersion": {
-    "compatibleSdkVersion": 22,
-    "targetSdkVersion": 26,
-    "runtimeOS": "HarmonyOS"
-  }
+  "minAPIVersion": 22,
+  "targetAPIVersion": 26,
+  "apiReleaseType": "Beta1"
   ```
-  （数值以实际 SDK 26 规范为准，改后须 `assembleHap` 验证 + 演示机复测。）
-- 优先级：低（演示不阻塞），列为下个迭代的发版加固项。
+  - **踩坑记录（重要）**：初版误写成嵌套 `"apiVersion": { "compatible": 22, "target": 26, "releaseType": "Beta1" }` → hvigor `Schema validate failed`（报错直接列出合法属性名 `minAPIVersion`/`targetAPIVersion`/`generateBuildHash`/`buildVersion`，且 `apiVersion` 根本不在枚举内）。真相：本 SDK(26) 的 `toolchains/modulecheck/app.json` schema 中这三个字段是 `app` 的**平铺直接子属性**（integer / integer / 字符串，apiReleaseType 须匹配 `^(Canary[1-9]\d*)|(Beta[1-9]\d*)|(Release[1-9]\d*)$`，"Beta1" 合法）。`configSchema_rich.json` 那份是另一套（含旧 `compatible`/`target` 键名），**不作为 hvigor 构建校验依据**，不可信。
+  - 改后 `assembleHap` 的 `PreBuild`/`CreateBuildProfile`/`CompileArkTS` 全部 Finished（CompileArkTS 19.7s 通过）。`PackageHap` 的 GBK 编码崩溃为环境坑，与配置无关（UTF-8 手动打包已验证可绕过）。
+- 优先级：低（演示不阻塞），现为已闭环项。
