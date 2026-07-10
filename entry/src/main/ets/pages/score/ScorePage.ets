@@ -1,4 +1,5 @@
 ﻿import { AccentColors } from '../../utils/AccentColors';
+import { menuOptions } from '../../utils/MaterialKit';
 // ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
 import { SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
 import { ScoreService } from '../../services/ScoreService';
@@ -536,7 +537,7 @@ export struct ScorePage {
               .height(40).layoutWeight(1).borderRadius(20)
               .backgroundColor(this.themeIsDark ? '#16263D' : '#EEF3FF')
               .border({ width: 0, color: Color.Transparent })
-              .bindMenu(this.semesterMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
+              .bindMenu(this.semesterMenuBuilder, menuOptions())
 
               Button() {
                 Row() {
@@ -550,7 +551,7 @@ export struct ScorePage {
               .height(40).layoutWeight(1).borderRadius(20)
               .backgroundColor(this.themeIsDark ? '#16263D' : '#EEF3FF')
               .border({ width: 0, color: Color.Transparent })
-              .bindMenu(this.typeMenuBuilder, { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
+              .bindMenu(this.typeMenuBuilder, menuOptions())
             }
             .width('100%').padding({ left: 12, right: 12, top: 8, bottom: 4 })
 

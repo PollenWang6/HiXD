@@ -1,11 +1,10 @@
+import { ToastUtil } from '../../utils/ToastUtil';
 ﻿// DormWaterPage.ets — 宿舍水机控制页面
 import { DormWaterService, DormWaterDevice, CaptchaData } from '../../services/DormWaterService';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { scanCore, scanBarcode } from '@kit.ScanKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { promptAction } from '@kit.ArkUI';
-
 @Component
 export struct DormWaterPage {
   pageInfo: NavPathStack = new NavPathStack();
@@ -70,7 +69,6 @@ export struct DormWaterPage {
     .height(52 + this.statusBarHeight)
     .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
-
 
   aboutToAppear(): void {
     // 检查是否已登录
@@ -155,15 +153,15 @@ export struct DormWaterPage {
       const url: string = result.originalValue;
       const deviceId: string = this.extractDeviceIdFromUrl(url);
       if (!deviceId) {
-        promptAction.showToast({ message: '无效的水机二维码' });
+        ToastUtil.show('无效的水机二维码');
         return;
       }
 
       await this.svc.toggleFavorite(deviceId, false);
-      promptAction.showToast({ message: '设备添加成功' });
+      ToastUtil.show('设备添加成功');
       this.loadDevices();
     } catch (e) {
-      promptAction.showToast({ message: '扫码失败，请重试' });
+      ToastUtil.show('扫码失败，请重试');
     }
   }
 
@@ -177,15 +175,15 @@ export struct DormWaterPage {
   // ===== 手动输入设备编号 =====
   async doManualAdd(): Promise<void> {
     const id: string = this.manualDeviceId.trim();
-    if (id.length === 0) { promptAction.showToast({ message: '请输入设备编号' }); return; }
+    if (id.length === 0) { ToastUtil.show('请输入设备编号'); return; }
     try {
       await this.svc.toggleFavorite(id, false);
-      promptAction.showToast({ message: '设备添加成功' });
+      ToastUtil.show('设备添加成功');
       this.showManualAdd = false;
       this.manualDeviceId = '';
       this.loadDevices();
     } catch (e) {
-      promptAction.showToast({ message: '添加失败' });
+      ToastUtil.show('添加失败');
     }
   }
 
@@ -236,7 +234,7 @@ export struct DormWaterPage {
       this.runningMsg = dev.name + ' 正在出水...';
       this.startStatusPolling(dev.id);
     } catch (e) {
-      promptAction.showToast({ message: '启动失败: ' + (e as Error).message });
+      ToastUtil.show('启动失败: ' + (e as Error).message);
     }
   }
 
@@ -248,7 +246,7 @@ export struct DormWaterPage {
       this.runningDeviceId = '';
       this.runningMsg = dev.name + ' 已停止';
     } catch (e) {
-      promptAction.showToast({ message: '停止失败' });
+      ToastUtil.show('停止失败');
     }
   }
 
@@ -257,9 +255,9 @@ export struct DormWaterPage {
     try {
       await this.svc.toggleFavorite(dev.id, true);
       this.devices = this.devices.filter((d: DormWaterDevice) => d.id !== dev.id);
-      promptAction.showToast({ message: '已移除 ' + dev.name });
+      ToastUtil.show('已移除 ' + dev.name);
     } catch (e) {
-      promptAction.showToast({ message: '移除失败' });
+      ToastUtil.show('移除失败');
     }
   }
 

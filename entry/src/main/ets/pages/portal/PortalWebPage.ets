@@ -1,4 +1,5 @@
 ﻿import { AccentColors } from '../../utils/AccentColors';
+import { menuOptions } from '../../utils/MaterialKit';
 // PortalWebPage.ets — 门户通用 WebView 页面
 // 通过 title + url 参数复用，避免为每个服务单独建文件
 import web_webview from '@ohos.web.webview';
@@ -239,7 +240,7 @@ export struct PortalWebPage {
       }
       .height(40)
       .width(40)
-      .bindMenu(this.WebviewMenu(), { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
+      .bindMenu(this.WebviewMenu(), menuOptions())
     }
     .padding({ left: 12, right: 12, top: this.statusBarHeight })
     .height(52 + this.statusBarHeight)

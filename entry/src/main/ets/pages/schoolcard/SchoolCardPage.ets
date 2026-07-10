@@ -1,7 +1,7 @@
+import { ToastUtil } from '../../utils/ToastUtil';
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // SchoolCardPage.ets — 校园卡原生页面（纯 HTTP，对标 Flutter）
 // 余额、付款码、消费记录
-import { promptAction } from '@kit.ArkUI';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { PaidRecord, SchoolCardService } from '../../services/SchoolCardService';
@@ -46,7 +46,6 @@ export struct SchoolCardPage {
     .height(52 + this.statusBarHeight)
     .padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
-
 
   aboutToAppear(): void {
     const now = new Date();
@@ -130,9 +129,9 @@ export struct SchoolCardPage {
       this.loading = true;
       this.error = '';
       this.records = await this.cardSvc.getPaidRecords(this.beginDate, this.endDate);
-      promptAction.showToast({ message: '查询成功，共 ' + String(this.records.length) + ' 条', duration: 2000 });
+      ToastUtil.show('查询成功，共 ' + String(this.records.length) + ' 条', 2000);
     } catch (e) {
-      promptAction.showToast({ message: '查询失败', duration: 2000 });
+      ToastUtil.show('查询失败', 2000);
     } finally {
       this.loading = false;
     }

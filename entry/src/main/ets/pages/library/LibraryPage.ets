@@ -1,3 +1,4 @@
+import { ToastUtil } from '../../utils/ToastUtil';
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // LibraryPage.ets — 图书馆页面
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -5,7 +6,7 @@ import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService, LibraryAuthResult } from '../../services/CasLoginService';
 import { common } from '@kit.AbilityKit';
-import promptAction from '@ohos.promptAction';
+
 import Want from '@ohos.app.ability.Want';
 
 interface BookLocation {
@@ -56,7 +57,6 @@ interface BorrowItem {
   imageUrl: string;
   locationName: string;
 }
-
 
 @Component
 export struct LibraryPage {
@@ -787,7 +787,7 @@ export struct LibraryPage {
       uri: url
     };
     ctx.startAbility(want).catch(() => {
-      promptAction.showToast({ message: '无法打开链接', duration: 1500 });
+      ToastUtil.show('无法打开链接', 1500);
     });
   }
 

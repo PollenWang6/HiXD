@@ -2,6 +2,12 @@
   "module": {
     "name": "entry",
     "type": "entry",
+    "metadata": [
+      {
+        "name": "ohos.arkui.UIMaterial.state",
+        "value": "enable"
+      }
+    ],
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
     "deviceTypes": [

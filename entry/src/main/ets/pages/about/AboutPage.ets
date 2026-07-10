@@ -1,10 +1,10 @@
+import { ToastUtil } from '../../utils/ToastUtil';
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // AboutPage.ets — 关于软件
 import { ThemeColors } from '../../utils/ThemeColors';
 import { VersionService } from '../../services/VersionService';
 import { VersionInfo } from '../../services/VersionService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 
 @Component
@@ -39,10 +39,10 @@ export struct AboutPage {
         this.updateInfo = info;
         this.showUpdateDialog = true;
       } else {
-        promptAction.showToast({ message: '当前已是最新版本' });
+        ToastUtil.show('当前已是最新版本');
       }
     } catch (_) {
-      promptAction.showToast({ message: '检查失败，请检查网络' });
+      ToastUtil.show('检查失败，请检查网络');
     }
     this.checkingUpdate = false;
   }

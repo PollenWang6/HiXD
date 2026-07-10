@@ -1,4 +1,5 @@
 ﻿import { AccentColors } from '../../utils/AccentColors';
+import { menuOptions } from '../../utils/MaterialKit';
 // ClassTablePage.ets — 支持点击查看所有冲突课程版（已修复重叠课程覆盖问题）
 import { ThemeColors } from '../../utils/ThemeColors';
 import { EhallService, SemesterUtil, ClassItemModel, ExamItemModel } from '../../services/EhallService';
@@ -1679,7 +1680,7 @@ export struct ClassTablePage {
       }
       .height(40)
       .width(40)
-      .bindMenu(this.buildClassTableMenu(), { backgroundBlurStyle: BlurStyle.COMPONENT_THICK })
+      .bindMenu(this.buildClassTableMenu(), menuOptions())
     }
     .height(52 + this.statusBarHeight)
     .width('100%')
