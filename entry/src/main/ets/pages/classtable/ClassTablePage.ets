@@ -10,12 +10,14 @@ import { ExamService } from '../../services/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { CalendarSyncService, SlimCell } from '../../services/CalendarSyncService';
+import { WeekChip } from '../../components/WeekChip';
 
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { router } from '@kit.ArkUI';
 import { calendarManager } from '@kit.CalendarKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
+import { SegmentButton, SegmentButtonOptions } from '@ohos.arkui.advanced.SegmentButton';
 
 // 课程卡片背景色（降低饱和度，白色文字）
 const CLASS_COLORS: string[] = ['#559BD6', '#AA68B8', '#E87F5A', '#6EAE6E', '#D86687', '#3EA8BC', '#D6B23E', '#82AD5A', '#8E6EBB', '#3EA6D6'];
@@ -161,6 +163,18 @@ export struct ClassTablePage {
   @State addExamTimeStart: string = '';  // HH:MM
   @State addExamTimeEnd: string = '';    // HH:MM
   @State addExamSeat: string = '';
+  // 高级分段控件（API26 重设计：替代手写 Row 分段）
+  @State addCourseSegOptions: SegmentButtonOptions = SegmentButtonOptions.tab({
+    buttons: [
+      { text: '📘 课程' },
+      { text: '📝 考试' },
+      { text: '🧪 实验' }
+    ],
+    selectedBackgroundColor: (AppStorage.get('accent_color') as string ?? '#2979FF'),
+    selectedFontColor: '#FFFFFF'
+  });
+  @State addCourseSegSel: number[] = [0];
+  @State weekIndexList: number[] = [];
 
   // 操作反馈 toast
   @State actionToast: string = '';
@@ -1208,7 +1222,7 @@ export struct ClassTablePage {
           .zIndex(2)
         }
 
-        // 手动添加日程弹窗（课程/考试/实验三合一）
+        // 手动添加日程弹窗（课程/考试/实验三合一，API26 重设计）
         if (this.showAddCourseDialog) {
           Stack() {
             Column()
@@ -1218,188 +1232,49 @@ export struct ClassTablePage {
             Column() {
               // 标题栏
               Row() {
-                Text(this.editingCustomIndex >= 0 ? '编辑日程' : '添加日程').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                Text(this.editingCustomIndex >= 0 ? '编辑日程' : '添加日程')
+                  .fontSize(18).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
                 Blank()
-                Row() { Text('✕').fontSize(20).fontColor('#999999') }
-                  .width(32).height(32).borderRadius(16).backgroundColor(ThemeColors.bgInput)
-                  .justifyContent(FlexAlign.Center)
-                  .onClick(() => { this.cancelAddCourse(); })
-              }.width('100%').margin({ bottom: 12 })
-
-              // 类型选择器 — 分段控件
-              Row() {
                 Row() {
-                  Text('📘')
-                    .fontSize(15)
-                    .fontColor(this.addCourseType === 0 ? '#FFFFFF' : ThemeColors.textSecondary)
-                    .fontWeight(this.addCourseType === 0 ? FontWeight.Medium : FontWeight.Normal)
-                  Text(' 课程')
-                    .fontSize(13)
-                    .fontColor(this.addCourseType === 0 ? '#FFFFFF' : ThemeColors.textSecondary)
-                    .fontWeight(this.addCourseType === 0 ? FontWeight.Medium : FontWeight.Normal)
+                  Text('✕').fontSize(18).fontColor(ThemeColors.textSecondary)
                 }
-                .layoutWeight(1).height(36).justifyContent(FlexAlign.Center)
-                .borderRadius(8)
-                .backgroundColor(this.addCourseType === 0 ? (AppStorage.get('accent_color') as string ?? '#2979FF') : Color.Transparent)
-                .onClick(() => { this.addCourseType = 0; })
+                .width(32).height(32).borderRadius(16).backgroundColor(ThemeColors.bgInput)
+                .justifyContent(FlexAlign.Center)
+                .onClick(() => { this.cancelAddCourse(); })
+              }.width('100%').margin({ bottom: 14 })
 
-                Row() {
-                  Text('📝')
-                    .fontSize(15)
-                    .fontColor(this.addCourseType === 1 ? '#FFFFFF' : ThemeColors.textSecondary)
-                    .fontWeight(this.addCourseType === 1 ? FontWeight.Medium : FontWeight.Normal)
-                  Text(' 考试')
-                    .fontSize(13)
-                    .fontColor(this.addCourseType === 1 ? '#FFFFFF' : ThemeColors.textSecondary)
-                    .fontWeight(this.addCourseType === 1 ? FontWeight.Medium : FontWeight.Normal)
+              // 类型选择器 — 高级分段控件（流畅动画、主题一致）
+              SegmentButton({
+                options: this.addCourseSegOptions,
+                selectedIndexes: this.addCourseSegSel,
+                onItemClicked: (idx: number) => {
+                  this.addCourseType = idx;
+                  if (idx === 1) this.initExamDefaults();
                 }
-                .layoutWeight(1).height(36).justifyContent(FlexAlign.Center)
-                .borderRadius(8)
-                .backgroundColor(this.addCourseType === 1 ? '#E91E63' : Color.Transparent)
-                .onClick(() => { this.addCourseType = 1; this.initExamDefaults(); })
+              })
+              .width('100%')
+              .margin({ bottom: 14 })
 
-                Row() {
-                  Text('🧪')
-                    .fontSize(15)
-                    .fontColor(this.addCourseType === 2 ? '#FFFFFF' : ThemeColors.textSecondary)
-                    .fontWeight(this.addCourseType === 2 ? FontWeight.Medium : FontWeight.Normal)
-                  Text(' 实验')
-                    .fontSize(13)
-                    .fontColor(this.addCourseType === 2 ? '#FFFFFF' : ThemeColors.textSecondary)
-                    .fontWeight(this.addCourseType === 2 ? FontWeight.Medium : FontWeight.Normal)
-                }
-                .layoutWeight(1).height(36).justifyContent(FlexAlign.Center)
-                .borderRadius(8)
-                .backgroundColor(this.addCourseType === 2 ? '#FF9800' : Color.Transparent)
-                .onClick(() => { this.addCourseType = 2; })
-              }
-              .width('100%').height(42).padding(3)
-              .backgroundColor(ThemeColors.bgInput).borderRadius(10)
-              .margin({ bottom: 16 })
-
-              // === 考试表单 ===
-              if (this.addCourseType === 1) {
-                Column({ space: 12 }) {
-                  // 名称
-                  Row() {
-                    TextInput({ placeholder: '考试名称（必填）', text: this.addCourseName })
-                      .onChange((v: string) => { this.addCourseName = v; })
-                      .layoutWeight(1).fontSize(14).backgroundColor(ThemeColors.bgInput).borderRadius(8)
-                  }.width('100%')
-                  // 日期（以今天为中心，前后各一年，跨学期无忧）
-                  Row() {
-                    DatePicker({
-                      start: (() => { const n = new Date(); return new Date(n.getFullYear() - 1, n.getMonth(), 1); })(),
-                      end: (() => { const n = new Date(); return new Date(n.getFullYear() + 1, 11, 31); })(),
-                      selected: this.addExamDate.length > 0 ? new Date(this.addExamDate) : new Date()
-                    })
-                      .onChange((v: DatePickerResult) => {
-                        const y = v.year || 2026;
-                        const m = (v.month != null ? v.month : 0) + 1;
-                        const d = v.day || 1;
-                        this.addExamDate = String(y) + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-                        this.addCourseDay = new Date(y, (v.month != null ? v.month : 0), d).getDay() || 7;
-                      })
-                      .layoutWeight(1)
-                  }.width('100%').height(48).backgroundColor(ThemeColors.bgInput).borderRadius(8).padding({ left: 8, right: 8 })
-                  // 起止时间 — 同一行
-                  Row({ space: 10 }) {
-                    TimePicker({
-                      selected: this.addExamTimeStart.length > 0 ? this.parseTime(this.addExamTimeStart) : new Date(2026, 0, 1, 8, 30)
-                    })
-                      .onChange((v: TimePickerResult) => {
-                        this.addExamTimeStart = String(v.hour || 8).padStart(2, '0') + ':' + String(v.minute || 0).padStart(2, '0');
-                      })
-                      .layoutWeight(1)
-                    Text('—').fontSize(16).fontColor(ThemeColors.textSecondary)
-                    TimePicker({
-                      selected: this.addExamTimeEnd.length > 0 ? this.parseTime(this.addExamTimeEnd) : new Date(2026, 0, 1, 10, 30)
-                    })
-                      .onChange((v: TimePickerResult) => {
-                        this.addExamTimeEnd = String(v.hour || 10).padStart(2, '0') + ':' + String(v.minute || 0).padStart(2, '0');
-                      })
-                      .layoutWeight(1)
-                  }.width('100%').height(48).backgroundColor(ThemeColors.bgInput).borderRadius(8).padding({ left: 8, right: 8 })
-                  // 考场
-                  Row() {
-                    TextInput({ placeholder: '考场/教室（选填）', text: this.addCourseClassroom })
-                      .onChange((v: string) => { this.addCourseClassroom = v; })
-                      .layoutWeight(1).fontSize(14).backgroundColor(ThemeColors.bgInput).borderRadius(8)
-                  }.width('100%')
-                  // 座位号
-                  Row() {
-                    TextInput({ placeholder: '座位号（选填）', text: this.addExamSeat })
-                      .onChange((v: string) => { this.addExamSeat = v; })
-                      .layoutWeight(1).fontSize(14).backgroundColor(ThemeColors.bgInput).borderRadius(8)
-                  }.width('100%')
+              // 表单内容（统一滚动容器，避免考试表单溢出截断）
+              Scroll() {
+                Column({ space: 14 }) {
+                  if (this.addCourseType === 1) {
+                    this.examForm()
+                  } else {
+                    this.courseForm()
+                  }
                 }.width('100%')
-              }
-
-              // === 课程/实验表单 ===
-              if (this.addCourseType !== 1) {
-                Scroll() {
-                  Column({ space: 10 }) {
-                    Row() { Text('名称').fontSize(14).fontColor(ThemeColors.textSecondary).width(56); TextInput({ placeholder: '必填', text: this.addCourseName }).onChange((v: string) => { this.addCourseName = v; }).layoutWeight(1).fontSize(14) }.width('100%')
-                    Row() { Text('教师').fontSize(14).fontColor(ThemeColors.textSecondary).width(56); TextInput({ placeholder: '选填', text: this.addCourseTeacher }).onChange((v: string) => { this.addCourseTeacher = v; }).layoutWeight(1).fontSize(14) }.width('100%')
-                    Row() { Text('教室').fontSize(14).fontColor(ThemeColors.textSecondary).width(56); TextInput({ placeholder: '选填', text: this.addCourseClassroom }).onChange((v: string) => { this.addCourseClassroom = v; }).layoutWeight(1).fontSize(14) }.width('100%')
-                    Row() { Text('周次').fontSize(14).fontColor(ThemeColors.textSecondary).width(56).alignSelf(ItemAlign.Start) }.width('100%')
-                    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-                      ForEach(this.buildWeekOptions(), (week: number) => {
-                        Stack() {
-                          if (week === this.currentWeek) {
-                            Circle()
-                              .width(30).height(30)
-                              .fill('#00000000')
-                              .stroke((AppStorage.get('accent_color') as string ?? '#2979FF'))
-                              .strokeWidth(2)
-                          }
-                          Circle()
-                            .width(26).height(26)
-                            .fill(this.addCourseWeekList[week - 1] ? (AppStorage.get('accent_color') as string ?? '#2979FF') : ThemeColors.bgInput)
-                          Text(String(week))
-                            .fontSize(13).fontColor(this.addCourseWeekList[week - 1] ? '#FFFFFF' : ThemeColors.textSecondary)
-                        }
-                        .margin({ right: 4, bottom: 6 })
-                        .onClick(() => {
-                          this.addCourseWeekList[week - 1] = !this.addCourseWeekList[week - 1];
-                        })
-                      })
-                    }.width('100%').margin({ top: 4 })
-                    Row() { Text('星期').fontSize(14).fontColor(ThemeColors.textSecondary).width(56)
-                      Select([
-                        { value: '请选择星期' },
-                        { value: '周一' },
-                        { value: '周二' },
-                        { value: '周三' },
-                        { value: '周四' },
-                        { value: '周五' },
-                        { value: '周六' },
-                        { value: '周日' }
-                      ])
-                        .value(this.getDayValue())
-                        .selected(this.addCourseDay).onSelect((idx: number) => { this.addCourseDay = idx; }).layoutWeight(1)
-                    }.width('100%')
-                    Row() { Text('开始节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(56)
-                      Select(this.buildSectionOptions())
-                        .value(this.getSectionValue(this.addCourseStartSection))
-                        .selected(this.addCourseStartSection).onSelect((idx: number) => { this.addCourseStartSection = idx; }).layoutWeight(1)
-                    }.width('100%')
-                    Row() { Text('结束节次').fontSize(14).fontColor(ThemeColors.textSecondary).width(56)
-                      Select(this.buildSectionOptions())
-                        .value(this.getSectionValue(this.addCourseEndSection))
-                        .selected(this.addCourseEndSection).onSelect((idx: number) => { this.addCourseEndSection = idx; }).layoutWeight(1)
-                    }.width('100%')
-                  }.width('100%')
-                }.width('100%').height(360).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
-              }
+              }.width('100%').constraintSize({ maxHeight: 460 }).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
 
               Row({ space: 12 }) {
                 Button('取消').layoutWeight(1).backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
                   .onClick(() => { this.cancelAddCourse(); })
-                Button(this.editingCustomIndex >= 0 ? '保存' : '添加').layoutWeight(1).backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).fontColor('#FFFFFF')
+                Button(this.editingCustomIndex >= 0 ? '保存' : '添加').layoutWeight(1)
+                  .backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).fontColor('#FFFFFF')
                   .onClick(() => { this.addCustomCourse(); })
               }.margin({ top: 16 }).width('100%')
-            }.width('88%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(14)
+            }
+            .width('92%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
             .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetY: 10 })
           }.width('100%').height('100%').zIndex(3)
         }
@@ -1653,6 +1528,139 @@ export struct ClassTablePage {
     }.width('100%')
   }
 
+  // ===== 添加弹窗：课程/实验表单 =====
+  @Builder courseForm() {
+    Row() {
+      Text('名称').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      TextInput({ placeholder: '必填', text: this.addCourseName })
+        .onChange((v: string) => { this.addCourseName = v; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+    Row() {
+      Text('教师').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      TextInput({ placeholder: '选填', text: this.addCourseTeacher })
+        .onChange((v: string) => { this.addCourseTeacher = v; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+    Row() {
+      Text('教室').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      TextInput({ placeholder: '选填', text: this.addCourseClassroom })
+        .onChange((v: string) => { this.addCourseClassroom = v; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+
+    // 周次
+    Row() {
+      Text('周次').fontSize(14).fontColor(ThemeColors.textSecondary)
+      Blank()
+      Row({ space: 14 }) {
+        Text('全选').fontSize(12)
+          .fontColor((AppStorage.get('accent_color') as string ?? '#2979FF'))
+          .onClick(() => { this.setAllWeeks(true); })
+        Text('清空').fontSize(12).fontColor(ThemeColors.textSecondary)
+          .onClick(() => { this.setAllWeeks(false); })
+      }
+    }.width('100%').margin({ top: 2, bottom: 6 })
+    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignContent: FlexAlign.Start }) {
+      ForEach(this.weekIndexList, (w: number) => {
+        WeekChip({
+          week: w,
+          selected: this.addCourseWeekList[w - 1],
+          current: this.currentWeek,
+          accent: (AppStorage.get('accent_color') as string ?? '#2979FF'),
+          onToggle: () => { this.addCourseWeekList[w - 1] = !this.addCourseWeekList[w - 1]; }
+        })
+          .margin({ right: 6, bottom: 6 })
+      }, (w: number) => String(w))
+    }.width('100%')
+
+    Row() {
+      Text('星期').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      Select([
+        { value: '请选择星期' }, { value: '周一' }, { value: '周二' }, { value: '周三' },
+        { value: '周四' }, { value: '周五' }, { value: '周六' }, { value: '周日' }
+      ])
+        .value(this.getDayValue())
+        .selected(this.addCourseDay)
+        .onSelect((idx: number) => { this.addCourseDay = idx; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+    Row() {
+      Text('开始').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      Select(this.buildSectionOptions())
+        .value(this.getSectionValue(this.addCourseStartSection))
+        .selected(this.addCourseStartSection)
+        .onSelect((idx: number) => { this.addCourseStartSection = idx; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+    Row() {
+      Text('结束').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      Select(this.buildSectionOptions())
+        .value(this.getSectionValue(this.addCourseEndSection))
+        .selected(this.addCourseEndSection)
+        .onSelect((idx: number) => { this.addCourseEndSection = idx; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+  }
+
+  // ===== 添加弹窗：考试表单 =====
+  @Builder examForm() {
+    Row() {
+      Text('名称').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      TextInput({ placeholder: '考试名称（必填）', text: this.addCourseName })
+        .onChange((v: string) => { this.addCourseName = v; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+    Column() {
+      Text('日期').fontSize(14).fontColor(ThemeColors.textSecondary).width('100%').margin({ bottom: 4 })
+      DatePicker({
+        start: (() => { const n = new Date(); return new Date(n.getFullYear() - 1, n.getMonth(), 1); })(),
+        end: (() => { const n = new Date(); return new Date(n.getFullYear() + 1, 11, 31); })(),
+        selected: this.addExamDate.length > 0 ? new Date(this.addExamDate) : new Date()
+      })
+        .onChange((v: DatePickerResult) => {
+          const y = v.year || 2026;
+          const m = (v.month != null ? v.month : 0) + 1;
+          const d = v.day || 1;
+          this.addExamDate = String(y) + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+          this.addCourseDay = new Date(y, (v.month != null ? v.month : 0), d).getDay() || 7;
+        })
+        .width('100%')
+    }.width('100%')
+    Column() {
+      Text('时间').fontSize(14).fontColor(ThemeColors.textSecondary).width('100%').margin({ bottom: 4 })
+      Row({ space: 10 }) {
+        TimePicker({
+          selected: this.addExamTimeStart.length > 0 ? this.parseTime(this.addExamTimeStart) : new Date(2026, 0, 1, 8, 30)
+        })
+          .onChange((v: TimePickerResult) => {
+            this.addExamTimeStart = String(v.hour || 8).padStart(2, '0') + ':' + String(v.minute || 0).padStart(2, '0');
+          })
+          .layoutWeight(1)
+        Text('—').fontSize(16).fontColor(ThemeColors.textSecondary)
+        TimePicker({
+          selected: this.addExamTimeEnd.length > 0 ? this.parseTime(this.addExamTimeEnd) : new Date(2026, 0, 1, 10, 30)
+        })
+          .onChange((v: TimePickerResult) => {
+            this.addExamTimeEnd = String(v.hour || 10).padStart(2, '0') + ':' + String(v.minute || 0).padStart(2, '0');
+          })
+          .layoutWeight(1)
+      }.width('100%').height(56)
+    }.width('100%')
+    Row() {
+      Text('考场').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      TextInput({ placeholder: '考场/教室（选填）', text: this.addCourseClassroom })
+        .onChange((v: string) => { this.addCourseClassroom = v; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+    Row() {
+      Text('座位').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+      TextInput({ placeholder: '座位号（选填）', text: this.addExamSeat })
+        .onChange((v: string) => { this.addExamSeat = v; })
+        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+    }.width('100%')
+  }
+
   @Builder customTitle() {
     Row() {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
@@ -1732,6 +1740,7 @@ export struct ClassTablePage {
         .onClick(() => {
           this.savedDetailDay = -1;
           this.savedDetailSection = -1;
+          this.refreshWeekIndex();
           this.showAddCourseDialog = true;
         })
       MenuItem({ content: '课程变更', startIcon: $r('app.media.ic_public_rotate') })
@@ -2760,6 +2769,22 @@ export struct ClassTablePage {
     this.addExamTimeStart = '';
     this.addExamTimeEnd = '';
     this.addExamSeat = '';
+    this.addCourseSegSel = [0];
+    this.refreshWeekIndex();
+  }
+
+  // 依据当前 maxWeek 刷新周次选择器的下标列表（稳定引用，避免 ForEach 每次重建）
+  private refreshWeekIndex(): void {
+    const arr: number[] = [];
+    for (let i = 1; i <= this.maxWeek; i++) arr.push(i);
+    this.weekIndexList = arr;
+  }
+
+  // 周次一键全选 / 清空
+  private setAllWeeks(flag: boolean): void {
+    const arr: boolean[] = [];
+    for (let i = 0; i < this.maxWeek; i++) arr.push(flag);
+    this.addCourseWeekList = arr;
   }
 
   // 构建节次下拉选项
@@ -2859,6 +2884,7 @@ export struct ClassTablePage {
 
   private editCustomCourse(cell: ClassCell): void {
     this.addCourseType = cell.isExam ? 1 : (cell.isExperiment ? 2 : 0);
+    this.addCourseSegSel = [this.addCourseType];
     this.addCourseName = cell.name;
     this.addCourseTeacher = cell.teacher;
     this.addCourseClassroom = cell.classroom;
@@ -2879,7 +2905,7 @@ export struct ClassTablePage {
     this.editingCustomIndex = this.customList.findIndex((item: CustomCourseItem) =>
       item.id === cell.customId
     );
-    // 保存详情弹窗位置，取消编辑时可以回到详情
+    this.refreshWeekIndex();
     this.savedDetailDay = this.selectedDay;
     this.savedDetailSection = this.selectedSection;
     // 关闭详情弹窗，再打开编辑弹窗
