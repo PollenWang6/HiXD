@@ -497,6 +497,9 @@ export struct LibraryPage {
 
   private hideHistory(): void {
     if (!this.historyShow) { return; }
+    // 收起键盘 + 清焦点，确保任何隐藏路径（点结果区/空白/空状态/失焦）键盘一并消失
+    this.searchInputController.stopEditing();
+    this.searchFocused = false;
     animateTo({ duration: 150, curve: Curve.EaseIn, onFinish: () => {
       this.historyShow = false;
     } }, () => {
