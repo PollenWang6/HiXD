@@ -380,9 +380,9 @@ export struct CalendarExportPage {
       const mon: Date = new Date(sd);
       mon.setDate(sd.getDate() + (sd.getDay() === 0 ? -6 : 1 - sd.getDay()) + sw * 7);
 
-      const existMap: Record<string, number> = {};
+      const existMap: Record<string, number[]> = {};
       let evTotalRaw: number = 0;   // [DIAG] 日历事件原始总数
-      let evDupCount: number = 0;   // [DIAG] 被覆盖（重复 key）的事件数 = 无法删除的孤儿数
+      let evDupCount: number = 0;   // [DIAG] 同 key 多条事件数（含学校重复课副本 / 历史孤儿）
       try {
         const evts: calendarManager.Event[] = await cal.getEvents();
         evTotalRaw = evts.length;
@@ -390,13 +390,14 @@ export struct CalendarExportPage {
           const ev: calendarManager.Event = evts[i];
           if (ev.id !== undefined && ev.title && ev.startTime) {
             const k: string = ev.title + '|' + String(ev.startTime);
-            if (DIAG && existMap[k] !== undefined) {
+            if (!existMap[k]) { existMap[k] = []; }
+            if (DIAG && existMap[k].length > 0) {
               evDupCount++;
               hilog.warn(DOMAIN, TAG, '[DIAG] 日历已存在重复事件 key=' + k
-                + ' 旧id=' + existMap[k] + ' 新id=' + ev.id
-                + '（existMap 覆盖旧id → 旧id 变孤儿，删除环节遍历不到、永久残留）');
+                + ' 已记id数=' + existMap[k].length + ' 新id=' + ev.id
+                + '（同 key 多条 → 除首条外均按孤儿/重复副本清理）');
             }
-            existMap[k] = ev.id;
+            existMap[k].push(ev.id);
           }
         }
       } catch (_e) {
@@ -408,6 +409,7 @@ export struct CalendarExportPage {
       }
 
       const needed: Record<string, boolean> = {};
+      const written: Record<string, boolean> = {};  // 本次运行已写入的 key，避免源数据重复课被写多次
       const st: ExportStats = { newCount: 0, delCount: 0, failCount: 0 };
       const rb: boolean = this.forceRebuild;
 
@@ -416,7 +418,7 @@ export struct CalendarExportPage {
         if (rb || this.courseChg()) {
           await this.impC(mon, cal, existMap, needed, st, p);
         } else {
-          await this.synC(mon, cal, existMap, needed, st, p);
+          await this.synC(mon, cal, existMap, needed, st, p, written);
         }
       }
       if (this.eEnabled) {
@@ -424,7 +426,7 @@ export struct CalendarExportPage {
         if (rb || this.expChg()) {
           await this.impE(mon, cal, existMap, needed, st, p, this.eDouble, this.eDbHour, this.eDbMin);
         } else {
-          await this.synE(mon, cal, existMap, needed, st, p, this.eDouble, this.eDbHour, this.eDbMin);
+          await this.synE(mon, cal, existMap, needed, st, p, this.eDouble, this.eDbHour, this.eDbMin, written);
         }
       }
       if (this.xEnabled) {
@@ -432,7 +434,7 @@ export struct CalendarExportPage {
         if (rb || this.examChg()) {
           await this.impX(cal, existMap, needed, st, p, this.xDouble, this.xDbHour, this.xDbMin);
         } else {
-          await this.synX(cal, existMap, needed, st, p, this.xDouble, this.xDbHour, this.xDbMin);
+          await this.synX(cal, existMap, needed, st, p, this.xDouble, this.xDbHour, this.xDbMin, written);
         }
       }
       this.forceRebuild = false;
@@ -444,14 +446,24 @@ export struct CalendarExportPage {
       }
       for (let i = 0; i < oldKeys.length; i++) {
         const k: string = oldKeys[i];
-        if (!needed[k]) {
-          try {
-            await cal.deleteEvent(existMap[k]);
-            st.delCount++;
-            if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 删除成功 key=' + k + ' id=' + existMap[k]); }
-          } catch (e) {
-            st.failCount++;
-            if (DIAG) { hilog.warn(DOMAIN, TAG, '[DIAG] 删除失败 key=' + k + ' id=' + existMap[k] + ' err=' + JSON.stringify(e)); }
+        const ids: number[] = existMap[k] || [];
+        if (ids.length === 0) { continue; }
+        if (needed[k]) {
+          // 需要的 key：保留首条，删除其余（含学校重复课副本 + 历史孤儿），避免日历出现重复事件
+          for (let j = 1; j < ids.length; j++) {
+            try {
+              await cal.deleteEvent(ids[j]);
+              st.delCount++;
+              if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 清理重复副本 key=' + k + ' id=' + ids[j]); }
+            } catch (_e) { /* 已删除或不存在，忽略 */ }
+          }
+        } else {
+          for (let j = 0; j < ids.length; j++) {
+            try {
+              await cal.deleteEvent(ids[j]);
+              st.delCount++;
+              if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 删除成功 key=' + k + ' id=' + ids[j]); }
+            } catch (_e) { /* 忽略 */ }
           }
         }
       }
@@ -478,7 +490,7 @@ export struct CalendarExportPage {
   }
 
   // ========== 全量重建 ==========
-  async impC(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number>,
+  async impC(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number[]>,
     needed: Record<string, boolean>, st: ExportStats, pre: number): Promise<void> {
     for (let d = 1; d <= DC; d++) {
       for (let s = 1; s <= SC; s++) {
@@ -503,14 +515,17 @@ export struct CalendarExportPage {
             const desc: string = (cell.classroom ? '教室: ' + cell.classroom : '') +
               (cell.teacher ? (cell.classroom ? ' | ' : '') + '教师: ' + cell.teacher : '');
             const key: string = this.cellKey(cell, stT.getTime());
-            if (DIAG && needed[key]) {
-              hilog.warn(DOMAIN, TAG, '[DIAG] impC 同一key重复写入 key=' + key + ' day=' + d + ' section=' + s
-                + '（源数据重复课 → 日历将出现重复事件）');
+            if (needed[key]) {
+              if (DIAG) {
+                hilog.warn(DOMAIN, TAG, '[DIAG] impC 同一key重复写入 key=' + key + ' day=' + d + ' section=' + s
+                  + '（源数据重复课 → 跳过，避免日历出现重复事件）');
+              }
+              continue;
             }
             needed[key] = true;
-            const oldId: number | undefined = existMap[key];
-            if (oldId !== undefined) {
-              try { await cal.deleteEvent(oldId); } catch (_e) { /* ignore */ }
+            const oldIds: number[] = existMap[key] ?? [];
+            for (let oi = 0; oi < oldIds.length; oi++) {
+              try { await cal.deleteEvent(oldIds[oi]); } catch (_e) { /* ignore */ }
             }
             const ev: calendarManager.Event = {
               type: calendarManager.EventType.NORMAL,
@@ -532,7 +547,7 @@ export struct CalendarExportPage {
     }
   }
 
-  async impE(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number>,
+  async impE(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number[]>,
     needed: Record<string, boolean>, st: ExportStats, pre: number, dbl: boolean,
     dbH: number, dbM: number): Promise<void> {
     for (let d = 1; d <= DC; d++) {
@@ -558,10 +573,11 @@ export struct CalendarExportPage {
             const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
               (cell.experimentProject ? ' 项目: ' + cell.experimentProject : '');
             const key: string = this.cellKey(cell, stT.getTime());
+            if (needed[key]) { continue; }
             needed[key] = true;
-            const oldId: number | undefined = existMap[key];
-            if (oldId !== undefined) {
-              try { await cal.deleteEvent(oldId); } catch (_e) { /* ignore */ }
+            const oldIds: number[] = existMap[key] ?? [];
+            for (let oi = 0; oi < oldIds.length; oi++) {
+              try { await cal.deleteEvent(oldIds[oi]); } catch (_e) { /* ignore */ }
             }
             const ev: calendarManager.Event = {
               type: calendarManager.EventType.NORMAL,
@@ -586,7 +602,7 @@ export struct CalendarExportPage {
     }
   }
 
-  async impX(cal: calendarManager.Calendar, existMap: Record<string, number>,
+  async impX(cal: calendarManager.Calendar, existMap: Record<string, number[]>,
     needed: Record<string, boolean>, st: ExportStats, pre: number, dbl: boolean,
     dbH: number, dbM: number): Promise<void> {
     for (let d = 1; d <= DC; d++) {
@@ -612,10 +628,11 @@ export struct CalendarExportPage {
         const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
           (cell.examSeat ? ' 座位: ' + cell.examSeat : '');
         const key: string = this.cellKey(cell, es.getTime());
+        if (needed[key]) { continue; }
         needed[key] = true;
-        const oldId: number | undefined = existMap[key];
-        if (oldId !== undefined) {
-          try { await cal.deleteEvent(oldId); } catch (_e) { /* ignore */ }
+        const oldIds: number[] = existMap[key] ?? [];
+        for (let oi = 0; oi < oldIds.length; oi++) {
+          try { await cal.deleteEvent(oldIds[oi]); } catch (_e) { /* ignore */ }
         }
         const ev: calendarManager.Event = {
           type: calendarManager.EventType.NORMAL,
@@ -639,8 +656,9 @@ export struct CalendarExportPage {
   }
 
   // ========== 增量同步 ==========
-  async synC(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number>,
-    needed: Record<string, boolean>, st: ExportStats, pre: number): Promise<void> {
+  async synC(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number[]>,
+    needed: Record<string, boolean>, st: ExportStats, pre: number,
+    written: Record<string, boolean>): Promise<void> {
     for (let d = 1; d <= DC; d++) {
       for (let s = 1; s <= SC; s++) {
         const slot: SlimCell[][] | undefined = this.gridCells[d];
@@ -661,12 +679,16 @@ export struct CalendarExportPage {
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
               parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
             const key: string = this.cellKey(cell, stT.getTime());
-            if (DIAG && needed[key]) {
-              hilog.warn(DOMAIN, TAG, '[DIAG] synC 同一key重复命中 key=' + key + ' day=' + d + ' section=' + s
-                + '（源数据重复课；existMap 未回填 → 可能重复写入日历）');
-            }
             needed[key] = true;
-            if (existMap[key] !== undefined) { continue; }
+            if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+            if (written[key]) {
+              if (DIAG) {
+                hilog.warn(DOMAIN, TAG, '[DIAG] synC 同一key重复命中 key=' + key + ' day=' + d + ' section=' + s
+                  + '（源数据重复课 → 跳过，避免重复写入）');
+              }
+              continue;
+            }
+            written[key] = true;
             const title: string = cell.name;
             const desc: string = (cell.classroom ? '教室: ' + cell.classroom : '') +
               (cell.teacher ? (cell.classroom ? ' | ' : '') + '教师: ' + cell.teacher : '');
@@ -690,9 +712,9 @@ export struct CalendarExportPage {
     }
   }
 
-  async synE(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number>,
+  async synE(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number[]>,
     needed: Record<string, boolean>, st: ExportStats, pre: number, dbl: boolean,
-    dbH: number, dbM: number): Promise<void> {
+    dbH: number, dbM: number, written: Record<string, boolean>): Promise<void> {
     for (let d = 1; d <= DC; d++) {
       for (let s = 1; s <= SC; s++) {
         const slot: SlimCell[][] | undefined = this.gridCells[d];
@@ -714,7 +736,9 @@ export struct CalendarExportPage {
               parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
             const key: string = this.cellKey(cell, stT.getTime());
             needed[key] = true;
-            if (existMap[key] !== undefined) { continue; }
+            if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+            if (written[key]) { continue; }
+            written[key] = true;
             const title: string = '🧪 ' + cell.name;
             const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
               (cell.experimentProject ? ' 项目: ' + cell.experimentProject : '');
@@ -741,9 +765,9 @@ export struct CalendarExportPage {
     }
   }
 
-  async synX(cal: calendarManager.Calendar, existMap: Record<string, number>,
+  async synX(cal: calendarManager.Calendar, existMap: Record<string, number[]>,
     needed: Record<string, boolean>, st: ExportStats, pre: number, dbl: boolean,
-    dbH: number, dbM: number): Promise<void> {
+    dbH: number, dbM: number, written: Record<string, boolean>): Promise<void> {
     for (let d = 1; d <= DC; d++) {
       const slot: SlimCell[][] | undefined = this.gridCells[d];
       const cells: SlimCell[] = (slot !== undefined && slot[0] !== undefined) ? slot[0] : [];
@@ -765,7 +789,9 @@ export struct CalendarExportPage {
           parseInt(ep[0]), parseInt(ep[1]), 0);
         const key: string = this.cellKey(cell, es.getTime());
         needed[key] = true;
-        if (existMap[key] !== undefined) { continue; }
+        if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+        if (written[key]) { continue; }
+        written[key] = true;
         const title: string = '📝 ' + cell.name;
         const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
           (cell.examSeat ? ' 座位: ' + cell.examSeat : '');

@@ -52,9 +52,9 @@ export class CalendarSyncService {
       return;
     }
 
-    const existMap: Record<string, number> = {};
+    const existMap: Record<string, number[]> = {};
     let evTotalRaw: number = 0;   // [DIAG] 日历事件原始总数
-    let evDupCount: number = 0;   // [DIAG] 被覆盖（重复 key）的孤儿事件数
+    let evDupCount: number = 0;   // [DIAG] 同 key 多条事件数（含学校重复课副本 / 历史孤儿）
     try {
       const evts: calendarManager.Event[] = await cal.getEvents();
       evTotalRaw = evts.length;
@@ -62,13 +62,14 @@ export class CalendarSyncService {
         const ev: calendarManager.Event = evts[i];
         if (ev.id !== undefined && ev.title && ev.startTime) {
           const k: string = ev.title + '|' + String(ev.startTime);
-          if (DIAG && existMap[k] !== undefined) {
+          if (!existMap[k]) { existMap[k] = []; }
+          if (DIAG && existMap[k].length > 0) {
             evDupCount++;
             hilog.warn(DOMAIN, TAG, '[DIAG] 日历已存在重复事件 key=' + k
-              + ' 旧id=' + existMap[k] + ' 新id=' + ev.id
-              + '（existMap 覆盖旧id → 旧id 变孤儿，删除环节遍历不到、永久残留）');
+              + ' 已记id数=' + existMap[k].length + ' 新id=' + ev.id
+              + '（同 key 多条 → 除首条外均按孤儿/重复副本清理）');
           }
-          existMap[k] = ev.id;
+          existMap[k].push(ev.id);
         }
       }
       if (DIAG) {
@@ -84,28 +85,29 @@ export class CalendarSyncService {
     mon.setDate(sd.getDate() + (sd.getDay() === 0 ? -6 : 1 - sd.getDay()) + sw * 7);
 
     const needed: Record<string, boolean> = {};
+    const written: Record<string, boolean> = {};  // 本次运行已写入的 key，避免源数据重复课被写多次
     let added: number = 0;
 
     if (cfg['cEnabled'] === true) {
       const pre: number = cfg['cNone'] === true ? -1 : parseInt(cfg['cMinutes'] as string);
-      added += await CalendarSyncService.syncC(mon, cal, grid, existMap, needed, pre);
+      added += await CalendarSyncService.syncC(mon, cal, grid, existMap, needed, pre, written);
     }
     if (cfg['eEnabled'] === true) {
       const pre: number = cfg['eNone'] === true ? -1 : parseInt(cfg['eMinutes'] as string);
       const dbl: boolean = cfg['eDouble'] === true;
       const dbH: number = cfg['eDbHour'] as number;
       const dbM: number = cfg['eDbMin'] as number;
-      added += await CalendarSyncService.syncE(mon, cal, grid, existMap, needed, pre, dbl, dbH, dbM);
+      added += await CalendarSyncService.syncE(mon, cal, grid, existMap, needed, pre, dbl, dbH, dbM, written);
     }
     if (cfg['xEnabled'] === true) {
       const pre: number = cfg['xNone'] === true ? -1 : parseInt(cfg['xMinutes'] as string);
       const dbl: boolean = cfg['xDouble'] === true;
       const dbH: number = cfg['xDbHour'] as number;
       const dbM: number = cfg['xDbMin'] as number;
-      added += await CalendarSyncService.syncX(cal, grid, existMap, needed, pre, dbl, dbH, dbM);
+      added += await CalendarSyncService.syncX(cal, grid, existMap, needed, pre, dbl, dbH, dbM, written);
     }
 
-    // 清理过期
+    // 清理过期 / 重复副本 / 历史孤儿
     let deleted: number = 0;
     const oldKeys: string[] = Object.keys(existMap);
     if (DIAG) {
@@ -114,13 +116,24 @@ export class CalendarSyncService {
     }
     for (let i = 0; i < oldKeys.length; i++) {
       const k: string = oldKeys[i];
-      if (!needed[k]) {
-        try {
-          await cal.deleteEvent(existMap[k]);
-          deleted++;
-          if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 删除成功 key=' + k + ' id=' + existMap[k]); }
-        } catch (_e) {
-          if (DIAG) { hilog.warn(DOMAIN, TAG, '[DIAG] 删除失败 key=' + k + ' id=' + existMap[k]); }
+      const ids: number[] = existMap[k] || [];
+      if (ids.length === 0) { continue; }
+      if (needed[k]) {
+        // 需要的 key：保留首条，删除其余（含学校重复课副本 + 历史孤儿）
+        for (let j = 1; j < ids.length; j++) {
+          try {
+            await cal.deleteEvent(ids[j]);
+            deleted++;
+            if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 清理重复副本 key=' + k + ' id=' + ids[j]); }
+          } catch (_e) { /* 已删/不存在，忽略 */ }
+        }
+      } else {
+        for (let j = 0; j < ids.length; j++) {
+          try {
+            await cal.deleteEvent(ids[j]);
+            deleted++;
+            if (DIAG) { hilog.info(DOMAIN, TAG, '[DIAG] 删除成功 key=' + k + ' id=' + ids[j]); }
+          } catch (_e) { /* 忽略 */ }
         }
       }
     }
@@ -258,8 +271,9 @@ export class CalendarSyncService {
   }
 
   static async syncC(mon: Date, cal: calendarManager.Calendar,
-    grid: SlimCell[][][], existMap: Record<string, number>,
-    needed: Record<string, boolean>, pre: number): Promise<number> {
+    grid: SlimCell[][][], existMap: Record<string, number[]>,
+    needed: Record<string, boolean>, pre: number,
+    written: Record<string, boolean>): Promise<number> {
     let added: number = 0;
     for (let d = 1; d <= DC; d++) {
       for (let s = 1; s <= SC; s++) {
@@ -282,7 +296,9 @@ export class CalendarSyncService {
               parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
             const key: string = CalendarSyncService.cellKey(cell, stT.getTime());
             needed[key] = true;
-            if (existMap[key] !== undefined) { continue; }
+            if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+            if (written[key]) { continue; }
+            written[key] = true;
             const ev: calendarManager.Event = {
               type: calendarManager.EventType.NORMAL,
               title: cell.name,
@@ -301,9 +317,9 @@ export class CalendarSyncService {
   }
 
   static async syncE(mon: Date, cal: calendarManager.Calendar,
-    grid: SlimCell[][][], existMap: Record<string, number>,
+    grid: SlimCell[][][], existMap: Record<string, number[]>,
     needed: Record<string, boolean>, pre: number, dbl: boolean,
-    dbH: number, dbM: number): Promise<number> {
+    dbH: number, dbM: number, written: Record<string, boolean>): Promise<number> {
     let added: number = 0;
     for (let d = 1; d <= DC; d++) {
       for (let s = 1; s <= SC; s++) {
@@ -326,7 +342,9 @@ export class CalendarSyncService {
               parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
             const key: string = CalendarSyncService.cellKey(cell, stT.getTime());
             needed[key] = true;
-            if (existMap[key] !== undefined) { continue; }
+            if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+            if (written[key]) { continue; }
+            written[key] = true;
             const ev: calendarManager.Event = {
               type: calendarManager.EventType.NORMAL,
               title: '🧪 ' + cell.name,
@@ -348,9 +366,9 @@ export class CalendarSyncService {
   }
 
   static async syncX(cal: calendarManager.Calendar,
-    grid: SlimCell[][][], existMap: Record<string, number>,
+    grid: SlimCell[][][], existMap: Record<string, number[]>,
     needed: Record<string, boolean>, pre: number, dbl: boolean,
-    dbH: number, dbM: number): Promise<number> {
+    dbH: number, dbM: number, written: Record<string, boolean>): Promise<number> {
     let added: number = 0;
     for (let d = 1; d <= DC; d++) {
       const slot: SlimCell[][] | undefined = grid[d];
@@ -373,7 +391,9 @@ export class CalendarSyncService {
           parseInt(ep[0]), parseInt(ep[1]), 0);
         const key: string = CalendarSyncService.cellKey(cell, es.getTime());
         needed[key] = true;
-        if (existMap[key] !== undefined) { continue; }
+        if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+        if (written[key]) { continue; }
+        written[key] = true;
         const ev: calendarManager.Event = {
           type: calendarManager.EventType.NORMAL,
           title: '📝 ' + cell.name,
