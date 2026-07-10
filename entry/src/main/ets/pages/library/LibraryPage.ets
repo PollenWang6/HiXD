@@ -496,52 +496,40 @@ export struct LibraryPage {
     this.searchBooks();
   }
 
-  // 搜索历史浮层：紧贴搜索框下方，像搜索框原生下拉（无变暗遮罩）
+  // 搜索历史浮层：紧贴搜索框下方，靠 onBlur 收起（不铺全屏拦截点击）
   @Builder historyPanel() {
-    Stack({ alignContent: Alignment.Top }) {
-      // 历史卡片：紧贴搜索框底部弹出
-      Column() {
-        Row() {
-          Text('搜索历史').fontSize(13).fontColor(ThemeColors.textSecondary)
-          Blank()
-          if (this.searchHistory.length > 0) {
-            Text('清空')
-              .fontSize(12)
-              .fontColor(this.accentColor)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .onClick(() => { this.clearSearchHistory(); })
-          }
-        }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 6 })
+    Column() {
+      Row() {
+        Text('搜索历史').fontSize(13).fontColor(ThemeColors.textSecondary)
+        Blank()
+        if (this.searchHistory.length > 0) {
+          Text('清空')
+            .fontSize(12)
+            .fontColor(this.accentColor)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .onClick(() => { this.clearSearchHistory(); })
+        }
+      }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 6 })
 
-        Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignItems: ItemAlign.Center }) {
-          ForEach(this.searchHistory, (item: SearchHistoryItem) => {
-            Text(item.w)
-              .fontSize(13).fontColor(ThemeColors.textPrimary)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .backgroundColor(ThemeColors.bgInput)
-              .borderRadius(14)
-              .constraintSize({ maxWidth: 220 })
-              .margin({ right: 8, bottom: 8 })
-              .onClick(() => { this.applyHistory(item); })
-          }, (item: SearchHistoryItem, idx?: number) => `hist_${idx}_${item.w}`)
-        }.width('100%').padding({ left: 16, right: 16, top: 4, bottom: 10 })
-      }
-      .width('100%')
-      .margin({ top: 56 })
-      .backgroundColor(ThemeColors.bgCard)
-      .borderRadius(12)
-      .shadow({ radius: 8, color: '#00000018', offsetY: 4 })
-      .zIndex(2)
-
-      // 透明点击层：点空白处收起（不变暗，像搜索框下拉）
-      Column()
-        .width('100%').layoutWeight(1)
-        .backgroundColor(Color.Transparent)
-        .onClick(() => { this.searchInputController.stopEditing(); this.searchFocused = false; })
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignItems: ItemAlign.Center }) {
+        ForEach(this.searchHistory, (item: SearchHistoryItem) => {
+          Text(item.w)
+            .fontSize(13).fontColor(ThemeColors.textPrimary)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .backgroundColor(ThemeColors.bgInput)
+            .borderRadius(14)
+            .constraintSize({ maxWidth: 220 })
+            .margin({ right: 8, bottom: 8 })
+            .onClick(() => { this.applyHistory(item); })
+        }, (item: SearchHistoryItem, idx?: number) => `hist_${idx}_${item.w}`)
+      }.width('100%').padding({ left: 16, right: 16, top: 4, bottom: 10 })
     }
-    .width('100%').height('100%')
-    .position({ x: 0, y: 0 })
+    .width('100%')
+    .position({ x: 0, y: 56 })
+    .backgroundColor(ThemeColors.bgCard)
+    .borderRadius(12)
+    .shadow({ radius: 8, color: '#00000018', offsetY: 4 })
     .zIndex(100)
   }
 
