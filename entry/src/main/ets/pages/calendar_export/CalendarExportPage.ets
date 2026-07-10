@@ -10,7 +10,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 const TAG: string = 'CalendarExportPage';
 const DOMAIN: number = 0xFF00;
 // [DIAG] 诊断日志开关：排查学校课表重复课导致的日历重复/删不掉问题（排查完可关）
-const DIAG: boolean = true;
+const DIAG: boolean = false;
 
 interface SlimCell {
   name: string;
