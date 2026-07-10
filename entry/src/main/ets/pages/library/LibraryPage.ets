@@ -58,6 +58,11 @@ interface BorrowItem {
   locationName: string;
 }
 
+interface SearchHistoryItem {
+  w: string; // 关键词
+  f: string; // 搜索字段（keyWord/title/author/isbn/barcode/callNo）
+}
+
 @Component
 export struct LibraryPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
@@ -97,11 +102,12 @@ export struct LibraryPage {
   @State selectedBook: BookItem | null = null;
   @State bookMaskOpacity: number = 0;
   @State bookSheetOffset: number = 100;
+  @State searchHistory: SearchHistoryItem[] = [];
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
   private http = HttpUtil.getInstance();
 
-  aboutToAppear(): void { this.loadBorrowList(); }
+  aboutToAppear(): void { this.loadBorrowList(); this.loadSearchHistory(); }
 
   closeBookDetail(): void {
     animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
@@ -387,6 +393,7 @@ export struct LibraryPage {
       this.searchPage = p;
       this.hasMore = rawList.length >= 20;
       this.fetchAllCovers(newBooks);
+      if (p === 1) { this.addSearchHistory(this.searchWord, this.searchField); }
     } catch (e) {
       if (p === 1) { this.books = []; }
       this.errorMsg = '搜索失败，请检查网络后重试';
@@ -414,6 +421,110 @@ export struct LibraryPage {
     if (this.searchField === 'barcode') return '条码';
     if (this.searchField === 'callNo') return '索书号';
     return '关键词';
+  }
+
+  private fieldLabelOf(f: string): string {
+    if (f === 'title') return '书名';
+    if (f === 'author') return '作者';
+    if (f === 'isbn') return 'ISBN';
+    if (f === 'barcode') return '条码';
+    if (f === 'callNo') return '索书号';
+    return '关键词';
+  }
+
+  private readonly HISTORY_KEY: string = 'library_search_history';
+  private readonly HISTORY_MAX: number = 10;
+
+  private loadSearchHistory(): void {
+    const raw: string = PreferenceUtil.getString(this.HISTORY_KEY, '[]');
+    try {
+      const parsed: ESObject = JSON.parse(raw);
+      const out: SearchHistoryItem[] = [];
+      if (Array.isArray(parsed)) {
+        const arr = parsed as SearchHistoryItem[];
+        for (let i = 0; i < arr.length; i++) {
+          const it = arr[i];
+          if (it && typeof it.w === 'string' && it.w.length > 0) {
+            out.push({ w: it.w, f: typeof it.f === 'string' ? it.f : 'keyWord' });
+          }
+        }
+      }
+      this.searchHistory = out;
+    } catch (e) {
+      this.searchHistory = [];
+    }
+  }
+
+  private saveSearchHistory(): void {
+    PreferenceUtil.putString(this.HISTORY_KEY, JSON.stringify(this.searchHistory)).catch(() => {});
+  }
+
+  // 新搜索成功后记录：去重 + 置顶 + 限长
+  private addSearchHistory(word: string, field: string): void {
+    const w = word.trim();
+    if (!w) return;
+    const lower = w.toLowerCase();
+    const filtered: SearchHistoryItem[] = this.searchHistory.filter((it) => it.w.toLowerCase() !== lower);
+    filtered.unshift({ w: w, f: field });
+    if (filtered.length > this.HISTORY_MAX) {
+      filtered.splice(this.HISTORY_MAX, filtered.length - this.HISTORY_MAX);
+    }
+    this.searchHistory = filtered;
+    this.saveSearchHistory();
+  }
+
+  private clearSearchHistory(): void {
+    this.searchHistory = [];
+    this.saveSearchHistory();
+  }
+
+  // 点击历史标签：回填字段+关键词并立即搜索
+  private applyHistory(item: SearchHistoryItem): void {
+    this.searchField = item.f;
+    this.searchWord = item.w;
+    this.searchBooks();
+  }
+
+  @Builder historyPanel() {
+    Column() {
+      Row() {
+        Text('搜索历史').fontSize(14).fontColor(ThemeColors.textSecondary)
+        Blank()
+        if (this.searchHistory.length > 0) {
+          Text('清空')
+            .fontSize(12)
+            .fontColor(this.accentColor)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .onClick(() => { this.clearSearchHistory(); })
+        }
+      }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
+
+      if (this.searchHistory.length === 0) {
+        Text('暂无搜索历史')
+          .fontSize(13).fontColor('#BBBBBB')
+          .width('100%').padding({ left: 16, top: 16 })
+      } else {
+        Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignItems: ItemAlign.Center }) {
+          ForEach(this.searchHistory, (item: SearchHistoryItem) => {
+            Row({ space: 4 }) {
+              if (item.f && item.f !== 'keyWord') {
+                Text(this.fieldLabelOf(item.f))
+                  .fontSize(11).fontColor('#999999')
+              }
+              Text(item.w)
+                .fontSize(13).fontColor(ThemeColors.textPrimary)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .backgroundColor(ThemeColors.bgInput)
+            .borderRadius(16)
+            .constraintSize({ maxWidth: 240 })
+            .margin({ right: 8, bottom: 8 })
+            .onClick(() => { this.applyHistory(item); })
+          }, (item: SearchHistoryItem, idx?: number) => `hist_${idx}_${item.w}`)
+        }.width('100%').padding({ left: 16, right: 8, top: 4, bottom: 8 })
+      }
+    }.width('100%').layoutWeight(1).alignItems(HorizontalAlign.Start)
   }
 
   build() {
@@ -519,10 +630,13 @@ export struct LibraryPage {
               this.searchBooks(this.searchPage + 1);
             }
           })
+        } else if (this.searchWord.trim() === '') {
+          this.historyPanel()
         } else {
           Column() {
             Text('📚').fontSize(48)
-            Text('搜索图书试试吧').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
+            Text(this.searchPage > 0 ? '未找到相关图书' : '搜索图书试试吧')
+              .fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         }
       } else {
