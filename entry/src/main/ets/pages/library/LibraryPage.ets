@@ -511,6 +511,8 @@ export struct LibraryPage {
         }
       }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 6 })
 
+      Divider().width('100%').color(ThemeColors.border).margin({ left: 16, right: 16 })
+
       Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignItems: ItemAlign.Center }) {
         ForEach(this.searchHistory, (item: SearchHistoryItem) => {
           Text(item.w)
@@ -529,7 +531,8 @@ export struct LibraryPage {
     .position({ x: 0, y: 56 })
     .backgroundColor(ThemeColors.bgCard)
     .borderRadius(12)
-    .shadow({ radius: 8, color: '#00000018', offsetY: 4 })
+    .border({ width: 1, color: ThemeColors.border })
+    .shadow({ radius: 18, color: '#0000002E', offsetY: 8 })
     .zIndex(100)
   }
 
