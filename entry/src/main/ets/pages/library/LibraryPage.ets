@@ -496,10 +496,10 @@ export struct LibraryPage {
     this.searchBooks();
   }
 
-  // 搜索历史短浮层：搜索框下方白卡，只显示历史标签（无搜索建议）
+  // 搜索历史浮层：紧贴搜索框下方，像搜索框原生下拉（无变暗遮罩）
   @Builder historyPanel() {
     Stack({ alignContent: Alignment.Top }) {
-      // 历史卡片（下移贴到搜索框下方）
+      // 历史卡片：紧贴搜索框底部弹出
       Column() {
         Row() {
           Text('搜索历史').fontSize(13).fontColor(ThemeColors.textSecondary)
@@ -511,39 +511,33 @@ export struct LibraryPage {
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
               .onClick(() => { this.clearSearchHistory(); })
           }
-        }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
+        }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 6 })
 
         Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignItems: ItemAlign.Center }) {
           ForEach(this.searchHistory, (item: SearchHistoryItem) => {
-            Row({ space: 4 }) {
-              if (item.f && item.f !== 'keyWord') {
-                Text(this.fieldLabelOf(item.f))
-                  .fontSize(10).fontColor('#999999')
-              }
-              Text(item.w)
-                .fontSize(12).fontColor(ThemeColors.textPrimary)
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            }
-            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-            .backgroundColor(ThemeColors.bgInput)
-            .borderRadius(12)
-            .constraintSize({ maxWidth: 200 })
-            .margin({ right: 8, bottom: 6 })
-            .onClick(() => { this.applyHistory(item); })
+            Text(item.w)
+              .fontSize(13).fontColor(ThemeColors.textPrimary)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor(ThemeColors.bgInput)
+              .borderRadius(14)
+              .constraintSize({ maxWidth: 220 })
+              .margin({ right: 8, bottom: 8 })
+              .onClick(() => { this.applyHistory(item); })
           }, (item: SearchHistoryItem, idx?: number) => `hist_${idx}_${item.w}`)
-        }.width('100%').padding({ left: 16, right: 8, top: 4, bottom: 8 })
+        }.width('100%').padding({ left: 16, right: 16, top: 4, bottom: 10 })
       }
       .width('100%')
-      .margin({ top: 52 + this.statusBarHeight + 56 })
+      .margin({ top: 56 })
       .backgroundColor(ThemeColors.bgCard)
       .borderRadius(12)
-      .shadow({ radius: 4, color: '#00000010', offsetY: 2 })
-      .zIndex(1)
+      .shadow({ radius: 8, color: '#00000018', offsetY: 4 })
+      .zIndex(2)
 
-      // 点击下方空白处收起历史
+      // 透明点击层：点空白处收起（不变暗，像搜索框下拉）
       Column()
         .width('100%').layoutWeight(1)
-        .backgroundColor('#000000').opacity(0.04)
+        .backgroundColor(Color.Transparent)
         .onClick(() => { this.searchInputController.stopEditing(); this.searchFocused = false; })
     }
     .width('100%').height('100%')
