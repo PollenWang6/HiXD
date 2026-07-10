@@ -97,6 +97,9 @@ export struct LibraryPage {
   @State books: BookItem[] = [];
   @State borrowList: BorrowItem[] = [];
   @State errorMsg: string = '';
+  @State historyShow: boolean = false;
+  @State historyAlpha: number = 0;
+  @State historyScale: number = 0.96;
   @State currentTab: number = 0;
   @State isSearching: boolean = false;
   @State selectedBook: BookItem | null = null;
@@ -480,12 +483,35 @@ export struct LibraryPage {
     this.saveSearchHistory();
   }
 
+  // 浮层动画显隐：用 animateTo 显式驱动透明度+缩放，规避 @Builder 内 transition 隐式转场不触发的问题
+  private showHistory(): void {
+    if (this.searchHistory.length === 0) { return; }
+    this.historyAlpha = 0;
+    this.historyScale = 0.96;
+    this.historyShow = true;
+    animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+      this.historyAlpha = 1;
+      this.historyScale = 1;
+    });
+  }
+
+  private hideHistory(): void {
+    if (!this.historyShow) { return; }
+    animateTo({ duration: 150, curve: Curve.EaseIn, onFinish: () => {
+      this.historyShow = false;
+    } }, () => {
+      this.historyAlpha = 0;
+      this.historyScale = 0.96;
+    });
+  }
+
   // 点击历史标签：回填字段+关键词并立即搜索
   private applyHistory(item: SearchHistoryItem): void {
     this.searchField = item.f;
     this.searchWord = item.w;
     this.searchInputController.stopEditing();
     this.searchFocused = false;
+    this.hideHistory();
     this.searchBooks();
   }
 
@@ -493,6 +519,7 @@ export struct LibraryPage {
   private doSearch(): void {
     this.searchInputController.stopEditing();
     this.searchFocused = false;
+    this.hideHistory();
     this.searchBooks();
   }
 
@@ -534,7 +561,8 @@ export struct LibraryPage {
     .border({ width: 1, color: ThemeColors.border })
     .shadow({ radius: 18, color: '#0000002E', offsetY: 8 })
     .zIndex(100)
-    .transition({ type: TransitionType.Insert | TransitionType.Delete, opacity: 0, scale: { x: 0.96, y: 0.96 } })
+    .opacity(this.historyAlpha)
+    .scale({ x: this.historyScale, y: this.historyScale })
   }
 
   build() {
@@ -552,8 +580,8 @@ export struct LibraryPage {
           .layoutWeight(1).height(40).borderRadius(20).backgroundColor(ThemeColors.bgInput).padding({ left: 16, right: 16 })
           .onChange((v: string) => { this.searchWord = v; })
           .onSubmit(() => { this.doSearch(); })
-          .onFocus(() => { this.searchFocused = true; })
-          .onBlur(() => { this.searchFocused = false; })
+          .onFocus(() => { this.searchFocused = true; this.showHistory(); })
+          .onBlur(() => { this.searchFocused = false; this.hideHistory(); })
         Button('搜索').height(40).borderRadius(20).backgroundColor('#8E24AA').fontColor('#FFFFFF')
           .onClick(() => { this.doSearch(); })
       }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
@@ -617,6 +645,7 @@ export struct LibraryPage {
                   // 点书先强制收起搜索框键盘与历史浮层（书籍项不可获焦，不会触发 onBlur）
                   this.searchInputController.stopEditing();
                   this.searchFocused = false;
+                  this.hideHistory();
                   this.selectedBook = book;
                   animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
                     this.bookMaskOpacity = 1;
@@ -649,7 +678,7 @@ export struct LibraryPage {
             // 滚动结果列表时收起搜索框键盘与历史浮层
             if (this.searchFocused) {
               this.searchInputController.stopEditing();
-              this.searchFocused = false;
+              this.hideHistory();
             }
           })
         } else {
@@ -755,7 +784,7 @@ export struct LibraryPage {
             // 滚动借阅列表时同样收起搜索框键盘与历史浮层
             if (this.searchFocused) {
               this.searchInputController.stopEditing();
-              this.searchFocused = false;
+              this.hideHistory();
             }
           })
           }.layoutWeight(1)
@@ -777,7 +806,7 @@ export struct LibraryPage {
         }
         .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
 
-        if (this.searchFocused && this.searchHistory.length > 0) {
+        if (this.historyShow) {
           this.historyPanel()
         }
 
