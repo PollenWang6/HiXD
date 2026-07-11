@@ -109,6 +109,19 @@ export struct PortalWebPage {
                 // 允许证书过期的 HTTPS 站点加载（如 experiment-helper.wizzstudio.com）
                 event.handler.handleConfirm();
               })
+              .onLoadIntercept((event) => {
+                // 超星服务大厅的「座位预约」按钮 JS 会跳转到微信 OAuth（open.weixin.qq.com），
+                // WebView 不在微信环境内，OCP 会白屏。拦截跳转，提取 redirect_uri 直接加载座位页。
+                const u: string = event.data.getRequestUrl();
+                if (u.includes('open.weixin.qq.com')) {
+                  const m: string[] | null = u.match(/redirect_uri=([^&]+)/);
+                  if (m && m[1]) {
+                    this.webController.loadUrl(decodeURIComponent(m[1]));
+                  }
+                  return true; // 拦截，不走微信 OAuth
+                }
+                return false;
+              })
               .width('100%').height('100%')
               .javaScriptAccess(true)
               .domStorageAccess(true)
