@@ -589,55 +589,6 @@ export class CasLoginService {
     }
   }
 
-  // 西电 CAS → 超星 统一 SSO：用已有 CAS TGC 走 ids.xidian.edu.cn SSO 进超星，
-  // 拿到超星会话 cookie 后注入 WebView，实现"WebView 内免登超星"。
-  // 参照 AttendanceService.loginToLearning（native 同款西电→超星 SSO）与 preWalkAndSyncTarget 的注入模式。
-  // 调用前需保证 CAS TGC 已在 native cookieStore（通常 checkAndAutoLogin 已恢复）。
-  async ensureChaoxingSessionForWebView(): Promise<void> {
-    // 1) 用 CAS TGC 走西电→超星 SSO，重定向链会把超星会话 cookie 写入 native jar
-    const ssoUrl: string = 'https://ids.xidian.edu.cn/authserver/login?service=' +
-      encodeURIComponent('https://xdspoc.fanya.chaoxing.com/sso/xdspoc');
-    try {
-      await this.http.get(ssoUrl);
-    } catch (e) { /* 重定向/超时忽略，cookie 已落 jar */ }
-
-    // 2) 跨子域复制，确保各超星子域都有会话
-    const srcDomains: string[] = ['xdspoc.fanya.chaoxing.com', 'ids.xidian.edu.cn', 'fanya.chaoxing.com'];
-    const dstDomains: string[] = [
-      'office.chaoxing.com',
-      'fanya.chaoxing.com',
-      'xdspoc.fanya.chaoxing.com',
-      'mobilelearn.chaoxing.com',
-      'mh.chaoxing.com',
-      'passport2.chaoxing.com'
-    ];
-    for (let i = 0; i < srcDomains.length; i++) {
-      for (let j = 0; j < dstDomains.length; j++) {
-        this.http.copyCookiesForDomain(srcDomains[i], dstDomains[j]);
-      }
-    }
-
-    // 3) 把 native jar 里的所有超星 cookie 强制注入 WebView
-    //    Domain=.chaoxing.com 覆盖全部子域（含 office.chaoxing.com 座位预约）
-    const WCM = web_webview.WebCookieManager;
-    for (let k = 0; k < dstDomains.length; k++) {
-      const c: string = this.http.getCookiesForDomain(dstDomains[k]);
-      if (!c || c.length === 0) { continue; }
-      const pairs: string[] = c.split(';');
-      for (let p = 0; p < pairs.length; p++) {
-        const kv: string = pairs[p].trim();
-        if (kv.length === 0) { continue; }
-        const eq: number = kv.indexOf('=');
-        if (eq <= 0) { continue; }
-        const name: string = kv.substring(0, eq);
-        const val: string = kv.substring(eq + 1);
-        try {
-          WCM.setCookie('https://office.chaoxing.com', name + '=' + val + '; Domain=.chaoxing.com; Path=/');
-        } catch (e) { /* ignore */ }
-      }
-    }
-  }
-
   // HTTP 层预热：订水 OAuth 走一遍，xxcapp session 入 HTTP cookieStore，再同步到 WebView
   // 调用时机：登录成功后（HTTP 层已有 TGC），不需要 WebView
   async warmUpWebViewSession(): Promise<void> {

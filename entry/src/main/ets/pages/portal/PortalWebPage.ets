@@ -54,17 +54,7 @@ export struct PortalWebPage {
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
     this.context = getContext(this) as common.UIAbilityContext;
-    if (this.url.includes('seatengine') || this.url.includes('office.chaoxing.com') || this.url.includes('v1.chaoxing.com')) {
-      // 超星座位预约：入口是西电移动门户 OAuth 代理（xxcapp/uc/api/oauth/index?redirect=…），
-      // 代理需要 CAS cookie（已同步到 WebView）来识别用户、现场签发 code/uid 票据并 302 到座位页。
-      // 同步注入超星会话确保座位页加载时已有超星登录态（免登）。
-      const cxOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
-      if (cxOk) {
-        await CasLoginService.getInstance().syncCasCookieOnly();       // CAS 给 xxcapp 代理
-        await CasLoginService.getInstance().ensureChaoxingSessionForWebView(); // 超星给座位页
-      }
-      // webUrl = this.url（即 OAuth 代理 URL）；代理会 302 跳转，WebView 自动跟踪到座位页
-    } else if (this.useWeChatUA) {
+    if (this.useWeChatUA) {
       // 移动门户：清除旧脏 cookie + 只同步 CASTGC，避免 route/JSESSIONID/MOD_AUTH_CAS
       // 污染 xxcapp OpenResty 路由 → 子页面显示随机 hash（如 250bb948bd643d8b18f4c0fdd72a059d）
       CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
