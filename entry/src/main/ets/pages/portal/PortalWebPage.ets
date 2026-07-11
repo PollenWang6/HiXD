@@ -6,6 +6,7 @@ import web_webview from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { common } from '@kit.AbilityKit';
 import { CasLoginService } from '../../services/CasLoginService';
+import { HttpUtil } from '../../utils/HttpUtil';
 const TAG = 'PortalWebPage';
 
 // 需要拉起外部 App 的自定义 scheme（微信支付、支付宝等）
@@ -41,6 +42,7 @@ export struct PortalWebPage {
   @Prop isTablet: boolean = false;
   @Prop useIncognito: boolean = false;  // 隐私模式，cookie 不持久化
   @State uaMode: number = UA_AUTO;  // 当前 UA 模式
+  @State needCxLogin: boolean = false;  // 超星需要先登录
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
   private context!: common.UIAbilityContext;
@@ -52,7 +54,17 @@ export struct PortalWebPage {
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
     this.context = getContext(this) as common.UIAbilityContext;
-    if (this.useWeChatUA) {
+    if (this.url.includes('seatengine') || this.url.includes('office.chaoxing.com')) {
+      // 超星座位预约：入口是西电移动门户 OAuth 代理（xxcapp/uc/api/oauth/index?redirect=…），
+      // 代理需要 CAS cookie（已同步到 WebView）来识别用户、现场签发 code/uid 票据并 302 到座位页。
+      // 同步注入超星会话确保座位页加载时已有超星登录态（免登）。
+      const cxOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
+      if (cxOk) {
+        await CasLoginService.getInstance().syncCasCookieOnly();       // CAS 给 xxcapp 代理
+        await CasLoginService.getInstance().ensureChaoxingSessionForWebView(); // 超星给座位页
+      }
+      // webUrl = this.url（即 OAuth 代理 URL）；代理会 302 跳转，WebView 自动跟踪到座位页
+    } else if (this.useWeChatUA) {
       // 移动门户：清除旧脏 cookie + 只同步 CASTGC，避免 route/JSESSIONID/MOD_AUTH_CAS
       // 污染 xxcapp OpenResty 路由 → 子页面显示随机 hash（如 250bb948bd643d8b18f4c0fdd72a059d）
       CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
@@ -109,6 +121,12 @@ export struct PortalWebPage {
               .onPageEnd((event) => {
                 this.isLoading = false;
                 const pageUrl: string = event ? event.url : this.url;
+                // 超星登录成功后跳转到目标 URL
+                if (this.needCxLogin && !pageUrl.includes('passport2.chaoxing.com/login') && !pageUrl.includes('passport2.chaoxing.com/wlogin')) {
+                  this.needCxLogin = false;
+                  this.webUrl = this.url;
+                  return;
+                }
                 // 诊断：加载后看 xxcapp cookie 变了没
                 if (this.useWeChatUA && !this.keepWeChatUA) {
                   this.webController.setCustomUserAgent('');
@@ -118,6 +136,10 @@ export struct PortalWebPage {
               })
               .onOverrideUrlLoading((req) => {
                 const schemeUrl: string = req.getRequestUrl();
+                // 拦截超星 jsbridge:// 协议，避免 ERR_UNKNOWN_URL_SCHEME
+                if (schemeUrl.startsWith('jsbridge://')) {
+                  return true;
+                }
                 for (let i = 0; i < EXTERNAL_SCHEMES.length; i++) {
                   if (schemeUrl.startsWith(EXTERNAL_SCHEMES[i])) {
                     try {
@@ -141,6 +163,10 @@ export struct PortalWebPage {
                   const errInfo: string = event.error.getErrorInfo();
                   const errCode: number = event.error.getErrorCode();
                   const errUrl: string = event.request ? event.request.getRequestUrl() : '?';
+                  // 忽略 jsbridge:// 等自定义协议的 ERR_UNKNOWN_URL_SCHEME 错误
+                  if (errCode === -302 || errUrl.startsWith('jsbridge://')) {
+                    return;
+                  }
                   this.loadError = '加载失败: ' + errInfo;
                   this.isLoading = false;
                 }
