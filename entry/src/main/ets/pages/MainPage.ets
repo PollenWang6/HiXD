@@ -361,7 +361,7 @@ struct MainPage {
     ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity', 'Sport'];
   @State portalSortOn: boolean = false;
   @State portalMenuOrder: string[] =
-    ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb', 'CxSeat'];
+    ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb'];
 
   private homeMenuItemClick(name: string): void {
     const names: Record<string, string> = {
@@ -1964,14 +1964,6 @@ AppStorage.set('loginStatus', 'expired');
       PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Physics') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '物理计算', url: 'https://experiment-helper.wizzstudio.com/#/', isTablet: this.isTablet })
-    } else if (name === 'PortalWeb_CxSeat') {
-      // 超星座位预约（seatengine）是签名深链专属应用——西电移动门户 OAuth 代理会给当前用户
-      // 现场签发 code/uid 等票据并 302 到座位页。这里直接加载代理 URL（WebView 已同步 CAS cookie），
-      // 代理自动 mint → 302 → seatengine；PortalWebPage 侧同步注入超星会话免登。
-      // （模式同 水电缴费：xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=...）
-      PortalWebPage({ pageInfo: this.pageInfo, title: '超星座位',
-        url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https%3A%2F%2Foffice.chaoxing.com%2Ffront%2Fthird%2Fapps%2Fseatengine%2Findex%3FmappId%3D20002259%26wfwEnc%3D76F0A82DFB9E5287B073928787555E66%26appId%3D1da12510da30428bbfd454d88a4d66d1%26wxAppid%3Dwx8e3134109fdaf3d6%26fidEnc%3D857e31087c860527',
-        isTablet: this.isTablet })
     } else if (name === 'AttendancePage') {
       AttendancePage({ pageInfo: this.pageInfo })
     } else if (name === 'DormWaterPage') {
@@ -3562,9 +3554,6 @@ AppStorage.set('loginStatus', 'not_logged_in');
     } else if (name === 'SchoolCardWeb') {
       this.MenuItemBuilder('🪪', '校园卡服务', '挂失/解绑/修改密码', '#FF7043',
         () => { this.pageInfo.pushPath({ name: 'PortalWeb_SchoolCard' }); })
-    } else if (name === 'CxSeat') {
-      this.MenuItemBuilder('🪑', '超星座位', '图书馆座位预约', '#1565C0',
-        () => { this.pageInfo.pushPath({ name: 'PortalWeb_CxSeat' }); })
     }
   }
 
