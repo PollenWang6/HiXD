@@ -361,7 +361,7 @@ struct MainPage {
     ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity', 'Sport'];
   @State portalSortOn: boolean = false;
   @State portalMenuOrder: string[] =
-    ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb'];
+    ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb', 'CxSeat'];
 
   private homeMenuItemClick(name: string): void {
     const names: Record<string, string> = {
@@ -1964,6 +1964,10 @@ AppStorage.set('loginStatus', 'expired');
       PortalWebPage({ pageInfo: this.pageInfo, title: '水电缴费', url: 'https://xxcapp.xidian.edu.cn/uc/api/oauth/index?redirect=https://ignypt.xidian.edu.cn/revenueH5/login?opcode=MPAY&appid=200260318155520600' , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Physics') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '物理计算', url: 'https://experiment-helper.wizzstudio.com/#/', isTablet: this.isTablet })
+    } else if (name === 'PortalWeb_CxSeat') {
+      PortalWebPage({ pageInfo: this.pageInfo, title: '超星座位',
+        url: 'http://v1.chaoxing.com/wechatSet/mobileIndex?type=1&fidEnc=2dec707fb0b62581&pageId=2896&wxAppid=wx8e3134109fdaf3d6&menuType=view',
+        useWeChatUA: true, keepWeChatUA: true, isTablet: this.isTablet })
     } else if (name === 'AttendancePage') {
       AttendancePage({ pageInfo: this.pageInfo })
     } else if (name === 'DormWaterPage') {
@@ -3554,6 +3558,9 @@ AppStorage.set('loginStatus', 'not_logged_in');
     } else if (name === 'SchoolCardWeb') {
       this.MenuItemBuilder('🪪', '校园卡服务', '挂失/解绑/修改密码', '#FF7043',
         () => { this.pageInfo.pushPath({ name: 'PortalWeb_SchoolCard' }); })
+    } else if (name === 'CxSeat') {
+      this.MenuItemBuilder('🪑', '超星座位', '图书馆座位预约', '#1565C0',
+        () => { this.pageInfo.pushPath({ name: 'PortalWeb_CxSeat' }); })
     }
   }
 

@@ -54,7 +54,7 @@ export struct PortalWebPage {
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
     this.context = getContext(this) as common.UIAbilityContext;
-    if (this.url.includes('seatengine') || this.url.includes('office.chaoxing.com')) {
+    if (this.url.includes('seatengine') || this.url.includes('office.chaoxing.com') || this.url.includes('v1.chaoxing.com')) {
       // 超星座位预约：入口是西电移动门户 OAuth 代理（xxcapp/uc/api/oauth/index?redirect=…），
       // 代理需要 CAS cookie（已同步到 WebView）来识别用户、现场签发 code/uid 票据并 302 到座位页。
       // 同步注入超星会话确保座位页加载时已有超星登录态（免登）。
