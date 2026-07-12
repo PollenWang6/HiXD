@@ -1,5 +1,5 @@
-import { ToastUtil } from '../utils/ToastUtil';
-﻿// MainPage.ets - 底部Tab栏主页(主页·更多功能·我的)
+﻿import { ToastUtil } from '../utils/ToastUtil';
+// MainPage.ets - 底部Tab栏主页(主页·更多功能·我的)
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { ThemeColors } from '../utils/ThemeColors';
 import { AccentColors, ACCENT_PRESETS } from '../utils/AccentColors';
@@ -28,6 +28,7 @@ import { CalendarExportPage } from './calendar_export/CalendarExportPage';
 import { AttendancePage } from './attendance/AttendancePage';
 import { DormWaterPage } from './dormwater/DormWaterPage';
 import { SportPage } from './sport/SportPage';
+import { SeatPage } from './seat/SeatPage';
 import { UserInfoService } from '../services/UserInfoService';
 import { AttendanceService } from '../services/AttendanceService';
 import { application, common } from '@kit.AbilityKit';
@@ -113,7 +114,14 @@ struct MainPage {
     if (this.showBgDialog) { this.closeBgDialog(); return true; }
     if (this.showUpdateDialog) { this.showUpdateDialog = false; return true; }
     if (this.showCaptcha) { this.closeCaptcha(); return true; }
-    return false;
+    // 有子页面在栈上 → 返回上一级（弹栈），不退出应用
+    if (this.pageInfo.getAllPathName().length > 0) {
+      this.pageInfo.pop();
+      return true;
+    }
+    // 主页根页面 → 退出应用（初页面返回键 = 退出）
+    this.context.terminateSelf();
+    return true;
   }
 
   // 弹窗动画关闭方法
@@ -358,7 +366,7 @@ struct MainPage {
   // ==================== 菜单排序 ====================
   @State homeSortOn: boolean = false;
   @State homeMenuOrder: string[] =
-    ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity', 'Sport'];
+    ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity', 'Sport', 'Seat'];
   @State portalSortOn: boolean = false;
   @State portalMenuOrder: string[] =
     ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb'];
@@ -369,7 +377,7 @@ struct MainPage {
       'SchoolNet': 'SchoolNetPage', 'EmptyClass': 'EmptyClassroomPage',
       'SchoolCard': 'SchoolCardPage', 'Attendance': 'AttendancePage',
       'Water': 'DormWaterPage', 'Experiment': 'ExperimentPage',
-      'Electricity': 'ElectricityPage', 'Sport': 'SportPage'
+      'Electricity': 'ElectricityPage', 'Sport': 'SportPage', 'Seat': 'SeatPage'
     };
     const route = names[name];
     if (route) { this.pageInfo.clear(); this.pageInfo.pushPath({ name: route }); }
@@ -399,7 +407,7 @@ struct MainPage {
     const saved = PreferenceUtil.getString('home_menu_order');
     if (saved.length > 0) {
       const arr = saved.split(',');
-      if (arr.length === 11) { this.homeMenuOrder = arr; }
+      if (arr.length === 12) { this.homeMenuOrder = arr; }
     }
   }
 
@@ -442,6 +450,8 @@ struct MainPage {
 
   aboutToAppear() {
     this.context = getContext(this) as common.UIAbilityContext;
+    // 把主页 Navigation 栈暴露给 EntryAbility，用于「根页面返回=退出 App」判断
+    AppStorage.setOrCreate('mainNavStack', this.pageInfo);
     this.loadHomeMenuOrder();
     this.loadPortalMenuOrder();
     // 卡片点击跳转
@@ -1970,6 +1980,8 @@ AppStorage.set('loginStatus', 'expired');
       DormWaterPage({ pageInfo: this.pageInfo })
     } else if (name === 'SportPage') {
       SportPage({ pageInfo: this.pageInfo })
+    } else if (name === 'SeatPage') {
+      SeatPage({ pageInfo: this.pageInfo })
     }
   }
 
@@ -3519,6 +3531,9 @@ AppStorage.set('loginStatus', 'not_logged_in');
     } else if (name === 'Sport') {
       this.MenuItemBuilder('🏀', '体育信息', '体测成绩与课程安排', '#2E7D32',
         () => { this.homeMenuItemClick('Sport'); })
+    } else if (name === 'Seat') {
+      this.MenuItemBuilder('🪑', '座位预约', '图书馆自习室在线预约', '#1565C0',
+        () => { this.homeMenuItemClick('Seat'); })
     }
   }
 

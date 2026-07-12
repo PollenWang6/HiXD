@@ -103,6 +103,7 @@ export struct PortalWebPage {
               .javaScriptAccess(true)
               .domStorageAccess(true)
               .cacheMode(CacheMode.Default)
+              .mixedMode(MixedMode.All)
               .onPageBegin((event) => {
                 this.isLoading = true;
                 this.loadError = '';
@@ -157,6 +158,11 @@ export struct PortalWebPage {
                   if (errCode === -302 || errUrl.startsWith('jsbridge://')) {
                     return;
                   }
+                  // 只处理主框架(main frame)错误；子资源(图片/JS/CSS)加载失败
+                  // 不应盖住整页（如 repair.xidian.edu.cn 某图片 ERR_CONTENT_LENGTH_MISMATCH）
+                  if (event.request && !event.request.isMainFrame()) {
+                    return;
+                  }
                   this.loadError = '加载失败: ' + errInfo;
                   this.isLoading = false;
                 }
@@ -204,6 +210,22 @@ export struct PortalWebPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .backgroundColor(ThemeColors.bgPage)
     .hideBackButton(true)
+    // 系统返回手势 = 网页后退（在门户历史里退一步）；到根则退出子页面回到主页（与左上角 ❌ 等价）
+    .onBackPressed(() => {
+      let canGoBack = false;
+      try {
+        canGoBack = this.webController.accessBackward();
+      } catch (_e) {
+        // WebView 尚未关联组件，忽略
+      }
+      if (canGoBack) {
+        try { this.webController.backward(); } catch (_e) { }
+        return true;
+      }
+      // 已到网页根目录：退出子页面，回到主页
+      this.pageInfo.pop();
+      return true;
+    })
 
 
   }
@@ -229,24 +251,14 @@ export struct PortalWebPage {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
 
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
-        Image($r('app.media.back'))
+        Image($r('app.media.refresh'))
           .height(22)
           .fillColor(ThemeColors.textPrimary)
           .draggable(false)
       }
       .height(40)
       .width(40)
-      .onClick(() => { this.webController.backward(); })
-
-      Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
-        Image($r('app.media.forth'))
-          .height(22)
-          .fillColor(ThemeColors.textPrimary)
-          .draggable(false)
-      }
-      .height(40)
-      .width(40)
-      .onClick(() => { this.webController.forward(); })
+      .onClick(() => { this.webController.refresh(); })
 
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.more_opinion'))
@@ -265,8 +277,9 @@ export struct PortalWebPage {
 
   @Builder WebviewMenu() {
     Menu() {
-      MenuItem({ content: '刷新', startIcon: $r('app.media.refresh') })
-        .onClick(() => { this.webController.refresh(); })
+      MenuItem({ content: '前进', startIcon: $r('app.media.forth') })
+        .enabled(this.webController.accessForward())
+        .onClick(() => { this.webController.forward(); })
       MenuItem({ content: '切换 UA', builder: this.changeUAMenu(),
         startIcon: $r('app.media.ic_public_rotate_switch'), endIcon: $r('app.media.ic_public_arrow_right') })
         .enabled(!this.useWeChatUA)
