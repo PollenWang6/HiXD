@@ -52,14 +52,19 @@ export struct SegmentTab {
       // Tab 栏
       Stack({ alignContent: Alignment.TopStart }) {
         // 胶囊背景（垂直居中：top=6, height=32, 总44）
+        // 位置直接用 Stack 坐标，x = 当前页偏移 + 滑动偏移 + 每页宽 10%
         Row()
           .width(this.perTabW * 0.8)
           .height(32)
           .borderRadius(16)
           .backgroundColor(this.accentColor + '20')
-          .margin({ left: this.capsuleX + this.capsuleSwipe + this.perTabW * 0.1, top: 6 })
+          .position({
+            x: this.capsuleX + this.capsuleSwipe + this.perTabW * 0.1,
+            y: 6
+          })
 
-        // 文字（上层）
+        // 文字（上层）。宽度显式绑定到 Stack 实测宽度，
+        // 保证文字均分与胶囊/指示器使用同一坐标系，任意父级容器下都对齐。
         Row() {
           ForEach(this.tabs, (tab: string, idx: number) => {
             Column() {
@@ -81,28 +86,32 @@ export struct SegmentTab {
             })
           }, (tab: string, idx: number) => `seg_${idx}_${tab}`)
         }
-        .width('100%')
-        .onAreaChange((_old: Area, newArea: Area) => {
-          const w: number = newArea.width as number;
-          if (w > 0 && w !== this.barW) {
-            this.barW = w;
-            this.perTabW = w / this.tabs.length;
-            this.capsuleX = this.currentIndex * this.perTabW;
-          }
-        })
+        .width(this.barW)
 
-        // 底部指示器（贴底：top=41 = 44-3）
+        // 底部指示器（贴底：top=41 = 44-3），居中于每页
         Row()
           .width(24)
           .height(3)
           .borderRadius(1.5)
           .backgroundColor(this.accentColor)
-          .margin({ left: this.capsuleX + this.capsuleSwipe + this.perTabW * 0.5 - 12, top: 41 })
+          .position({
+            x: this.capsuleX + this.capsuleSwipe + this.perTabW * 0.5 - 12,
+            y: 41
+          })
       }
       .width('100%')
       .height(44)
-      .padding({ left: 16, right: 16 })
       .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
+      // 关键：宽度以 Stack 自身为准（胶囊/指示器的坐标父级），
+      // 不再依赖文字 Row 的 onAreaChange，避免不同父容器下两套坐标错位。
+      .onAreaChange((_old: Area, newArea: Area) => {
+        const w: number = newArea.width as number;
+        if (w > 0) {
+          this.barW = w;
+          this.perTabW = w / this.tabs.length;
+          this.capsuleX = this.currentIndex * this.perTabW;
+        }
+      })
 
       // Swiper 内容区
       Swiper(this.swiperCtrl) {
@@ -136,7 +145,7 @@ export struct SegmentTab {
       })
       .layoutWeight(1)
     }
-    .width('100%')
+    .width('100%').layoutWeight(1)
   }
 
   getTextActive(idx: number): number {
