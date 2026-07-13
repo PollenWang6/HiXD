@@ -1,6 +1,13 @@
 // SegmentTab.ets — 通用分段 Tab + Swiper 组件
 // 胶囊背景 springMotion 滑动 + 文字颜色插值 + 手势跟随 + Swiper 联动
 //
+// 设计要点（修复平板首帧错位）：
+//   - 胶囊/指示器宽度直接设为单页百分比 `100/len%`，用 translate 百分比平移。
+//     translate 的百分比是「相对自身宽」，故进度 progress(第几页的小数) 直接驱动，
+//     **不依赖任何测量宽度**，手机/平板首帧即正确，无需 onAreaChange 修正。
+//   - 仅 Swiper.onAreaChange 保留 swiperWidth，且仅用于手势滑动比例换算，
+//     静止定位完全不依赖它，不存在首帧错位问题。
+//
 // 用法：
 //   SegmentTab({
 //     tabs: ['电费', '水费'],
@@ -25,25 +32,22 @@ export struct SegmentTab {
   onTabChange?: (index: number) => void = undefined;
   @BuilderParam content: () => void = this.defaultContent;
 
-  // 胶囊位置（动画目标值）
-  @State capsuleX: number = 0;
-  // 手势滑动偏移
-  @State capsuleSwipe: number = 0;
-  // 文字进度（0 = tab0, 1 = tab1）
+  // 胶囊/指示器进度（单位：页）。0 = 第0页，1 = 第1页，可带小数做滑动跟随。
+  @State capsuleProgress: number = 0;
+  // 文字颜色插值进度（0 = tab0, 1 = tab1，可带小数）
   @State textProgress: number = 0;
   @State textSwipeProgress: number = 0;
-  // 容器宽度
-  @State barW: number = 360;
-  private perTabW: number = 180;
+  // 仅用于手势滑动比例换算（不影响静止定位）
+  private swiperWidth: number = 0;
   private swiperCtrl: SwiperController = new SwiperController();
-  private swiperWidth: number = 360;
 
   @Builder defaultContent() {
     Column().width('100%')
   }
 
   aboutToAppear(): void {
-    // 初始化胶囊位置
+    // 首帧即按当前页定位，无需等测量 —— 这是修复平板错位的关键
+    this.capsuleProgress = this.currentIndex;
     this.textProgress = this.currentIndex;
   }
 
@@ -51,20 +55,22 @@ export struct SegmentTab {
     Column() {
       // Tab 栏
       Stack({ alignContent: Alignment.TopStart }) {
-        // 胶囊背景（垂直居中：top=6, height=32, 总44）
-        // 位置直接用 Stack 坐标，x = 当前页偏移 + 滑动偏移 + 每页宽 10%
-        Row()
-          .width(this.perTabW * 0.8)
-          .height(32)
-          .borderRadius(16)
-          .backgroundColor(this.accentColor + '20')
-          .position({
-            x: this.capsuleX + this.capsuleSwipe + this.perTabW * 0.1,
-            y: 6
-          })
+        // 滑动胶囊：外层宽度 = 单页宽(百分比)，translate 百分比(相对自身宽=单页宽)
+        // 平移 progress*100% 即把胶囊移到第 progress 页；内层 80% 宽做视觉内缩。
+        Row() {
+          Row()
+            .width('80%')
+            .height(32)
+            .borderRadius(16)
+            .backgroundColor(this.accentColor + '20')
+        }
+        .width(`${100 / this.tabs.length}%`)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .translate({ x: `${this.capsuleProgress * 100}%` })
 
-        // 文字（上层）。宽度显式绑定到 Stack 实测宽度，
-        // 保证文字均分与胶囊/指示器使用同一坐标系，任意父级容器下都对齐。
+        // 文字（上层）。每页 layoutWeight(1) 均分，宽度 100% 父级，
+        // 与胶囊/指示器共用同一百分比坐标系，任意父容器下都对齐。
         Row() {
           ForEach(this.tabs, (tab: string, idx: number) => {
             Column() {
@@ -86,32 +92,27 @@ export struct SegmentTab {
             })
           }, (tab: string, idx: number) => `seg_${idx}_${tab}`)
         }
-        .width(this.barW)
+        .width('100%')
 
-        // 底部指示器（贴底：top=41 = 44-3），居中于每页
-        Row()
-          .width(24)
-          .height(3)
-          .borderRadius(1.5)
-          .backgroundColor(this.accentColor)
-          .position({
-            x: this.capsuleX + this.capsuleSwipe + this.perTabW * 0.5 - 12,
-            y: 41
-          })
+        // 底部指示器（贴底：top=41 = 44-3）。
+        // 外层宽度=单页宽并 translate 平移(相对自身宽=单页宽)，内层固定 24px 小横条居中
+        // → 任意屏幕下都是「小条居中于当前页」，不再随屏宽变长。
+        Row() {
+          Row()
+            .width(42)
+            .height(3)
+            .borderRadius(1.5)
+            .backgroundColor(this.accentColor)
+        }
+        .width(`${100 / this.tabs.length}%`)
+        .height(3)
+        .justifyContent(FlexAlign.Center)
+        .position({ y: 41 })
+        .translate({ x: `${this.capsuleProgress * 100}%` })
       }
       .width('100%')
       .height(44)
       .border({ width: { bottom: 0.5 }, color: ThemeColors.border })
-      // 关键：宽度以 Stack 自身为准（胶囊/指示器的坐标父级），
-      // 不再依赖文字 Row 的 onAreaChange，避免不同父容器下两套坐标错位。
-      .onAreaChange((_old: Area, newArea: Area) => {
-        const w: number = newArea.width as number;
-        if (w > 0) {
-          this.barW = w;
-          this.perTabW = w / this.tabs.length;
-          this.capsuleX = this.currentIndex * this.perTabW;
-        }
-      })
 
       // Swiper 内容区
       Swiper(this.swiperCtrl) {
@@ -125,16 +126,15 @@ export struct SegmentTab {
       })
       .onGestureSwipe((_index: number, event: SwiperAnimationEvent) => {
         const offset: number = event.currentOffset as number;
-        if (this.swiperWidth <= 0 || this.perTabW <= 0) return;
+        if (this.swiperWidth <= 0) return;
+        // 偏移 / 页宽 = 0..1 的「页分数」，直接累加到胶囊进度上做跟随
         const ratio: number = Math.abs(offset) / this.swiperWidth;
-        const move: number = ratio >= 1 ? this.perTabW : this.perTabW * ratio;
-        this.capsuleSwipe = offset < 0 ? move : -move;
+        this.capsuleProgress = this.currentIndex + (offset < 0 ? ratio : -ratio);
         this.textSwipeProgress = offset < 0 ? ratio : -ratio;
       })
       .onAnimationStart((_index: number, targetIndex: number, _event: SwiperAnimationEvent) => {
         animateTo({ duration: 350, curve: curves.springMotion(0.38, 0.85) }, () => {
-          this.capsuleX = targetIndex * this.perTabW;
-          this.capsuleSwipe = 0;
+          this.capsuleProgress = targetIndex;
           this.textProgress = targetIndex;
           this.textSwipeProgress = 0;
         });
