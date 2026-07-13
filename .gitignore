@@ -45,3 +45,6 @@ keystore/
 
 # ===================== AI 工具目录 =====================
 .codegenie/
+
+# 例外：隐私弹窗 HAR 模块的配置必须提交（否则 clone 后该模块无法编译）
+!privacy_consent_dialog/build-profile.json5

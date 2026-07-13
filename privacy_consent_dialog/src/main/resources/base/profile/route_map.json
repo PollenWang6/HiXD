@@ -1,0 +1,14 @@
+{
+  "routerMap": [
+    {
+      "name": "PrivacyConsentH5Page",
+      "pageSourceFile": "src/main/ets/pages/PrivacyConsentH5Page.ets",
+      "buildFunction": "buildPrivacyConsentH5Page"
+    },
+    {
+      "name": "PrivacyConsentH5SheetPage",
+      "pageSourceFile": "src/main/ets/pages/PrivacyConsentH5Page.ets",
+      "buildFunction": "buildPrivacyConsentH5Page"
+    }
+  ]
+}
