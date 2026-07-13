@@ -366,7 +366,7 @@ struct MainPage {
   // ==================== 菜单排序 ====================
   @State homeSortOn: boolean = false;
   @State homeMenuOrder: string[] =
-    ['Score', 'Exam', 'Library', 'SchoolNet', 'EmptyClass', 'SchoolCard', 'Attendance', 'Water', 'Experiment', 'Electricity', 'Sport', 'Seat'];
+    ['EmptyClass', 'Library', 'SchoolCard', 'Seat', 'Electricity', 'Water', 'Experiment', 'Exam', 'Attendance', 'Score', 'SchoolNet', 'Sport'];
   @State portalSortOn: boolean = false;
   @State portalMenuOrder: string[] =
     ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb'];
@@ -1955,7 +1955,7 @@ AppStorage.set('loginStatus', 'expired');
     } else if (name === 'PortalWeb_Ruisi') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '睿思导航', url: 'https://nav.xdruisi.cn/', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Net') {
-      PortalWebPage({ pageInfo: this.pageInfo, title: '校园网登录', url: 'https://zfw.xidian.edu.cn/', isTablet: this.isTablet, useIncognito: true })
+      PortalWebPage({ pageInfo: this.pageInfo, title: '校园网', url: 'https://w.xidian.edu.cn/', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_SchoolCard') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '校园卡服务', url: 'https://v8scan.xidian.edu.cn/home/openXDOAuth2Page', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Mail') {
@@ -3564,7 +3564,7 @@ AppStorage.set('loginStatus', 'not_logged_in');
       this.MenuItemBuilder('📧', '学生邮箱', '查看icoremail邮件', '#D32F2F',
         () => { this.pageInfo.pushPath({ name: 'PortalWeb_Mail' }); })
     } else if (name === 'Net') {
-      this.MenuItemBuilder('🌐', '校园网登录', '登录校园网自助服务平台', '#00ACC1',
+      this.MenuItemBuilder('🌐', '校园网', '校园网状态与自助服务', '#00ACC1',
         () => { this.pageInfo.pushPath({ name: 'PortalWeb_Net' }); })
     } else if (name === 'SchoolCardWeb') {
       this.MenuItemBuilder('🪪', '校园卡服务', '挂失/解绑/修改密码', '#FF7043',

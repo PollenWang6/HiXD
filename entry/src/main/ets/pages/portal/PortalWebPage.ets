@@ -51,6 +51,27 @@ export struct PortalWebPage {
     this.portalFullscreen = false;
   }
 
+  // 把 HttpUtil 单例（与主页校园网同一实例）里已登录的 zfw.xidian.edu.cn 会话
+  // 注入 WebView 的 CookieJar，使「更多功能→校园网」打开 w.xidian.edu.cn 后跳转 zfw 时
+  // WebView 已是与主页同账号的登录态；并先清除 WebView 残留的脏 cookie（避免带脏会话
+  // 访问 /site/sso 被服务端判为失效票据而 404）。
+  private syncZfwSessionToWebView(): void {
+    CasLoginService.getInstance().clearWebViewCookiesForDomain('zfw.xidian.edu.cn');
+    const zfwCookies: string = HttpUtil.getInstance().getCookiesForDomain('zfw.xidian.edu.cn');
+    if (zfwCookies.length > 0) {
+      for (const kv of zfwCookies.split('; ')) {
+        const trimmed: string = kv.trim();
+        if (trimmed.length === 0) continue;
+        try {
+          web_webview.WebCookieManager.setCookie(
+            'https://zfw.xidian.edu.cn',
+            trimmed + '; Domain=.xidian.edu.cn; Path=/'
+          );
+        } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
     this.context = getContext(this) as common.UIAbilityContext;
@@ -65,6 +86,11 @@ export struct PortalWebPage {
       const t0 = Date.now();
       const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
       await CasLoginService.getInstance().syncCookiesToWebView();
+      // 打通主页原生校园网已登录的 zfw 会话到 WebView：
+      // 主页 SchoolNetPage 经 SchoolnetService 用 HttpUtil 单例登录 zfw，会话 cookie 只留在
+      // HttpUtil，WebView 拿不到；且关隐私模式后 WebView 残留脏 cookie → /site/sso 404。
+      // 此处把 HttpUtil 里已登录的 zfw 会话注入 WebView，并先清掉脏 cookie。
+      this.syncZfwSessionToWebView();
     } else if (this.url.includes('libspace') || this.url.includes('ignypt')) {
       // libspace/ignypt 对 session cookie 敏感，只同步 CASTGC
       CasLoginService.getInstance().clearWebViewCookiesForDomain(
@@ -127,6 +153,12 @@ export struct PortalWebPage {
               })
               .onOverrideUrlLoading((req) => {
                 const schemeUrl: string = req.getRequestUrl();
+                // 西电校园网门户 SSO 会把 302 跳到明文 http://zfw.xidian.edu.cn，
+                // ArkWeb 顶到明文降级链接会误报 404；统一升级为 https 规避
+                if (schemeUrl.startsWith('http://zfw.xidian.edu.cn')) {
+                  this.webController.loadUrl(schemeUrl.replace('http://', 'https://'));
+                  return true;
+                }
                 // 拦截超星 jsbridge:// 协议，避免 ERR_UNKNOWN_URL_SCHEME
                 if (schemeUrl.startsWith('jsbridge://')) {
                   return true;
@@ -147,6 +179,13 @@ export struct PortalWebPage {
                 if (event) {
                   const errUrl: string = event.request.getRequestUrl();
                   const errCode: number = event.response.getResponseCode();
+                  // 校园网门户 SSO 跳 zfw.xidian.edu.cn/site/sso 在 WebView 里会误报 404
+                  // （实为明文 http 降级链导致），直接改走可用的 https 登录页（服务端实测 200）
+                  if (errCode === 404 && event.request.isMainFrame()
+                    && errUrl.includes('zfw.xidian.edu.cn/site/sso')) {
+                    // 已登录态直接进主页；未登录服务端会自行 302 到 /login
+                    this.webController.loadUrl('https://zfw.xidian.edu.cn/');
+                  }
                 }
               })
               .onErrorReceive((event) => {
