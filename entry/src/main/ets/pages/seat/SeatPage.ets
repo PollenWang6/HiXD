@@ -34,6 +34,7 @@ export struct SeatPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
+  @Prop isTablet: boolean = false;
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
 
@@ -203,8 +204,9 @@ export struct SeatPage {
               LoadingProgress().width(36).height(36).color(this.accentColor)
             }
           }
-          .width('100%')
+          .width(this.isTablet ? '60%' : '100%')
           .layoutWeight(1)
+          .alignSelf(ItemAlign.Center)
           .backgroundColor(ThemeColors.bgPage)
         }
       }

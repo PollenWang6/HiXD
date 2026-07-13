@@ -1981,7 +1981,7 @@ AppStorage.set('loginStatus', 'expired');
     } else if (name === 'SportPage') {
       SportPage({ pageInfo: this.pageInfo })
     } else if (name === 'SeatPage') {
-      SeatPage({ pageInfo: this.pageInfo })
+      SeatPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
     }
   }
 
