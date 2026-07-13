@@ -15,12 +15,17 @@
 
 import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
+import { http } from '@kit.NetworkKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 // 一次 libsp 会话：JWT 本体 + 动态认证头名 + 图书馆分组码
 export interface LibspSession {
   jwt: string;
   jwtHeader: string;   // 动态认证头名（如 jwtOpacAuth / jwt / Authorization）
   groupCode: string;   // 图书馆分组码（西电 200755）
+  userId: string;      // 读者ID（scanSubtenancy 需要）
+  libCode: string;     // 馆代码（scanSubtenancy 需要）
+  allCookies: string;  // findxidian.libsp.cn 全部 cookie 串（含 jwt/SESSION 等），供 postJson Cookie 头
 }
 
 // WebView 注入脚本回传的控制台消息分类
@@ -39,6 +44,9 @@ export class LibspSessionService {
   private static readonly KEY_JWT: string = 'libsp_jwt';
   private static readonly KEY_HEADER: string = 'libsp_jwt_header';
   private static readonly KEY_GROUP: string = 'libsp_group_code';
+  private static readonly KEY_COOKIES: string = 'libsp_cookies';
+  private static readonly KEY_USER_ID: string = 'libsp_user_id';
+  private static readonly KEY_LIB_CODE: string = 'libsp_lib_code';
 
   // ============ 会话缓存（Preference 持久化） ============
 
@@ -50,18 +58,30 @@ export class LibspSessionService {
       return null;
     }
     const groupCode: string = PreferenceUtil.getString(LibspSessionService.KEY_GROUP, LibspSessionService.GROUP_CODE);
-    return { jwt: jwt, jwtHeader: jwtHeader, groupCode: groupCode };
+    const allCookies: string = PreferenceUtil.getString(LibspSessionService.KEY_COOKIES, '');
+    const userId: string = PreferenceUtil.getString(LibspSessionService.KEY_USER_ID, '');
+    const libCode: string = PreferenceUtil.getString(LibspSessionService.KEY_LIB_CODE, '');
+    return { jwt, jwtHeader, groupCode, allCookies, userId, libCode };
   }
 
   static hasSession(): boolean {
     return LibspSessionService.getSession() !== null;
   }
 
-  // 持久化会话（通常在 WebView 注入脚本回传 LIBSESSION 时调用）
+  // 持久化会话
   static async saveSession(s: LibspSession): Promise<void> {
     await PreferenceUtil.putString(LibspSessionService.KEY_JWT, s.jwt);
     await PreferenceUtil.putString(LibspSessionService.KEY_HEADER, s.jwtHeader);
     await PreferenceUtil.putString(LibspSessionService.KEY_GROUP, s.groupCode || LibspSessionService.GROUP_CODE);
+    if (s.userId && s.userId.length > 0) {
+      await PreferenceUtil.putString(LibspSessionService.KEY_USER_ID, s.userId);
+    }
+    if (s.libCode && s.libCode.length > 0) {
+      await PreferenceUtil.putString(LibspSessionService.KEY_LIB_CODE, s.libCode);
+    }
+    if (s.allCookies && s.allCookies.length > 0) {
+      await PreferenceUtil.putString(LibspSessionService.KEY_COOKIES, s.allCookies);
+    }
   }
 
   // 清除会话（鉴权失败 / JWT 失效时）
@@ -71,32 +91,142 @@ export class LibspSessionService {
     await PreferenceUtil.putString(LibspSessionService.KEY_GROUP, '');
   }
 
+  // ============ 纯 HTTP 登录（CAS CASTGC → findxidian SSO → JWT） ============
+
+  // 确保有效会话存在。先从 Preference 缓存取；未命中则走 CAS SSO 链获取全新 JWT。
+  // 调用方无需关心 WebView — 全链路纯 HTTP。
+  static async ensureSession(): Promise<LibspSession | null> {
+    // 1. 先检查缓存
+    const cached: LibspSession | null = LibspSessionService.getSession();
+    if (cached) {
+      return cached;
+    }
+
+    const http: HttpUtil = HttpUtil.getInstance();
+    const SSO_PATH: string = '/find/sso/login/xidian/0';
+    const OPC: string = encodeURIComponent('?opacRoute=/personalCenter');
+    const serviceUrl: string = LibspSessionService.BASE + SSO_PATH + OPC;
+
+    // 2. 直连 CAS：用已有 CASTGC 换 findxidian SSO ticket
+    //    CAS 验证 CASTGC → 302 到 findxidian（带 ticket）→ findxidian 返回 Set-Cookie jwt
+    //    HttpUtil.request() 自动跟随 302 并在 headersReceive 中存 Set-Cookie
+    const casUrl: string = 'https://ids.xidian.edu.cn/authserver/login?service=' + encodeURIComponent(serviceUrl);
+
+    try {
+      // CAS → findxidian 全链：
+      // 1. ids.xidian.edu.cn/authserver/login?service=findxidian/SSO-path
+      // 2. CASTGC 有效 → CAS 302 到 service URL（带 ticket）
+      // 3. findxidian → tyrzfw.chaoxing.com（OpenResty 路由，HTTP 302）
+      // 4. tyrzfw 验 ticket → 302 回 findxidian → Set-Cookie: jwt/jwtHeader/SESSION
+      // HttpUtil.get() 自动跟随 302，沿途 headersReceive 收集 Set-Cookie
+      const resp: HttpResponse = await http.get(casUrl);
+
+      // 诊断日志：最终落哪个 URL
+      console.info('[HiXD-Libsp] ensureSession final status=' + resp.statusCode +
+        ' url=' + (resp.headers['X-Final-Url'] || casUrl));
+
+      // 3. 从 cookieStore 提取 JWT 和全部 cookie
+      const cookies: string = http.getAllCookies('findxidian.libsp.cn');
+      if (cookies.length === 0) {
+        console.error('[HiXD-Libsp] ensureSession: no cookies on findxidian.libsp.cn after CAS chain');
+        return null;
+      }
+
+      // 全 cookie 串需在内存中保留，供 postJson Cookie 头发送
+      const COOKIES: string = cookies;
+
+      // 解析 cookie 字符串
+      const map: Record<string, string> = {};
+      for (const kv of cookies.split('; ')) {
+        const eq: number = kv.indexOf('=');
+        if (eq > 0) {
+          map[kv.substring(0, eq).trim()] = kv.substring(eq + 1).trim();
+        }
+      }
+
+      const jwt: string = map['jwt'] || '';
+      const jwtHeader: string = map['jwtHeader'] || '';
+      const hasSession: boolean = (map['SESSION'] || '').length > 0;
+
+      if (!jwt || !jwtHeader) {
+        console.error('[HiXD-Libsp] ensureSession: jwt or jwtHeader missing from cookies. ' +
+          'keys=' + Object.keys(map).join(','));
+        return null;
+      }
+
+      // 部分cookie可能来自WebView / browser（已登录）或仅来自HTTP CAS链（仅jwt+header，无SESSION）。
+      // 仅当已有SESSION时缓存；没有SESSION时直接返回null → LibraryPage走WebView部署以确保全cookie写入。
+      if (!hasSession) {
+        console.info('[HiXD-Libsp] ensureSession: no SESSION cookie from HTTP CAS chain; skipping cache, will use WebView');
+        return null;
+      }
+
+      const session: LibspSession = {
+        jwt: jwt,
+        jwtHeader: jwtHeader,
+        groupCode: LibspSessionService.GROUP_CODE,
+        userId: '',
+        libCode: '',
+        allCookies: COOKIES
+      };
+      await LibspSessionService.saveSession(session);
+      console.info('[HiXD-Libsp] ensureSession SUCCESS jwt.len=' + jwt.length + ' header=' + jwtHeader + ' hasSession=true');
+      return session;
+    } catch (e) {
+      console.error('[HiXD-Libsp] ensureSession ERROR: ' + e);
+      return null;
+    }
+  }
+
   // ============ 请求助手（直连 HTTP，带 JWT 双保险） ============
 
-  // 带 libsp 会话直连接口：注入 jwt cookie + 动态 jwt 头，复刻 SPA 请求范式。
-  // 成功返回 HttpResponse（调用方自行解析 body）；失败抛异常。
+  // 带 libsp 会话直连接口：原生 http.createHttp()，绕过 HttpUtil cookie 存储。
+  // 鉴权双通道：JWT 动态头 + 完整 Cookie（含 jwt/SESSION 等）。
+  // 服务端同时校验 cookie，缺 SESSION 会返回 success:true 但 searchResult 空数组。
   static async postJson(apiPath: string, body: object, session: LibspSession): Promise<HttpResponse> {
-    const http: HttpUtil = HttpUtil.getInstance();
-    // 双保险：动态认证头 + cookie 都带上（复刻 SPA 行为）
-    await http.injectCookies(
-      'jwt=' + session.jwt + '; jwtHeader=' + session.jwtHeader,
-      'findxidian.libsp.cn'
-    );
-    const headers: Record<string, string> = {
-      'Referer': LibspSessionService.BASE + '/',
-      'mappingPath': '',
-      'groupCode': session.groupCode || LibspSessionService.GROUP_CODE,
-      'x-lang': 'CHI',
-      'content-language': 'zh_CN'
-    };
-    // SPA 把 jwt 作为名为 jwtHeader 值的动态头发送
-    headers[session.jwtHeader] = session.jwt;
-    return await http.postRaw(
-      LibspSessionService.BASE + apiPath,
-      JSON.stringify(body),
-      'application/json',
-      headers
-    );
+    return new Promise<HttpResponse>((resolve, reject) => {
+      const req = http.createHttp();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Referer': LibspSessionService.BASE + '/',
+        'mappingPath': '',
+        'groupCode': session.groupCode || LibspSessionService.GROUP_CODE,
+        'x-lang': 'CHI',
+        'content-language': 'zh_CN'
+      };
+      // 完整 cookie（含 jwt/SESSION 等）—— 不缺 SESSION，否则服务端返回空数据
+      if (session.allCookies && session.allCookies.length > 0) {
+        headers['Cookie'] = session.allCookies;
+      } else {
+        headers['Cookie'] = 'jwt=' + session.jwt;
+      }
+      // JWT 动态头
+      headers[session.jwtHeader] = session.jwt;
+      req.request(
+        LibspSessionService.BASE + apiPath,
+        {
+          method: http.RequestMethod.POST,
+          header: headers,
+          extraData: JSON.stringify(body) as string,
+          expectDataType: http.HttpDataType.STRING,
+          readTimeout: 120000,
+          connectTimeout: 30000,
+        },
+        (err: BusinessError | undefined, data: http.HttpResponse) => {
+          if (err !== undefined && err.code !== 0) {
+            req.destroy();
+            reject(new Error('HTTP ' + err.code + ': ' + err.message));
+            return;
+          }
+          const resp = new HttpResponse();
+          resp.statusCode = data.responseCode;
+          const raw = data.result;
+          resp.body = typeof raw === 'string' ? raw : '';
+          req.destroy();
+          resolve(resp);
+        }
+      );
+    });
   }
 
   // ============ WebView 注入脚本 ============
@@ -120,7 +250,11 @@ export class LibspSessionService {
       "if(!jv){console.log('LIBNOTREADY');return;}" +
       "var jh=sessionStorage.getItem('jwtHeader')||gci('jwtHeader')||'';" +
       "var gc=(window.groupCode||'')+'';" +
-      "console.log('LIBSESSION:'+JSON.stringify({jwt:jv,jwtHeader:jh,groupCode:gc}));" +
+      "var ji=sessionStorage.getItem('userInfo');" +
+      "var uid='',lbc='';" +
+      "try{if(ji){var ui=JSON.parse(ji);uid=ui.userId||ui.id||'';lbc=ui.libCode||'';}}" +
+      "catch(e){}" +
+      "console.log('LIBSESSION:'+JSON.stringify({jwt:jv,jwtHeader:jh,groupCode:gc,allCookies:document.cookie||'',userId:uid,libCode:lbc}));" +
       "var api=" + apiLit + ";" +
       "var body=" + bodyLit + ";" +
       "var h={'Content-Type':'application/json','mappingPath':'','groupCode':gc,'x-lang':'CHI','content-language':'zh_CN'};" +

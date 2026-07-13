@@ -186,11 +186,15 @@ export struct LibraryPage {
   @State errorMsg: string = '';
   // findxidian(libsp) 新系统借阅历史会话（JWT 认证，由 LibspSessionService 统一托管）
   @State showLibLogin: boolean = false;
+  @State libLoginManual: boolean = false;  // 自动登录失败后露出 WebView 手动登录
   // WebView 登录时取数目标：当前借阅(loanList) 或 借阅历史(loanHistoryList)
   private libLoginMode: string = 'history';
   private libLoginWeb: web_webview.WebviewController = new web_webview.WebviewController();
   private libLoginTimeoutId: number = -1;
   private libFetchTimer: number = -1;   // 取数轮询注入定时器（SPA 就绪前多次重试）
+  private pendingRenewLoanId: number = -1;  // 续借待办：当前借阅取数完成时在 WebView 内发起续借
+  private renewingLoanId: number = -1;      // 正在续借的 loanId（用于禁用按钮/显示进度）
+  private renewResultMsg: string = '';      // 续借结果提示，待列表刷新后展示
   @State historyShow: boolean = false;
   // 扫码借书
   @State scanBarcode: string = '';        // 扫到的条码
@@ -205,6 +209,7 @@ export struct LibraryPage {
   @State transferPending: boolean = false;
   @State transferShowDialog: boolean = false;
   @State transferInput: string = '';
+  private _libspSession: LibspSession | null = null;
 
   // 显示结果提示，3 秒后自动消失
   private showScanMsg(msg: string): void {
@@ -270,14 +275,28 @@ export struct LibraryPage {
   private async doTransfer(session: LibspSession, code: string): Promise<void> {
     this.showTransferMsg('转借中…');
     try {
-      const body: Record<string, string> = { 'barcode': code };
+      const userId: string = session.userId || this._libspSession?.userId || '';
+      const libCode: string = session.libCode || this._libspSession?.libCode || '';
+      const body: Record<string, string> = {
+        'barcode': code,
+        'userId': userId,
+        'groupCode': session.groupCode || this._libspSession?.groupCode || '',
+        'libCode': libCode,
+        'subtenancySource': '3'
+      };
+      console.info('[HiXD-Lib] scanSubtenancy body=' + JSON.stringify(body));
       const resp = await LibspSessionService.postJson('/find/credit/scanSubtenancy', body, session);
+      console.info('[HiXD-Lib] scanSubtenancy raw resp: ' + resp.body);
       const data: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
-      if (data['success'] === true) {
+      const dataObj: Record<string, Object> = (data['data'] as Record<string, Object>) || {};
+      const checkMsg: string = (dataObj['checkResultMessage'] as string) || '';
+      const valid: boolean = dataObj['valid'] === true;
+      // scanSubtenancy 可能和 phoneLend 一样：success 始终 true，真实结果在 data.valid
+      if (data['success'] === true && (valid || dataObj['valid'] === undefined)) {
         this.showTransferMsg('转借成功！');
         this.loadBorrowList();
       } else {
-        this.showTransferMsg((data['message'] as string) || '转借失败');
+        this.showTransferMsg(checkMsg || (data['message'] as string) || '转借失败');
       }
     } catch (e) {
       this.showTransferMsg('请求失败: ' + e);
@@ -313,11 +332,16 @@ export struct LibraryPage {
       const body: Record<string, string> = { 'barcode': this.scanBarcode };
       const resp = await LibspSessionService.postJson('/find/lendbook/phoneLend', body, session);
       const data: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
-      if (data['success'] === true) {
+      const dataObj: Record<string, Object> = (data['data'] as Record<string, Object>) || {};
+      // phoneLend 成功/失败都在 data.valid 和 data.checkResultMessage 里，
+      // message 总是"操作成功"（包括已借过的情况）
+      const checkMsg: string = (dataObj['checkResultMessage'] as string) || '';
+      const valid: boolean = dataObj['valid'] === true;
+      if (data['success'] === true && valid) {
         this.showScanMsg('借阅成功！');
         this.loadBorrowList();
       } else {
-        this.showScanMsg((data['message'] as string) || '借阅失败');
+        this.showScanMsg(checkMsg || (data['message'] as string) || '借阅失败');
       }
     } catch (e) {
       if (!this.scanBarcode) {
@@ -762,64 +786,77 @@ export struct LibraryPage {
     return parts.join('&');
   }
 
-  // 续借：新系统 /find/lendbook/reNew，body 为 { loanIds: [loanId] }（与 Flutter 一致）。
-  // 需 libsp JWT 会话；若无则提示先刷新当前借阅（刷新即走 WebView 登录取数）。
+  // 续借：新系统 /find/lendbook/reNew（body { loanIds: [loanId] }，与 Flutter 一致）。
+  // 直连 HTTP 用 JWT 头鉴权（已实测有效：不带 SESSION cookie 反而成功，带 cookie 触发 401）。
+  // 续借后自动刷新当前借阅列表（应还日期/续借次数会变）。
   private async renewBook(borrow: BorrowItem): Promise<void> {
-    const session: LibspSession | null = LibspSessionService.getSession();
-    if (!session) {
-      this.errorMsg = '请先下拉刷新当前借阅';
-      setTimeout(() => { if (this.errorMsg === '请先下拉刷新当前借阅') this.errorMsg = ''; }, 3000);
-      return;
+    if (this.renewingLoanId === borrow.loanId) {
+      return; // 防重复点击
     }
-    try {
-      const body: LibspRenewReq = { loanIds: [borrow.loanId] };
-      const resp: HttpResponse = await LibspSessionService.postJson(
-        '/find/lendbook/reNew',
-        body,
-        session
-      );
-      if (resp.statusCode === 200) {
-        const raw: Record<string, Object> = resp.json<Record<string, Object>>();
-        console.info('[HiXD-LibRenew] resp=' + JSON.stringify(raw));
-        const data: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
-        const msg: string = this.extractRenewMsg(raw, data);
-        // 先刷新列表（应还日期/续借次数会变），再展示续借结果
-        await this.loadBorrowList();
-        this.errorMsg = msg;
-      } else {
-        this.errorMsg = '续借失败 (HTTP ' + resp.statusCode + ')';
-      }
-    } catch (e) {
-      this.errorMsg = '续借请求失败';
-    }
-    setTimeout(() => { this.errorMsg = ''; }, 3000);
+    this.renewingLoanId = borrow.loanId;
+    this.errorMsg = '';
+    // 复用已认证的 WebView 会话：标记续借待办 → 注入借阅列表 fetch →
+    // onLibBorrowReceived 拿到数据后在存活 WebView 内再发起续借 fetch
+    this.pendingRenewLoanId = borrow.loanId;
+    this.libLoginMode = 'borrow';
+    this.injectLibFetch();
+    this.startLibFetchLoop();
   }
 
-  // 从续借响应中提取可读提示：兼容 result/msg 为字符串或对象两种情况（避免显示 [object Object]）
-  private extractRenewMsg(raw: Record<string, Object>, data: Record<string, Object>): string {
-    const candidates: Object[] = [data['result'], raw['msg'], raw['message'], data['msg'], data['message']];
-    for (const c of candidates) {
-      if (c === undefined || c === null) {
-        continue;
-      }
-      if (typeof c === 'string') {
-        return c as string;
-      }
-      if (typeof c === 'object') {
-        const o: Record<string, Object> = c as Record<string, Object>;
-        const m: Object = o['msg'] ?? o['message'] ?? o['resultMsg'] ?? o['info'];
-        if (typeof m === 'string') {
-          return m as string;
-        }
-        try {
-          return JSON.stringify(c);
-        } catch (e) {
-          return '续借已提交';
-        }
-      }
-      return String(c);
+  // .onConsole 捕获到续借结果
+  // 真实返回结构（浏览器实测 /find/lendbook/reNew）：
+  // {"success":true,"message":"操作成功","errCode":200,          ← 外层只表示"请求被受理"，非续借结果！
+  //  "data":{"result":{"<loanId> <title>":"<业务消息>"},         ← 真正业务结果：key=loanId+书名，value=消息
+  //          "fail":1,"success":0}}                              ← data.success/fail 是成功/失败本数计数
+  // 例：续借成功 → data.success:1，消息如"续借成功"；未到期 → data.fail:1，value="未达到允许续借日期,N天后可办理续借手续"。
+  // 在存活的 WebView 内发起续借 fetch（复用 buildInjectJs，marker=LIBRENEW）
+  private runRenewInWeb(loanId: number): void {
+    const body: LibspRenewReq = { loanIds: [loanId] };
+    const js: string = LibspSessionService.buildInjectJs(
+      '/find/lendbook/reNew',
+      body,
+      'LIBRENEW'
+    );
+    try {
+      this.libLoginWeb.runJavaScript(js);
+    } catch (e) {
+      this.renewingLoanId = -1;
+      this.showLibLogin = false;
+      this.errorMsg = '续借失败：WebView 未就绪，请下拉刷新后重试';
+      setTimeout(() => { this.errorMsg = ''; }, 3000);
     }
-    return '续借已提交';
+  }
+
+  // .onConsole 捕获到续借结果
+  private onLibRenewReceived(jsonStr: string): void {
+    this.renewingLoanId = -1;
+    try {
+      const raw: Record<string, Object> = JSON.parse(jsonStr) as Record<string, Object>;
+      const data: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
+      const okCount: number = (typeof data['success'] === 'number') ? (data['success'] as number) : 0;
+      // 从 data.result 对象里取第一条业务消息（未达续借日期 / 续借成功 等）
+      let bizMsg: string = '';
+      const result: Record<string, Object> = (data['result'] as Record<string, Object>) || {};
+      const keys: string[] = Object.keys(result);
+      for (let i = 0; i < keys.length; i++) {
+        const v: Object = result[keys[i]];
+        if (typeof v === 'string' && (v as string).length > 0) {
+          bizMsg = v as string;
+          break;
+        }
+      }
+      if (bizMsg.length === 0) {
+        bizMsg = (typeof raw['message'] === 'string') ? (raw['message'] as string) : '续借已提交';
+      }
+      // 只有 data.success>0 才是真正续借成功；否则直接展示业务消息（如"未达到允许续借日期…"）
+      this.renewResultMsg = okCount > 0 ? ('续借成功：' + bizMsg) : bizMsg;
+    } catch (e) {
+      this.renewResultMsg = '续借结果解析失败，请下拉刷新查看';
+    }
+    // 续借后刷新当前借阅列表（成功则应还日期/续借次数会变）；
+    // 保持 WebView 存活（不立即收起浮层），待刷新 fetch 完成后再收起并展示结果。
+    this.libLoginMode = 'borrow';
+    this.injectLibFetch();
   }
 
   private fmtDateShort(raw: string): string {
@@ -908,16 +945,19 @@ export struct LibraryPage {
       // SSO 种子失败不致命，WebView 内可手动登录
     }
     this.showLibLogin = true;
+    this.libLoginManual = false;
     this.historyLoaded = false;
     this.errorMsg = '';
     this.clearLibLoginTimeout();
     // 超时兜底：CAS 网关/网络异常时避免无限停在网上
     this.libLoginTimeoutId = setTimeout(() => {
+      console.info('[HiXD-Lib] lib login TIMEOUT(40s) mode=' + this.libLoginMode);
       if (this.showLibLogin) {
-        this.stopLibFetchLoop();
-        this.showLibLogin = false;
-        this.errorMsg = '图书馆借阅信息获取超时，请点“重新登录”重试';
-        this.historyLoaded = true;
+        // 关键修复：超时不再 stopLibFetchLoop()！
+        // 冷启动首次取数需先过 CAS SSO + 滑块验证（人工操作常 > 40s），
+        // 若此处停掉注入循环，用户验证完滑块后 jwt 就绪也不再取数 → 当前借阅永远失败。
+        // 改为：仅露出 WebView 提示用户手动完成登录，注入循环继续跑，jwt 就绪即自动取数成功并关闭浮层。
+        this.libLoginManual = true;
       }
     }, 40000) as number;
   }
@@ -989,6 +1029,7 @@ export struct LibraryPage {
       const raw: Record<string, object> = JSON.parse(jsonStr);
       const data: Record<string, object> = (raw['data'] as Record<string, object>) || {};
       const rawList: Record<string, string>[] = (data['searchResult'] as Record<string, string>[]) || [];
+      console.info('[HiXD-Lib] parseHistory jsonLen=' + jsonStr.length + ' searchResultLen=' + rawList.length);
       const result: HistoryItem[] = [];
       for (let i = 0; i < rawList.length; i++) {
         result.push(this.makeHistoryItem(rawList[i]));
@@ -1007,7 +1048,20 @@ export struct LibraryPage {
     this.clearLibLoginTimeout();
     this.stopLibFetchLoop();
     this.parseAndShowBorrow(jsonStr);
+    // 续借待办：此刻 WebView 仍存活（尚未销毁），趁机在其内发起续借 fetch；
+    if (this.pendingRenewLoanId > 0) {
+      const loanId: number = this.pendingRenewLoanId;
+      this.pendingRenewLoanId = -1;
+      this.runRenewInWeb(loanId);
+      this.fetchBorrowCovers(this.borrowList);
+      return;
+    }
     this.showLibLogin = false;
+    if (this.renewResultMsg.length > 0) {
+      this.errorMsg = this.renewResultMsg;
+      this.renewResultMsg = '';
+      setTimeout(() => { this.errorMsg = ''; }, 4000);
+    }
     this.fetchBorrowCovers(this.borrowList);
   }
 
@@ -1017,7 +1071,8 @@ export struct LibraryPage {
       const raw: Record<string, object> = JSON.parse(jsonStr);
       const data: Record<string, object> = (raw['data'] as Record<string, object>) || {};
       const rawList: Record<string, string>[] = (data['searchResult'] as Record<string, string>[]) || [];
-      // [诊断] 打印首条原始字段，确认 loanList 真实返回哪些 key/value（重点看 lendDay / renewTimes / loanType / itemLibName / loanDeskName 等是否存在）
+      console.info('[HiXD-Lib] parseBorrow jsonLen=' + jsonStr.length + ' searchResultLen=' + rawList.length);
+      // [诊断] 打印首条原始字段，确认 loanList 真实返回哪些 key/value
       if (rawList.length > 0) {
         console.info('[HiXD-LibDiag] loanList[0] keys=' + JSON.stringify(Object.keys(rawList[0])));
         console.info('[HiXD-LibDiag] loanList[0] raw=' + JSON.stringify(rawList[0]));
@@ -1043,8 +1098,11 @@ export struct LibraryPage {
 
   // libsp WebView 登录浮层（当前借阅 / 借阅历史 / 扫码 共用）：背后静默完成 CAS SSO + 取数，
   // 被不透明加载覆盖层完全遮住，不显示给用户。取数结果经 onConsole 回传 LIBHIST / LIBBORROW。
+  // libsp WebView 登录/取数层：常驻挂载、默认隐藏，取数时置顶覆盖。
+  // 关键改进：不随 showLibLogin=false 卸载 WebView，保持 SSO 会话温热 ——
+  // 续借/二次取数无需重新冷加载 SPA，既消除“点续借整页刷新”的闪烁，也让会话热时取数近乎瞬时。
   @Builder
-  libLoginOverlay() {
+  libLoginLayer() {
     Stack() {
       Web({ src: 'https://findxidian.libsp.cn/#/personalCenter', controller: this.libLoginWeb })
         .javaScriptAccess(true)
@@ -1058,12 +1116,15 @@ export struct LibraryPage {
         .onConsole((event): boolean => {
           if (event && event.message) {
             const msg: string = event.message.getMessage();
+            console.info('[HiXD-Lib] onConsole: ' + msg.substring(0, 200));
             const parsed = LibspSessionService.parseConsole(msg);
             if (parsed.kind === 'session' && parsed.payload) {
               try {
                 const s: LibspSession = JSON.parse(parsed.payload) as LibspSession;
+                console.info('[HiXD-LibDiag] LIBSESSION parsed: userId=' + (s.userId||'(empty)') + ' libCode=' + (s.libCode||'(empty)') + ' groupCode=' + (s.groupCode||'(empty)'));
                 if (s.jwt && s.jwtHeader) {
                   LibspSessionService.saveSession(s);
+                  this._libspSession = s;
                   if (this.scanPending) {
                     this.scanPending = false;
                     this.stopLibLoginPoll();
@@ -1083,10 +1144,24 @@ export struct LibraryPage {
               return true;
             }
             if (msg.indexOf('LIBBORROW:') === 0) {
-              this.onLibBorrowReceived(msg.substring(11));
+              // 注意：'LIBBORROW:' 共 10 个字符，须 substring(10) 才能保留开头的 '{'，
+              // 否则 JSON.parse 会抛异常导致当前借阅解析失败（历史用 'LIBHIST:' 8 字符对应 substring(8)）。
+              console.info('[HiXD-Lib] LIBBORROW raw=' + msg.substring(10, 511));
+              this.onLibBorrowReceived(msg.substring(10));
+              return true;
+            }
+            if (msg.indexOf('LIBRENEW:') === 0) {
+              console.info('[HiXD-Lib] LIBRENEW raw=' + msg.substring(9, 511));
+              this.onLibRenewReceived(msg.substring(9));
+              return true;
+            }
+            if (msg.indexOf('LIBNOTREADY') === 0) {
+              // jwt 尚未就绪（SPA 未初始化完 / CAS SSO 未完成），注入循环会 1.5s 后自动重试，此处仅打点便于诊断
+              console.info('[HiXD-Lib] LIBNOTREADY (jwt 未就绪，等待重试) mode=' + this.libLoginMode);
               return true;
             }
             if (msg.indexOf('LIBERR:') === 0) {
+              console.info('[HiXD-Lib] LIBERR=' + msg.substring(7, 207));
               this.stopLibFetchLoop();
               this.errorMsg = '借阅信息获取失败，请点“重新登录”重试';
               this.historyLoaded = true;
@@ -1098,54 +1173,91 @@ export struct LibraryPage {
           return false;
         })
         .width('100%').height('100%')
-      // 鸿蒙加载动画覆盖层（不透明，仅在内容区，完全遮住 WebView，不影响上方头部）
-      Column() {
-        LoadingProgress().width(48).height(48).color(this.accentColor)
-        Text('正在加载借阅信息...').fontSize(14)
-          .fontColor(ThemeColors.textPrimary).margin({ top: 14 })
-        Text('取消').fontSize(13)
-          .fontColor(this.themeIsDark ? '#9E9E9E' : '#888888')
-          .padding({ left: 16, right: 16, top: 6, bottom: 6 })
-          .margin({ top: 22 })
-          .onClick(() => { this.stopLibLoginPoll(); })
+      // 取数阶段：覆盖层（自动登录 loading 或手动登录提示）；平时（showLibLogin=false）不显示
+      if (this.showLibLogin) {
+        if (!this.libLoginManual) {
+        Column() {
+          LoadingProgress().width(48).height(48).color(this.accentColor)
+          Text('正在加载借阅信息...').fontSize(14)
+            .fontColor(ThemeColors.textPrimary).margin({ top: 14 })
+          Text('取消').fontSize(13)
+            .fontColor(this.themeIsDark ? '#9E9E9E' : '#888888')
+            .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+            .margin({ top: 22 })
+            .onClick(() => { this.stopLibLoginPoll(); })
+        }
+        .width('100%').height('100%')
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor(ThemeColors.bgPage)
+      } else {
+        // 自动登录失败：露出 WebView 让用户在 CAS 登录页手动登录西电账号，登录后自动取数
+        Row() {
+          Text('自动登录失败，请在页面内登录西电账号，登录成功后自动取数')
+            .fontSize(13).fontColor('#FFFFFF').layoutWeight(1)
+          Text('关闭').fontSize(13).fontColor('#FFFFFF')
+            .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+            .onClick(() => { this.stopLibLoginPoll(); })
+        }
+        .width('100%').padding({ left: 16, right: 8, top: 12, bottom: 12 })
+        .backgroundColor('#00000099')
+        .alignSelf(ItemAlign.Start)
+        }
       }
-      .width('100%').height('100%')
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor(ThemeColors.bgPage)
-    }.width('100%').layoutWeight(1)
+    }.width('100%').height('100%')
+    .visibility(this.showLibLogin ? Visibility.Visible : Visibility.Hidden)
   }
+
 
   private async loadBorrowHistory(): Promise<void> {
     this.historyLoaded = false;
+    this.errorMsg = '';
+    this.libLoginMode = 'history';
+    // 纯 HTTP 优先
+    const ok: boolean = await this.loadHistoryViaHttp();
+    if (ok) {
+      return;
+    }
+    // 纯 HTTP 失败 → fallback WebView
+    this.startLibLogin();
+    this.startLibFetchLoop();
+  }
+
+  // 纯 HTTP 加载借阅历史
+  private async loadHistoryViaHttp(): Promise<boolean> {
     try {
       const session: LibspSession | null = LibspSessionService.getSession();
       if (!session) {
-        // 无缓存会话：走 WebView 登录（CAS SSO 自动登录后由注入脚本取数 + 回存会话）
-        this.errorMsg = '';
-        this.historyLoaded = true;
-        this.libLoginMode = 'history';
-        this.startLibLogin();
-        return;
+        return false;
       }
-      // 有缓存会话：直连接口（JWT 双保险），无需再弹 WebView —— 修掉"每次进页都重登"
-      const req: BorrowHistoryReq = { page: 1, rows: 50, searchType: 1, searchContent: this.borrowSearchWord, sortType: 0, startDate: null, endDate: null };
-      const resp = await LibspSessionService.postJson(
-        '/find/loanInfo/loanHistoryList',
-        req,
-        session
-      );
+      const body: BorrowHistoryReq = {
+        page: 1, rows: 50, searchType: 1, searchContent: '',
+        sortType: 0, startDate: null as string | null, endDate: null as string | null
+      };
+      const resp: HttpResponse = await LibspSessionService.postJson('/find/loanInfo/loanHistoryList', body, session);
       if (resp.statusCode !== 200) {
-        throw new Error('HTTP ' + resp.statusCode);
+        await LibspSessionService.clearSession();
+        return false;
       }
-      this.parseAndShowHistory(resp.body);
-      this.fetchHistoryCovers(this.historyList);
-    } catch (e) {
-      // 会话可能失效，清除缓存并自动重新拉起 WebView 登录（避免卡在错误页）
-      await LibspSessionService.clearSession();
-      this.errorMsg = '';
+      const raw: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
+      if (raw['success'] !== true) {
+        await LibspSessionService.clearSession();
+        return false;
+      }
+      const dataObj: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
+      const rawList: Record<string, string>[] = (dataObj['searchResult'] as Record<string, string>[]) || [];
+      const result: HistoryItem[] = [];
+      for (let i = 0; i < rawList.length; i++) {
+        result.push(this.makeHistoryItem(rawList[i]));
+      }
+      this.historyList = result;
       this.historyLoaded = true;
-      this.libLoginMode = 'history';
-      this.startLibLogin();
+      this.errorMsg = '';
+      this.fetchHistoryCovers(result);
+      console.info('[HiXD-Lib] loadHistoryViaHttp SUCCESS count=' + result.length);
+      return true;
+    } catch (e) {
+      console.error('[HiXD-Lib] loadHistoryViaHttp ERROR: ' + e);
+      return false;
     }
   }
 
@@ -1213,28 +1325,65 @@ export struct LibraryPage {
     this.historyList = updated;
   }
 
-  // 当前借阅：新系统 /find/loanInfo/loanList（与 Flutter 一致）。
-  // 有 libsp JWT 会话则直连接口；无会话则拉起 WebView(CAS SSO) 登录，
-  // 登录完成后注入脚本取数并经 LIBBORROW 回传（见 onConsole / onLibBorrowReceived）。
+  // 当前借阅：新系统 /find/loanInfo/loanList。
+  // 优先纯 HTTP（JWT 头 + 完整 cookie）；无会话时走 WebView 登录获取完整 cookie。
   async loadBorrowList(): Promise<void> {
-    const session: LibspSession | null = LibspSessionService.getSession();
-    if (!session) {
-      this.libLoginMode = 'borrow';
-      this.startLibLogin();
+    this.libLoginMode = 'borrow';
+    // HTTP 快路径：Preference 有完整 cookie 时直接走
+    const ok: boolean = await this.loadBorrowViaHttp();
+    if (ok) {
       return;
     }
+    // 无会话 → WebView 登录 → 拿到完整 cookie → saveSession → 下次 HTTP
+    this.startLibLogin();
+    this.startLibFetchLoop();
+  }
+
+  // 纯 HTTP 加载当前借阅
+  private async loadBorrowViaHttp(): Promise<boolean> {
     try {
-      const req: BorrowHistoryReq = { page: 1, rows: 999, searchType: 1, searchContent: this.borrowSearchWord, sortType: 0, startDate: null, endDate: null };
-      const resp = await LibspSessionService.postJson('/find/loanInfo/loanList', req, session);
-      if (resp.statusCode !== 200) {
-        throw new Error('HTTP ' + resp.statusCode);
+      const session: LibspSession | null = LibspSessionService.getSession();
+      if (!session) {
+        return false;
       }
-      this.parseAndShowBorrow(resp.body);
-      this.fetchBorrowCovers(this.borrowList);
+      const body: BorrowHistoryReq = {
+        page: 1, rows: 999, searchType: 1, searchContent: this.borrowSearchWord,
+        sortType: 0, startDate: null as string | null, endDate: null as string | null
+      };
+      const resp: HttpResponse = await LibspSessionService.postJson('/find/loanInfo/loanList', body, session);
+      if (resp.statusCode !== 200) {
+        console.error('[HiXD-Lib] loadBorrowViaHttp HTTP ' + resp.statusCode);
+        await LibspSessionService.clearSession();
+        return false;
+      }
+      const raw: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
+      if (raw['success'] !== true) {
+        console.error('[HiXD-Lib] loadBorrowViaHttp api failed: ' + (raw['message'] || ''));
+        await LibspSessionService.clearSession();
+        return false;
+      }
+      const dataObj: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
+      const rawList: Record<string, string>[] = (dataObj['searchResult'] as Record<string, string>[]) || [];
+      // 空数据也算成功 — 确实没有借书记录
+      const result: BorrowItem[] = [];
+      for (let i = 0; i < rawList.length; i++) {
+        result.push(this.makeBorrowItem(rawList[i]));
+      }
+      this.borrowList = result;
+      let overdue = 0;
+      const todayStr: string = this.todayKey();
+      for (const b of result) {
+        const nr: string = this.fmtDateShort(b.normReturnDate);
+        if (nr.length >= 10 && nr < todayStr) overdue++;
+      }
+      PreferenceUtil.putString('lib_summary', result.length + '|' + overdue);
+      this.errorMsg = '';
+      this.fetchBorrowCovers(result);
+      console.info('[HiXD-Lib] loadBorrowViaHttp SUCCESS count=' + result.length);
+      return true;
     } catch (e) {
-      await LibspSessionService.clearSession();
-      this.libLoginMode = 'borrow';
-      this.startLibLogin();
+      console.error('[HiXD-Lib] loadBorrowViaHttp ERROR: ' + e);
+      return false;
     }
   }
 
@@ -1749,6 +1898,8 @@ export struct LibraryPage {
                 this.loadBorrowHistory();
               })
           }.width('100%').backgroundColor(ThemeColors.bgCard)
+        Stack() {
+        Column() {
         if (this.borrowSubTab === 0) {
           // 操作栏：扫码借书 / 一键转借（正常布局流，置于列表上方，不悬浮遮挡）
           // 包成白色圆角卡片（带阴影+左右留边距），与上方子标签行在浅灰页面背景上形成清晰间隔
@@ -1771,10 +1922,7 @@ export struct LibraryPage {
               .height(42).borderRadius(21).layoutWeight(1)
               .onClick(() => { this.transferShowDialog = true; })
           }
-          if (this.showLibLogin) {
-            // 当前借阅登录取数：复用 libsp WebView 登录浮层（与借阅历史同一套）
-            this.libLoginOverlay()
-          } else {
+          // 当前借阅内容（取数时由 libLoginLayer 覆盖层遮挡，无需在此渲染 WebView）
           // 扫码结果反馈
           if (this.scanMsg.length > 0) {
             Text(this.scanMsg)
@@ -1866,9 +2014,10 @@ export struct LibraryPage {
                     Text('续借剩余 ' + borrow.surplusRenewTimes + ' 次')
                       .fontSize(12).fontColor('#666666').layoutWeight(1)
                     if (borrow.surplusRenewTimes > 0) {
-                      Button('续借', { type: ButtonType.Capsule })
+                      Button(this.renewingLoanId === borrow.loanId ? '续借中...' : '续借', { type: ButtonType.Capsule })
                         .fontSize(13).height(32)
                         .backgroundColor('#8E24AA').fontColor(Color.White)
+                        .enabled(this.renewingLoanId !== borrow.loanId)
                         .onClick(() => { this.renewBook(borrow); })
                     } else {
                       Button('已无可续', { type: ButtonType.Capsule })
@@ -1917,14 +2066,11 @@ export struct LibraryPage {
             this.hideHistory();
           })
         }
-          }  // 结束 当前借阅 子分支(else)
         } else {
           // ===== 借阅历史视图 =====
           // 头部（搜索结果/我的借阅 主标签 + 当前借阅/借阅历史 子标签）始终保留，
           // 仅在本内容区（子标签下方）显示状态：取数时显示鸿蒙加载动画，WebView 在背后静默跑。
-          if (this.showLibLogin) {
-            this.libLoginOverlay()
-          } else if (this.historyList.length > 0) {
+          if (this.historyList.length > 0) {
             List({ space: 4 }) {
               ForEach(this.historyList, (h: HistoryItem, idx?: number) => {
                 ListItem() {
@@ -1954,7 +2100,10 @@ export struct LibraryPage {
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           }
         }
-        }.width('100%').height('100%')
+        }
+        this.libLoginLayer()
+        }.layoutWeight(1).width('100%')
+      }.width('100%').height('100%')
       }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
 
