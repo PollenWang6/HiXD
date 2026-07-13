@@ -1230,7 +1230,7 @@ export struct LibraryPage {
         return false;
       }
       const body: BorrowHistoryReq = {
-        page: 1, rows: 50, searchType: 1, searchContent: '',
+        page: 1, rows: 50, searchType: 1, searchContent: this.borrowSearchWord,
         sortType: 0, startDate: null as string | null, endDate: null as string | null
       };
       const resp: HttpResponse = await LibspSessionService.postJson('/find/loanInfo/loanHistoryList', body, session);
@@ -1888,15 +1888,12 @@ export struct LibraryPage {
               .fontWeight(this.borrowSubTab === 0 ? FontWeight.Bold : FontWeight.Normal)
               .fontColor(this.borrowSubTab === 0 ? '#8E24AA' : '#999999')
               .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-              .onClick(() => { this.borrowSubTab = 0; })
+              .onClick(() => { this.borrowSubTab = 0; this.doBorrowSearch(); })
             Text('借阅历史').fontSize(14)
               .fontWeight(this.borrowSubTab === 1 ? FontWeight.Bold : FontWeight.Normal)
               .fontColor(this.borrowSubTab === 1 ? '#8E24AA' : '#999999')
               .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-              .onClick(() => {
-                this.borrowSubTab = 1;
-                this.loadBorrowHistory();
-              })
+              .onClick(() => { this.borrowSubTab = 1; this.doBorrowSearch(); })
           }.width('100%').backgroundColor(ThemeColors.bgCard)
         Stack() {
         Column() {
