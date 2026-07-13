@@ -194,7 +194,12 @@ export struct LibraryPage {
   private libFetchTimer: number = -1;   // 取数轮询注入定时器（SPA 就绪前多次重试）
   private pendingRenewLoanId: number = -1;  // 续借待办：当前借阅取数完成时在 WebView 内发起续借
   private renewingLoanId: number = -1;      // 正在续借的 loanId（用于禁用按钮/显示进度）
-  private renewResultMsg: string = '';      // 续借结果提示，待列表刷新后展示
+  // 批量续借
+  @State isBatchMode: boolean = false;          // 是否在选择态
+  @State selectedLoanIds: number[] = [];        // 已选 loanId 集合（独立存储，刷新列表不冲掉）
+  @State batchRenewing: boolean = false;        // 批量续借进行中（禁用底栏）
+  private pendingRenewLoanIds: number[] = [];   // 批量续借待办：取数完成时在 WebView 内一次性续借
+  private isBatchRenewOp: boolean = false;       // 标记本次续借回传是否来自批量操作
   @State historyShow: boolean = false;
   // 扫码借书
   @State scanBarcode: string = '';        // 扫到的条码
@@ -787,8 +792,9 @@ export struct LibraryPage {
   }
 
   // 续借：新系统 /find/lendbook/reNew（body { loanIds: [loanId] }，与 Flutter 一致）。
-  // 直连 HTTP 用 JWT 头鉴权（已实测有效：不带 SESSION cookie 反而成功，带 cookie 触发 401）。
-  // 续借后自动刷新当前借阅列表（应还日期/续借次数会变）。
+  // 走已认证的 libsp WebView 会话：标记续借待办 → 注入借阅列表 fetch →
+  // 取数完成后在存活 WebView 内注入续借 fetch（runRenewInWeb，credentials:'include' 带 cookie），
+  // 续借结果经 LIBRENEW 回传后刷新当前借阅列表（应还日期/续借次数会变）。
   private async renewBook(borrow: BorrowItem): Promise<void> {
     if (this.renewingLoanId === borrow.loanId) {
       return; // 防重复点击
@@ -810,8 +816,9 @@ export struct LibraryPage {
   //          "fail":1,"success":0}}                              ← data.success/fail 是成功/失败本数计数
   // 例：续借成功 → data.success:1，消息如"续借成功"；未到期 → data.fail:1，value="未达到允许续借日期,N天后可办理续借手续"。
   // 在存活的 WebView 内发起续借 fetch（复用 buildInjectJs，marker=LIBRENEW）
-  private runRenewInWeb(loanId: number): void {
-    const body: LibspRenewReq = { loanIds: [loanId] };
+  // loanIds 为数组：单本传 [loanId]，批量传多本 id（后端 /find/lendbook/reNew 原生支持数组）
+  private runRenewInWeb(loanIds: number[]): void {
+    const body: LibspRenewReq = { loanIds: loanIds };
     const js: string = LibspSessionService.buildInjectJs(
       '/find/lendbook/reNew',
       body,
@@ -821,6 +828,7 @@ export struct LibraryPage {
       this.libLoginWeb.runJavaScript(js);
     } catch (e) {
       this.renewingLoanId = -1;
+      this.batchRenewing = false;
       this.showLibLogin = false;
       this.errorMsg = '续借失败：WebView 未就绪，请下拉刷新后重试';
       setTimeout(() => { this.errorMsg = ''; }, 3000);
@@ -830,14 +838,46 @@ export struct LibraryPage {
   // .onConsole 捕获到续借结果
   private onLibRenewReceived(jsonStr: string): void {
     this.renewingLoanId = -1;
+    this.batchRenewing = false;
     try {
       const raw: Record<string, Object> = JSON.parse(jsonStr) as Record<string, Object>;
       const data: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
       const okCount: number = (typeof data['success'] === 'number') ? (data['success'] as number) : 0;
-      // 从 data.result 对象里取第一条业务消息（未达续借日期 / 续借成功 等）
-      let bizMsg: string = '';
+      const failCount: number = (typeof data['fail'] === 'number') ? (data['fail'] as number) : 0;
       const result: Record<string, Object> = (data['result'] as Record<string, Object>) || {};
       const keys: string[] = Object.keys(result);
+      if (this.isBatchRenewOp) {
+        // 批量续借：逐条列出每本结果，弹窗汇总
+        this.isBatchRenewOp = false;
+        const lines: string[] = [];
+        for (let i = 0; i < keys.length; i++) {
+          const v: Object = result[keys[i]];
+          if (typeof v === 'string' && (v as string).length > 0) {
+            const ok: boolean = (v as string).indexOf('成功') >= 0;
+            lines.push((ok ? '✓ ' : '✗ ') + keys[i] + '：' + (v as string));
+          }
+        }
+        const total: number = okCount + failCount;
+        const tail: string = '\n\n共 ' + total + ' 本 · 成功 ' + okCount + ' · 未到期/失败 ' + failCount;
+        const msg: string = (lines.length > 0 ? lines.join('\n')
+          : (typeof raw['message'] === 'string' ? (raw['message'] as string) : '续借已提交')) + tail;
+        AlertDialog.show({
+          title: '批量续借结果',
+          message: msg,
+          confirm: {
+            value: '知道了',
+            action: () => {
+              this.isBatchMode = false;
+              this.selectedLoanIds = [];
+              this.loadBorrowList();
+            }
+          }
+        });
+        return;
+      }
+      // 单本续借（原有逻辑）：结果以弹窗展示，不放列表顶部
+      // 从 data.result 对象里取第一条业务消息（未达续借日期 / 续借成功 等）
+      let bizMsg: string = '';
       for (let i = 0; i < keys.length; i++) {
         const v: Object = result[keys[i]];
         if (typeof v === 'string' && (v as string).length > 0) {
@@ -849,14 +889,84 @@ export struct LibraryPage {
         bizMsg = (typeof raw['message'] === 'string') ? (raw['message'] as string) : '续借已提交';
       }
       // 只有 data.success>0 才是真正续借成功；否则直接展示业务消息（如"未达到允许续借日期…"）
-      this.renewResultMsg = okCount > 0 ? ('续借成功：' + bizMsg) : bizMsg;
+      const ok: boolean = okCount > 0;
+      AlertDialog.show({
+        title: ok ? '续借成功' : '续借提示',
+        message: bizMsg,
+        confirm: { value: '知道了', action: () => {} }
+      });
     } catch (e) {
-      this.renewResultMsg = '续借结果解析失败，请下拉刷新查看';
+      AlertDialog.show({
+        title: '续借提示',
+        message: '续借结果解析失败，请下拉刷新查看',
+        confirm: { value: '知道了', action: () => {} }
+      });
     }
     // 续借后刷新当前借阅列表（成功则应还日期/续借次数会变）；
     // 保持 WebView 存活（不立即收起浮层），待刷新 fetch 完成后再收起并展示结果。
     this.libLoginMode = 'borrow';
     this.injectLibFetch();
+  }
+
+  // ===== 批量续借 =====
+  private toggleBatchMode(): void {
+    if (this.isBatchMode) {
+      this.isBatchMode = false;
+      this.selectedLoanIds = [];
+    } else {
+      this.isBatchMode = true;
+    }
+  }
+
+  private toggleSelect(borrow: BorrowItem): void {
+    if (borrow.surplusRenewTimes <= 0) {
+      return; // 不可续的不让选
+    }
+    const arr: number[] = this.selectedLoanIds.slice();
+    const i: number = arr.indexOf(borrow.loanId);
+    if (i >= 0) {
+      arr.splice(i, 1);
+    } else {
+      arr.push(borrow.loanId);
+    }
+    this.selectedLoanIds = arr;
+  }
+
+  private selectAllBorrowable(): void {
+    const arr: number[] = [];
+    for (let i = 0; i < this.borrowList.length; i++) {
+      const b: BorrowItem = this.borrowList[i];
+      if (b.surplusRenewTimes > 0) {
+        arr.push(b.loanId);
+      }
+    }
+    this.selectedLoanIds = arr;
+  }
+
+  private async batchRenew(): Promise<void> {
+    if (this.batchRenewing) {
+      return;
+    }
+    const valid: number[] = this.selectedLoanIds.filter((id: number) => {
+      for (let i = 0; i < this.borrowList.length; i++) {
+        if (this.borrowList[i].loanId === id && this.borrowList[i].surplusRenewTimes > 0) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (valid.length === 0) {
+      this.errorMsg = '请选择可续借的图书';
+      setTimeout(() => { this.errorMsg = ''; }, 2500);
+      return;
+    }
+    this.batchRenewing = true;
+    this.errorMsg = '';
+    this.isBatchRenewOp = true;
+    this.pendingRenewLoanIds = valid;
+    this.libLoginMode = 'borrow';
+    this.injectLibFetch();
+    this.startLibFetchLoop();
   }
 
   private fmtDateShort(raw: string): string {
@@ -1048,20 +1158,23 @@ export struct LibraryPage {
     this.clearLibLoginTimeout();
     this.stopLibFetchLoop();
     this.parseAndShowBorrow(jsonStr);
-    // 续借待办：此刻 WebView 仍存活（尚未销毁），趁机在其内发起续借 fetch；
+    // 批量续借待办：一次性在 WebView 内续借多本
+    if (this.pendingRenewLoanIds.length > 0) {
+      const ids: number[] = this.pendingRenewLoanIds.slice();
+      this.pendingRenewLoanIds = [];
+      this.runRenewInWeb(ids);
+      this.fetchBorrowCovers(this.borrowList);
+      return;
+    }
+    // 单本续借待办：此刻 WebView 仍存活（尚未销毁），趁机在其内发起续借 fetch；
     if (this.pendingRenewLoanId > 0) {
       const loanId: number = this.pendingRenewLoanId;
       this.pendingRenewLoanId = -1;
-      this.runRenewInWeb(loanId);
+      this.runRenewInWeb([loanId]);
       this.fetchBorrowCovers(this.borrowList);
       return;
     }
     this.showLibLogin = false;
-    if (this.renewResultMsg.length > 0) {
-      this.errorMsg = this.renewResultMsg;
-      this.renewResultMsg = '';
-      setTimeout(() => { this.errorMsg = ''; }, 4000);
-    }
     this.fetchBorrowCovers(this.borrowList);
   }
 
@@ -1072,11 +1185,6 @@ export struct LibraryPage {
       const data: Record<string, object> = (raw['data'] as Record<string, object>) || {};
       const rawList: Record<string, string>[] = (data['searchResult'] as Record<string, string>[]) || [];
       console.info('[HiXD-Lib] parseBorrow jsonLen=' + jsonStr.length + ' searchResultLen=' + rawList.length);
-      // [诊断] 打印首条原始字段，确认 loanList 真实返回哪些 key/value
-      if (rawList.length > 0) {
-        console.info('[HiXD-LibDiag] loanList[0] keys=' + JSON.stringify(Object.keys(rawList[0])));
-        console.info('[HiXD-LibDiag] loanList[0] raw=' + JSON.stringify(rawList[0]));
-      }
       const result: BorrowItem[] = [];
       for (let i = 0; i < rawList.length; i++) {
         result.push(this.makeBorrowItem(rawList[i]));
@@ -1884,17 +1992,19 @@ export struct LibraryPage {
 
           // 子 tab：当前借阅 / 借阅历史
           Row() {
-            Text('当前借阅').fontSize(14)
-              .fontWeight(this.borrowSubTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-              .fontColor(this.borrowSubTab === 0 ? '#8E24AA' : '#999999')
-              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-              .onClick(() => { this.borrowSubTab = 0; this.doBorrowSearch(); })
-            Text('借阅历史').fontSize(14)
-              .fontWeight(this.borrowSubTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-              .fontColor(this.borrowSubTab === 1 ? '#8E24AA' : '#999999')
-              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-              .onClick(() => { this.borrowSubTab = 1; this.doBorrowSearch(); })
-          }.width('100%').backgroundColor(ThemeColors.bgCard)
+            Row() {
+              Text('当前借阅').fontSize(14)
+                .fontWeight(this.borrowSubTab === 0 ? FontWeight.Bold : FontWeight.Normal)
+                .fontColor(this.borrowSubTab === 0 ? '#8E24AA' : '#999999')
+                .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+                .onClick(() => { this.borrowSubTab = 0; this.doBorrowSearch(); })
+              Text('借阅历史').fontSize(14)
+                .fontWeight(this.borrowSubTab === 1 ? FontWeight.Bold : FontWeight.Normal)
+                .fontColor(this.borrowSubTab === 1 ? '#8E24AA' : '#999999')
+                .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+                .onClick(() => { this.borrowSubTab = 1; this.isBatchMode = false; this.doBorrowSearch(); })
+            }
+          }.width('100%').backgroundColor(ThemeColors.bgCard).justifyContent(FlexAlign.Start)
         Stack() {
         Column() {
         if (this.borrowSubTab === 0) {
@@ -1919,6 +2029,16 @@ export struct LibraryPage {
               .height(42).borderRadius(21).layoutWeight(1)
               .onClick(() => { this.transferShowDialog = true; })
           }
+          // 「管理」入口：仅当前借阅可批量续借，置于操作栏下方，突出归属当前借阅
+          Row() {
+            Text(this.isBatchMode ? '完成' : '管理')
+              .fontSize(13).fontColor(this.isBatchMode ? '#FFFFFF' : '#8E24AA')
+              .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+              .backgroundColor(this.isBatchMode ? '#8E24AA'
+                : (this.themeIsDark ? '#2A2A2A' : '#F3E5F5'))
+              .borderRadius(16)
+              .onClick(() => { this.toggleBatchMode(); })
+          }.width('100%').margin({ top: 8, left: 14, right: 14 })
           // 当前借阅内容（取数时由 libLoginLayer 覆盖层遮挡，无需在此渲染 WebView）
           // 扫码结果反馈
           if (this.scanMsg.length > 0) {
@@ -1955,6 +2075,20 @@ export struct LibraryPage {
               ListItem() {
                 Column() {
                   Row() {
+                    // 批量勾选框（仅选择态显示）
+                    if (this.isBatchMode) {
+                      Stack() {
+                        Circle({ width: 22, height: 22 })
+                          .fill(this.selectedLoanIds.indexOf(borrow.loanId) >= 0 ? '#8E24AA'
+                            : (this.themeIsDark ? '#333333' : '#FFFFFF'))
+                          .stroke(this.selectedLoanIds.indexOf(borrow.loanId) >= 0 ? '#8E24AA' : '#BBBBBB')
+                          .strokeWidth(1)
+                        if (this.selectedLoanIds.indexOf(borrow.loanId) >= 0) {
+                          Text('✓').fontSize(14).fontColor('#FFFFFF')
+                        }
+                      }.width(22).height(22)
+                      .margin({ right: 10 })
+                    }
                     // 封面
                     if (borrow.imagePixelMap) {
                       Image(borrow.imagePixelMap).width(64).height(90)
@@ -2006,27 +2140,30 @@ export struct LibraryPage {
                       }.width('100%').margin({ top: 8 })
                     }.layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ left: 12 })
                   }.width('100%')
+                  .onClick(() => { if (this.isBatchMode) this.toggleSelect(borrow); })
                   // 底部：续借剩余 + 续借按钮 + 详细按钮
                   Row({ space: 8 }) {
                     Text('续借剩余 ' + borrow.surplusRenewTimes + ' 次')
                       .fontSize(12).fontColor('#666666').layoutWeight(1)
-                    if (borrow.surplusRenewTimes > 0) {
-                      Button(this.renewingLoanId === borrow.loanId ? '续借中...' : '续借', { type: ButtonType.Capsule })
+                    if (!this.isBatchMode) {
+                      if (borrow.surplusRenewTimes > 0) {
+                        Button(this.renewingLoanId === borrow.loanId ? '续借中...' : '续借', { type: ButtonType.Capsule })
+                          .fontSize(13).height(32)
+                          .backgroundColor('#8E24AA').fontColor(Color.White)
+                          .enabled(this.renewingLoanId !== borrow.loanId)
+                          .onClick(() => { this.renewBook(borrow); })
+                      } else {
+                        Button('已无可续', { type: ButtonType.Capsule })
+                          .fontSize(13).height(32)
+                          .backgroundColor('#E0E0E0').fontColor('#9E9E9E')
+                          .enabled(false)
+                      }
+                      Button('详细', { type: ButtonType.Capsule })
                         .fontSize(13).height(32)
-                        .backgroundColor('#8E24AA').fontColor(Color.White)
-                        .enabled(this.renewingLoanId !== borrow.loanId)
-                        .onClick(() => { this.renewBook(borrow); })
-                    } else {
-                      Button('已无可续', { type: ButtonType.Capsule })
-                        .fontSize(13).height(32)
-                        .backgroundColor('#E0E0E0').fontColor('#9E9E9E')
-                        .enabled(false)
+                        .backgroundColor(this.themeIsDark ? '#333333' : '#EEEEEE')
+                        .fontColor(ThemeColors.textPrimary)
+                        .onClick(() => { this.openBorrowDetail(borrow); })
                     }
-                    Button('详细', { type: ButtonType.Capsule })
-                      .fontSize(13).height(32)
-                      .backgroundColor(this.themeIsDark ? '#333333' : '#EEEEEE')
-                      .fontColor(ThemeColors.textPrimary)
-                      .onClick(() => { this.openBorrowDetail(borrow); })
                   }.width('100%').margin({ top: 10 })
                 }.width('100%').padding(14)
                 .backgroundColor(ThemeColors.bgCard).borderRadius(12)
@@ -2046,6 +2183,26 @@ export struct LibraryPage {
             this.hideHistory();
           })
           }.layoutWeight(1)
+          // 批量续借操作栏（仅选择态显示）
+          if (this.isBatchMode) {
+            Row({ space: 12 }) {
+              Text('全选')
+                .fontSize(14).fontColor('#8E24AA')
+                .padding({ left: 4, right: 4 })
+                .onClick(() => { this.selectAllBorrowable(); })
+              Button('批量续借(' + this.selectedLoanIds.length + ')', { type: ButtonType.Capsule })
+                .fontSize(14).height(38)
+                .backgroundColor('#8E24AA').fontColor(Color.White)
+                .enabled(!this.batchRenewing && this.selectedLoanIds.length > 0)
+                .onClick(() => { this.batchRenew(); })
+              Text('取消')
+                .fontSize(14).fontColor('#888888')
+                .padding({ left: 4, right: 4 })
+                .onClick(() => { this.toggleBatchMode(); })
+            }.width('100%')
+            .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+            .backgroundColor(ThemeColors.bgCard)
+          }
         } else {
           Column() {
             Text('📖').fontSize(48)

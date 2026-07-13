@@ -13,7 +13,7 @@
 // WebView 加载 findxidian.libsp.cn 自动登录 → SPA 把 JWT 写入 sessionStorage
 // → 注入脚本读出 JWT 并经 console.log('LIBSESSION:...') 回传。
 
-import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
+import { HttpResponse } from '../utils/HttpUtil';
 import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -91,94 +91,7 @@ export class LibspSessionService {
     await PreferenceUtil.putString(LibspSessionService.KEY_GROUP, '');
   }
 
-  // ============ 纯 HTTP 登录（CAS CASTGC → findxidian SSO → JWT） ============
-
-  // 确保有效会话存在。先从 Preference 缓存取；未命中则走 CAS SSO 链获取全新 JWT。
-  // 调用方无需关心 WebView — 全链路纯 HTTP。
-  static async ensureSession(): Promise<LibspSession | null> {
-    // 1. 先检查缓存
-    const cached: LibspSession | null = LibspSessionService.getSession();
-    if (cached) {
-      return cached;
-    }
-
-    const http: HttpUtil = HttpUtil.getInstance();
-    const SSO_PATH: string = '/find/sso/login/xidian/0';
-    const OPC: string = encodeURIComponent('?opacRoute=/personalCenter');
-    const serviceUrl: string = LibspSessionService.BASE + SSO_PATH + OPC;
-
-    // 2. 直连 CAS：用已有 CASTGC 换 findxidian SSO ticket
-    //    CAS 验证 CASTGC → 302 到 findxidian（带 ticket）→ findxidian 返回 Set-Cookie jwt
-    //    HttpUtil.request() 自动跟随 302 并在 headersReceive 中存 Set-Cookie
-    const casUrl: string = 'https://ids.xidian.edu.cn/authserver/login?service=' + encodeURIComponent(serviceUrl);
-
-    try {
-      // CAS → findxidian 全链：
-      // 1. ids.xidian.edu.cn/authserver/login?service=findxidian/SSO-path
-      // 2. CASTGC 有效 → CAS 302 到 service URL（带 ticket）
-      // 3. findxidian → tyrzfw.chaoxing.com（OpenResty 路由，HTTP 302）
-      // 4. tyrzfw 验 ticket → 302 回 findxidian → Set-Cookie: jwt/jwtHeader/SESSION
-      // HttpUtil.get() 自动跟随 302，沿途 headersReceive 收集 Set-Cookie
-      const resp: HttpResponse = await http.get(casUrl);
-
-      // 诊断日志：最终落哪个 URL
-      console.info('[HiXD-Libsp] ensureSession final status=' + resp.statusCode +
-        ' url=' + (resp.headers['X-Final-Url'] || casUrl));
-
-      // 3. 从 cookieStore 提取 JWT 和全部 cookie
-      const cookies: string = http.getAllCookies('findxidian.libsp.cn');
-      if (cookies.length === 0) {
-        console.error('[HiXD-Libsp] ensureSession: no cookies on findxidian.libsp.cn after CAS chain');
-        return null;
-      }
-
-      // 全 cookie 串需在内存中保留，供 postJson Cookie 头发送
-      const COOKIES: string = cookies;
-
-      // 解析 cookie 字符串
-      const map: Record<string, string> = {};
-      for (const kv of cookies.split('; ')) {
-        const eq: number = kv.indexOf('=');
-        if (eq > 0) {
-          map[kv.substring(0, eq).trim()] = kv.substring(eq + 1).trim();
-        }
-      }
-
-      const jwt: string = map['jwt'] || '';
-      const jwtHeader: string = map['jwtHeader'] || '';
-      const hasSession: boolean = (map['SESSION'] || '').length > 0;
-
-      if (!jwt || !jwtHeader) {
-        console.error('[HiXD-Libsp] ensureSession: jwt or jwtHeader missing from cookies. ' +
-          'keys=' + Object.keys(map).join(','));
-        return null;
-      }
-
-      // 部分cookie可能来自WebView / browser（已登录）或仅来自HTTP CAS链（仅jwt+header，无SESSION）。
-      // 仅当已有SESSION时缓存；没有SESSION时直接返回null → LibraryPage走WebView部署以确保全cookie写入。
-      if (!hasSession) {
-        console.info('[HiXD-Libsp] ensureSession: no SESSION cookie from HTTP CAS chain; skipping cache, will use WebView');
-        return null;
-      }
-
-      const session: LibspSession = {
-        jwt: jwt,
-        jwtHeader: jwtHeader,
-        groupCode: LibspSessionService.GROUP_CODE,
-        userId: '',
-        libCode: '',
-        allCookies: COOKIES
-      };
-      await LibspSessionService.saveSession(session);
-      console.info('[HiXD-Libsp] ensureSession SUCCESS jwt.len=' + jwt.length + ' header=' + jwtHeader + ' hasSession=true');
-      return session;
-    } catch (e) {
-      console.error('[HiXD-Libsp] ensureSession ERROR: ' + e);
-      return null;
-    }
-  }
-
-  // ============ 请求助手（直连 HTTP，带 JWT 双保险） ============
+  // ============ 请求助手（直连 HTTP，带 JWT + 完整 Cookie 双鉴权） ============
 
   // 带 libsp 会话直连接口：原生 http.createHttp()，绕过 HttpUtil cookie 存储。
   // 鉴权双通道：JWT 动态头 + 完整 Cookie（含 jwt/SESSION 等）。
