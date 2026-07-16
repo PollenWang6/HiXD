@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>西电校园助手（HiXD）隐私政策</title>
+<style>
+  :root{ --fg:#1f2329; --sub:#5b6168; --brand:#2b5cff; --line:#e6e8eb; --bg:#f7f8fa; --card:#fff; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;line-height:1.75;font-size:16px}
+  .wrap{max-width:820px;margin:0 auto;padding:24px 20px 64px}
+  header{border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:8px}
+  h1{font-size:24px;margin:0 0 6px}
+  .meta{color:var(--sub);font-size:13px}
+  h2{font-size:19px;margin:32px 0 10px;padding-left:10px;border-left:4px solid var(--brand)}
+  h3{font-size:16px;margin:20px 0 6px;color:#2a2f36}
+  p,li{color:#2a2f36}
+  a{color:var(--brand);text-decoration:none}
+  a:hover{text-decoration:underline}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:#eef2ff;font-weight:600}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .note{background:#fff8e6;border:1px solid #ffe08a;color:#7a5a00;border-radius:10px;padding:12px 14px;font-size:13px;margin:16px 0}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:18px 0}
+  .toc a{display:block;padding:3px 0;color:var(--sub)}
+  footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--sub);font-size:13px}
+  code{background:#eef0f3;padding:1px 6px;border-radius:5px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>西电校园助手（HiXD）隐私政策</h1>
+    <div class="meta">应用名称：西电校园助手（HiXD）　|　包名：com.HiXD.myapplication　|　版本：1.4.1　|　生效日期：2026-07-17</div>
+  </header>
+
+  <div class="note">
+    本页面依据《中华人民共和国个人信息保护法》《常见类型移动互联网应用程序必要个人信息范围规定》等编写，供华为应用市场审核及用户查阅使用。发布前请核对「如何联系我们」中的联系方式，并确认各模块所述数据项与实际功能一致。
+  </div>
+
+  <div class="toc">
+    <strong>目录</strong>
+    <a href="#s1">一、我们如何收集和使用您的个人信息</a>
+    <a href="#s2">二、设备权限调用说明</a>
+    <a href="#s3">三、与第三方共享及第三方服务</a>
+    <a href="#s4">四、对未成年人的保护</a>
+    <a href="#s5">五、您如何管理个人信息</a>
+    <a href="#s6">六、信息的存储地点与期限</a>
+    <a href="#s7">七、如何联系我们</a>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">导语</h3>
+    <p><strong>产品简介：</strong>西电校园助手（HiXD）是一款面向西安电子科技大学师生的 HarmonyOS 校园服务聚合应用，整合课表、成绩与考试、图书馆借阅与续借、图书馆座位预约、睿思论坛、体育测试成绩查询、校园网等校园常用功能，帮助师生一站式获取校内信息服务。</p>
+    <p><strong>摘要：</strong>本应用不运营独立后台服务器收集用户数据。所有个人信息均通过与西安电子科技大学各官方业务系统（统一身份认证、教务、图书馆、校园网等）建立的加密连接获取或提交，数据的实际控制方为相应的学校业务系统。本应用仅在本地保存必要的登录态（令牌/Cookie）与功能缓存，用于会话保持与离线查看，并于退出登录或清除缓存时予以删除。</p>
+  </div>
+
+  <h2 id="s1">一、我们如何收集和使用您的个人信息</h2>
+
+  <h3>1.1 统一身份认证与校园网登录</h3>
+  <p>您使用西安电子科技大学统一身份认证账号（学工号及密码）或校园网账号登录时，凭据将通过学校官方认证接口（CAS/校园网认证）传输。本应用<strong>不会在本地存储您的明文密码</strong>，仅在内存及系统安全存储中保留登录后获得的会话凭证（Cookie/Token）以维持登录状态。该凭证仅用于向对应学校业务系统发起经您授权的数据请求。</p>
+
+  <h3>1.2 课表与考试安排</h3>
+  <p>为展示您的个人课表、考试安排与成绩，应用从学校教务相关系统读取相应信息并在本地缓存以便查看。这些数据仅用于本应用内的展示与（经您授权的）系统日历同步。</p>
+
+  <h3>1.3 图书馆服务</h3>
+  <p>为提供图书借阅查询、续借等功能，应用连接学校图书馆系统（findxidian.libsp.cn 等），在您登录后读取借阅记录并向系统提交续借等请求。相关操作均以您的图书馆账号权限为限。</p>
+
+  <h3>1.4 图书馆座位预约</h3>
+  <p>座位预约功能通过应用内 WebView 加载学校指定的座位预约系统（超星 v1.chaoxing.com 相关服务）实现，相关登录与操作在网页内完成，遵循该系统的隐私规则。</p>
+
+  <h3>1.5 睿思论坛</h3>
+  <p>浏览、发帖、收藏睿思论坛内容需使用论坛账号登录。应用读取并展示您在论坛中的公开活动信息（如帖子、回复、收藏），仅用于本应用内展示。</p>
+
+  <h3>1.6 体育测试成绩</h3>
+  <p>体育测试成绩查询通过学校相关接口获取，用于在本应用内展示您的体测成绩。</p>
+
+  <h3>1.7 系统日历同步</h3>
+  <p>在您授权后，应用可将课表、考试安排写入系统日历，以便您接收提醒。该过程仅在本地完成，不会上传日历数据。</p>
+
+  <h3>1.8 相机</h3>
+  <p>在您使用扫码相关功能（如扫码登录、扫码加课等）时，应用会调用相机完成拍摄与识别。拍摄内容仅用于当前识别目的，不会被保存或上传。</p>
+
+  <h3>1.9 智感握持（手势与动作识别）</h3>
+  <p>为提供"握持感应"等交互增强（如检测到用户握持设备时触发相应功能），应用会在使用相关功能时调用手势检测（DETECT_GESTURE）与动作/活动状态（ACTIVITY_MOTION）权限。相关传感器数据仅在设备端用于交互判断，不被上传。</p>
+
+  <h2 id="s2">二、设备权限调用说明</h2>
+  <p>下表列出本应用实际申请的权限及其用途，与安装包中声明的权限一致：</p>
+  <table>
+    <thead><tr><th>权限</th><th>用途</th><th>申请时机</th></tr></thead>
+    <tbody>
+      <tr><td><code>INTERNET</code></td><td>连接学校各业务系统、图书馆系统与第三方服务，获取/提交数据</td><td>运行时</td></tr>
+      <tr><td><code>CAMERA</code></td><td>扫码登录、扫码加课等需要拍摄/识别的场景</td><td>使用时（inuse）</td></tr>
+      <tr><td><code>READ_CALENDAR</code></td><td>读取系统日历，避免课表/考试重复写入</td><td>使用时（inuse）</td></tr>
+      <tr><td><code>WRITE_CALENDAR</code></td><td>将课表、考试安排写入系统日历以便提醒</td><td>使用时（inuse）</td></tr>
+      <tr><td><code>DETECT_GESTURE</code></td><td>智感握持/手势检测，提供握持感应交互</td><td>使用时（inuse）</td></tr>
+      <tr><td><code>ACTIVITY_MOTION</code></td><td>动作/活动状态识别，用于交互增强</td><td>使用时（inuse）</td></tr>
+    </tbody>
+  </table>
+  <p>除上述权限外，应用不会在后台擅自调用与功能无关的敏感权限。您可在系统设置中随时撤回已授予的权限，撤回后相关功能可能无法使用。</p>
+
+  <h2 id="s3">三、与第三方共享及第三方服务</h2>
+  <p>为提供上述功能，应用需连接以下学校业务系统及第三方服务。除为完成您发起的操作所必需外，应用不会将您的个人信息提供给无关第三方：</p>
+  <table>
+    <thead><tr><th>服务方</th><th>用途</th><th>涉及数据</th></tr></thead>
+    <tbody>
+      <tr><td>西安电子科技大学统一身份认证 / 校园网</td><td>账号登录与认证</td><td>学工号、认证凭据（不存明文密码）</td></tr>
+      <tr><td>学校教务相关系统</td><td>课表、成绩、考试查询</td><td>课表、成绩、考试安排</td></tr>
+      <tr><td>学校图书馆系统（findxidian.libsp.cn 等）</td><td>借阅查询、图书续借</td><td>借阅记录、续借操作</td></tr>
+      <tr><td>超星座位预约系统（v1.chaoxing.com）</td><td>图书馆座位预约（WebView 内完成）</td><td>预约操作相关账号信息</td></tr>
+      <tr><td>睿思论坛</td><td>论坛浏览、发帖、收藏</td><td>论坛账号及公开活动信息</td></tr>
+    </tbody>
+  </table>
+  <p>上述服务的个人信息处理受其各自隐私政策约束，建议您在使用前查阅。</p>
+
+  <h2 id="s4">四、对未成年人的保护</h2>
+  <p>本应用主要面向西安电子科技大学师生。我们重视未成年人信息保护，不会主动收集与年龄相关的敏感信息；若发现未成年人使用本应用，建议其在监护人指导下使用，并通过学校统一身份平台管理账号。如您认为未成年人信息被不当处理，可通过下方联系方式与我们联系。</p>
+
+  <h2 id="s5">五、您如何管理个人信息</h2>
+  <ul>
+    <li><strong>查询与更正：</strong>课表、成绩、借阅等信息存储于相应学校业务系统，您可通过本应用查看，或登录对应系统核对与更正。</li>
+    <li><strong>删除与清除：</strong>您可在本应用内「退出登录」或「清除缓存」以删除本地保存的登录态与功能缓存；账号层面的注销请通过学校统一身份平台办理。</li>
+    <li><strong>权限管理：</strong>您可随时在系统设置中撤回已授予的权限。</li>
+    <li><strong>注销账号：</strong>本应用不单独存储用户账号，账号注销由学校统一身份平台处理。</li>
+  </ul>
+
+  <h2 id="s6">六、信息的存储地点与期限</h2>
+  <p>本应用在<strong>设备本地</strong>保存登录态（Cookie/Token）与功能缓存，用于会话保持与离线查看。登录态在您退出登录、清除缓存或会话过期后删除；功能缓存可随清除缓存操作一并删除。应用不将数据上传至开发者自有服务器，故不存在开发者侧的长周期存储。跨境数据处理：本应用所用服务均部署于中国大陆，不涉及个人信息出境。</p>
+
+  <h2 id="s7">七、如何联系我们</h2>
+  <div class="card">
+    <p style="margin:0">如您对本隐私政策或个人信息处理有任何疑问、意见或行使权利的请求，请通过以下方式联系我们：</p>
+    <ul style="margin:8px 0 0">
+      <li>开发者：西电校园助手（HiXD）开发团队</li>
+      <li>联系邮箱：<span style="color:#c00;font-weight:600">【请替换为真实联系方式，例如 hixd-dev@example.com】</span></li>
+      <li>项目地址：<a href="https://github.com/PollenWang6/HiXD" target="_blank" rel="noopener">github.com/PollenWang6/HiXD</a>（可通过 Issues 反馈）</li>
+    </ul>
+  </div>
+
+  <footer>
+    本隐私政策为西电校园助手（HiXD）标准文本，最终解释权归开发者所有。政策更新后将在此页面公布并视情况在应用内提示。
+  </footer>
+</div>
+</body>
+</html>
