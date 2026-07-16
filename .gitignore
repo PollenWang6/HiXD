@@ -35,6 +35,11 @@ keystore/
 *.der
 *.pem
 
+# 华为 AGC 服务凭证（含 client_secret / api_key，禁止入库）
+agconnect-services.json
+# 签名证书 / CSR / 配置文件（.p12 私钥已由 *.p12 忽略，此处忽略其余签名材料）
+cert/
+
 # ===================== 自定义缓存 =====================
 .cache/
 
