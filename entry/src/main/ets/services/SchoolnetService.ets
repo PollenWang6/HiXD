@@ -195,13 +195,9 @@ export class SchoolnetService {
   async startZfwLogin(): Promise<ZfwLoginResult> {
     // 清除旧 session，开始新的登录流程
     await this.http.clearCookies('zfw.xidian.edu.cn');
-    // 调试：打印 clear 后 cookie 状态
-    const afterClear: string = this.http.getCookiesForDomain('zfw.xidian.edu.cn');
 
     const resp: HttpResponse = await this.http.get(ZFW_BASE + '/login');
     const body: string = resp.body;
-    // 调试：打印 set-cookie 响应头
-    const scHeader: string = resp.headers['set-cookie'] || resp.headers['Set-Cookie'] || 'NONE';
 
     // 遍历 <input> 标签提取 csrf 和 RSA public key
     let csrf: string = '';
@@ -229,9 +225,6 @@ export class SchoolnetService {
       // 都找到了提前退出
       if (csrf.length > 0 && rsaKey.length > 0) break;
     }
-
-    // 调试：打印 GET /login 后拿到的 cookie
-    const loginCookies: string = this.http.getCookiesForDomain('zfw.xidian.edu.cn');
 
     if (csrf.length === 0 || rsaKey.length === 0) {
       throw new Error('ZFW login page missing csrf or RSA key');
@@ -278,9 +271,6 @@ export class SchoolnetService {
     headers['X-CSRF-Token'] = csrf;
     headers['X-Requested-With'] = 'XMLHttpRequest';
     headers['Accept'] = '*/*';
-
-    // 调试：打印 CSRF 和 cookie 状态
-    const cookieDebug: string = this.http.getCookiesForDomain('zfw.xidian.edu.cn');
 
     const resp: HttpResponse = await this.http.postForm(
       ZFW_BASE + '/site/validate-user', data, headers

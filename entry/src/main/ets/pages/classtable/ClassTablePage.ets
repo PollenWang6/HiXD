@@ -631,7 +631,6 @@ export struct ClassTablePage {
     this.classGrid = grid;
     this.updateWeekList();
     this.buildCellCache();
-    this.diagTodayGrid(grid);
     this.computeCellStatuses();
     this.saveClassGridSnapshot();
   }
@@ -694,23 +693,6 @@ export struct ClassTablePage {
     if (nowMin >= startMin && nowMin < endMin) return 1;  // 进行中
     if (nowMin >= endMin) return -1;  // 已结束
     return 0;  // 未开始
-  }
-
-  private diagTodayGrid(grid: ClassCell[][][]): void {
-    const cw: number = this.currentWeek;
-    const today: number = 1; // 周一，硬编码用于诊断
-    let count: number = 0;
-    for (let s: number = 1; s <= SECTION_COUNT; s++) {
-      const cells: ClassCell[] = grid[today][s] || [];
-      for (let ci: number = 0; ci < cells.length; ci++) {
-        const c: ClassCell = cells[ci];
-        if (c.weekList.length > cw && c.weekList[cw]) {
-          const prefix: string = c.isExperiment ? '🧪' : (c.isCustom ? '✏️' : '📘');
-          const tag: string = c.isExperiment ? 'EXP' : (c.isCustom ? 'CUSTOM' : 'API');
-          count++;
-        }
-      }
-    }
   }
 
   // 在当前 classGrid 上合并实验数据
