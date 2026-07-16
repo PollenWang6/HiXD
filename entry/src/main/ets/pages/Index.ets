@@ -60,7 +60,7 @@ struct Index {
       { text: '和', type: TextType.PLAIN },
       { text: '《隐私政策》', type: TextType.ACTION, onAction: () => this.openExternal('https://pollenwang6.github.io/HiXD/privacy.html') },
       {
-        text: '。\n\n本应用需要您使用学号和密码登录西安电子科技大学统一身份认证系统，' +
+        text: '。\n\n本应用需要您使用学号和密码登录西电统一身份认证系统，' +
           '以获取课表、成绩等教务数据。您的账号密码仅用于校内认证，不会上传至任何第三方服务器。',
         type: TextType.PLAIN
       }
@@ -68,7 +68,7 @@ struct Index {
     this.controller
       .setAppIcon($r('app.media.hixd_icon'))
       .setAppName('HiXD')
-      .setAppDescription('西安电子科技大学校园助手')
+      .setAppDescription('西电校园助手')
       .setTitle('用户协议与隐私政策')
       .setDocument(doc)
       .onAccept(() => {
