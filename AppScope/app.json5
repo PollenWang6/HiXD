@@ -4,8 +4,8 @@
     "vendor": "PollenWang",
     "versionCode": 1040100,
     "versionName": "1.4.1",
-    "minAPIVersion": 22,
-    "targetAPIVersion": 26,
+    "minAPIVersion": 23,
+    "targetAPIVersion": 23,
     "apiReleaseType": "Release1",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
