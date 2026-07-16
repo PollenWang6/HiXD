@@ -57,6 +57,15 @@ export struct AboutPage {
     }
   }
 
+  // 跳转在线版用户协议（单一来源）
+  private openUserAgreement(): void {
+    try {
+      this.context.openLink('https://pollenwang6.github.io/HiXD/user-agreement.html').catch(() => {});
+    } catch (_e) {
+      // 无法拉起浏览器时忽略
+    }
+  }
+
   build() {
     NavDestination() {
       Scroll() {
@@ -77,17 +86,19 @@ export struct AboutPage {
               .onClick(() => { this.doCheckUpdate(); })
           }.width('100%').padding({ left: 20, right: 20, top: 20, bottom: 16 })
 
-          // 用户协议
+          // 用户协议（跳转在线版，单一来源）
           Column() {
-            Text('用户协议').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-              .padding({ left: 16, top: 14, bottom: 10 })
-            Divider().color('#E0E0E0').strokeWidth(0.5).margin({ left: 16, right: 16 })
-            Text('一、服务说明\n1.1 HiXD（以下简称"本软件"）是西安电子科技大学校园助手应用，由独立开发者（以下简称"我们"）开发并提供。本软件非学校官方应用，不代表校方立场。\n\n1.2 本软件通过您主动提供的学号和密码，经由学校统一身份认证系统（CAS）获取您的教务数据，为您提供课表查询、成绩查询、考试安排、空闲教室、水电缴费、空间预约等校园服务。\n\n二、账号与安全\n2.1 您需要使用学号和密码登录西安电子科技大学 CAS 系统。您的密码采用加密传输，仅存储在您的设备本地，不会上传至我们或任何第三方服务器。\n\n2.2 您应妥善保管账号密码，不得泄露给他人。因您自身原因（设备丢失、账号泄露等）导致的损失，由您自行承担。\n\n三、用户义务\n3.1 您承诺提供的学号和密码信息真实有效，不利用本软件进行任何违法违规活动，不通过任何方式干扰学校教务系统的正常运行。\n\n3.2 您不得滥用本软件功能（如频繁刷新接口、恶意提交数据），避免对学校服务器造成压力。\n\n四、免责声明\n4.1 本软件以"现状"和"可用"方式提供。因学校系统升级、接口变更或网络波动导致的功能异常，我们将尽力修复但不承担任何责任。\n\n4.2 因以下情况导致您遭受损失的，我们不承担责任：(1)您违反本协议约定或相关法律法规使用本软件；(2)设备故障、网络问题等非因我们原因导致的问题；(3)不可抗力等超出我们控制范围的因素。\n\n4.3 本软件为非官方第三方应用，开发者不承担超出合理范围的赔偿责任。\n\n五、协议变更\n5.1 我们有权根据法律法规或运营需要修改本协议，修改后通过应用更新说明等方式公示。继续使用即视为接受修改后的协议。若不同意修改后的协议，应立即停止使用本软件。\n\n六、法律适用与争议解决\n6.1 本协议的成立、生效、履行、解释及纠纷解决，均适用中华人民共和国法律。\n\n6.2 若因本协议产生纠纷，应首先友好协商解决；协商不成的，任何一方有权向开发者所在地有管辖权的人民法院提起诉讼。\n\n七、联系方式\n如有问题或建议，请联系：\npollenwang666@petalmail.com')
-              .fontSize(13).fontColor(ThemeColors.textSecondary).lineHeight(22)
-              .padding({ left: 16, right: 16, top: 8, bottom: 14 })
+            Row() {
+              Column() {
+                Text('用户协议').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                Text('点击查看完整用户协议').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }.width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
           }.borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
           .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-          .margin({ left: 16, right: 16, top: 8 })
+          .margin({ left: 16, right: 16, top: 12 })
+          .onClick(() => this.openUserAgreement())
 
           // 隐私政策（跳转在线版，单一来源）
           Column() {
