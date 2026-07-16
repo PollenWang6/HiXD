@@ -6,7 +6,7 @@
     "versionName": "1.4.1",
     "minAPIVersion": 22,
     "targetAPIVersion": 26,
-    "apiReleaseType": "Beta1",
+    "apiReleaseType": "Release1",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
   }

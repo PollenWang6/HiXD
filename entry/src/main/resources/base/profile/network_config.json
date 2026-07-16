@@ -1,0 +1,22 @@
+{
+  "network-security-config": {
+    "base-config": {
+      "cleartextTrafficPermitted": false
+    },
+    "domain-config": [
+      {
+        "domains": [
+          {
+            "name": "wlsy.xidian.edu.cn",
+            "subdomains": true
+          },
+          {
+            "name": "tybjxgl.xidian.edu.cn",
+            "subdomains": true
+          }
+        ],
+        "cleartextTrafficPermitted": true
+      }
+    ]
+  }
+}

@@ -6,6 +6,10 @@
       {
         "name": "ohos.arkui.UIMaterial.state",
         "value": "enable"
+      },
+      {
+        "name": "ohos.network.security.config",
+        "resource": "$profile:network_config"
       }
     ],
     "description": "$string:module_desc",

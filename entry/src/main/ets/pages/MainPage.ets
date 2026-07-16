@@ -32,6 +32,7 @@ import { SeatPage } from './seat/SeatPage';
 import { UserInfoService } from '../services/UserInfoService';
 import { AttendanceService } from '../services/AttendanceService';
 import { application, common } from '@kit.AbilityKit';
+import { openAppGalleryDetail } from '../utils/AppGalleryUtil';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo, fileUri, storageStatistics } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
@@ -1920,7 +1921,7 @@ AppStorage.set('loginStatus', 'expired');
     } else if (name === 'PortalWeb_Baoxiu') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '后勤报修', url: 'https://ids.xidian.edu.cn/authserver/login?service=https%3A%2F%2Fids.xidian.edu.cn%2Fauthserver%2Foauth2.0%2FcallbackAuthorize%3Fclient_id%3D869608421533880320%26redirect_uri%3Dhttp%253A%252F%252Frepair.xidian.edu.cn%252Fappsys%252FxidianCasLogin%252FoauthLogin%26response_type%3Dcode%26state%3Dhome%26client_name%3DCasOAuthClient', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Space') {
-      PortalWebPage({ pageInfo: this.pageInfo, title: '空间预约', url: 'http://libspace.xidian.edu.cn', isTablet: this.isTablet })
+      PortalWebPage({ pageInfo: this.pageInfo, title: '空间预约', url: 'https://libspace.xidian.edu.cn', isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Portal') {
       PortalWebPage({ pageInfo: this.pageInfo, title: '移动门户', url: 'https://xxcapp.xidian.edu.cn/site/xidianPage/home' , useWeChatUA: true , keepWeChatUA: true , isTablet: this.isTablet })
     } else if (name === 'PortalWeb_Ruisi') {
@@ -2086,7 +2087,6 @@ AppStorage.set('loginStatus', 'expired');
         .barMode(BarMode.Fixed)
         .barBackgroundColor('#FFFFFF')
         .barOverlap(true)
-        .barFloatingStyle({ barBottomMargin: this.navIndicatorHeight })
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onChange((index: number) => {
           this.currentIndex = index;
@@ -2716,15 +2716,13 @@ AppStorage.set('loginStatus', 'not_logged_in');
               this.showUpdateDialog = false;
               if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
             })
-          Button('立即查看').layoutWeight(1).height(40)
+          Button('前往应用市场').layoutWeight(1).height(40)
             .backgroundColor(this.accentColor).fontColor(this.accentTextColor())
             .borderRadius(10)
             .onClick(() => {
               this.showUpdateDialog = false;
               if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
-              if (this.updateInfo) {
-                try { this.context.openLink(this.updateInfo.url); } catch (_) {}
-              }
+              openAppGalleryDetail(this.context);
             })
         }.width('100%')
         // 以后不再提示
