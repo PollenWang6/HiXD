@@ -240,7 +240,6 @@ function parseWeekStr(skzc: string, maxWeeks: number): boolean[] {
 function readClassCache(context: common.Context): string | null {
   const code: string = getSemesterCode();
   const path: string = context.filesDir + '/class_table_' + code + '.json';
-  hilog.info(DOMAIN, TAG, 'readClassCache path=' + path);
   try {
     const f: fileIo.File = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
     const stat: fileIo.Stat = fileIo.statSync(path);
@@ -249,7 +248,6 @@ function readClassCache(context: common.Context): string | null {
     fileIo.closeSync(f);
     const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
     const result: string = decoder.decodeToString(new Uint8Array(buf));
-    hilog.info(DOMAIN, TAG, 'readClassCache success, length=' + result.length);
     return result;
   } catch (e) {
     hilog.warn(DOMAIN, TAG, 'readClassCache failed: ' + JSON.stringify(e));
@@ -285,7 +283,6 @@ function mergeCustomCourses(form: FormDataClass, context: common.Context): void 
     const tomorrowDay: number = todayDay === 7 ? 1 : todayDay + 1;
     const currentWeek: number = calcCurrentWeek();
 
-    hilog.info(DOMAIN, TAG, 'mergeCustomCourses: file=' + path + ' code=' + code + ' items=' + items.length + ' currentWeek=' + currentWeek + ' todayDay=' + todayDay);
 
     for (let i: number = 0; i < items.length; i++) {
       const item: Record<string, Object> = items[i] as Record<string, Object>;
@@ -334,7 +331,6 @@ function mergeCustomCourses(form: FormDataClass, context: common.Context): void 
       const name: string = item['name'] as string || '';
       const startSec: number = item['startSection'] as number || 0;
       const customTeacher: string = item['teacher'] as string || '';
-      hilog.info(DOMAIN, TAG, 'MC[' + i + ']: name=' + name + ' day=' + day + ' start=' + startSec + ' weekList[' + (currentWeek - 1) + ']=' + (weekList[currentWeek - 1] || 0) + ' weekMatch=' + weekMatch);
       if (!weekMatch) continue;
 
       if (day < 1 || day > 7) continue;
@@ -364,7 +360,6 @@ function mergeCustomCourses(form: FormDataClass, context: common.Context): void 
         form.tomorrowTypes.push(typeLabel);
       }
     }
-    hilog.info(DOMAIN, TAG, 'mergeCustomCourses done: today=' + form.todayNames.length + ' tomorrow=' + form.tomorrowNames.length);
   } catch (e) {
     hilog.warn(DOMAIN, TAG, 'mergeCustomCourses read failed: ' + JSON.stringify(e));
   }
@@ -380,7 +375,6 @@ function mergeExperimentPreview(form: FormDataClass, currentWeek: number, localD
 
     const todayDay: number = localDay;
     const tomorrowDay: number = todayDay === 7 ? 1 : todayDay + 1;
-    hilog.info(DOMAIN, TAG, 'mergeExperimentPreview: items=' + data.length + ' currentWeek=' + currentWeek);
 
     for (let i: number = 0; i < data.length; i++) {
       const item: Record<string, Object> = data[i] as Record<string, Object>;
@@ -414,7 +408,6 @@ function mergeExperimentPreview(form: FormDataClass, currentWeek: number, localD
         form.tomorrowStarts.push(startSec);
       }
     }
-    hilog.info(DOMAIN, TAG, 'mergeExperimentPreview done: today=' + form.todayNames.length + ' tomorrow=' + form.tomorrowNames.length);
   } catch (e) {
     hilog.warn(DOMAIN, TAG, 'mergeExperimentPreview error: ' + JSON.stringify(e));
   }
@@ -719,7 +712,6 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
     else if (localH < 0) d = (d + 6) % 7;
     return d === 0 ? 7 : d; // 转成 1=周一 ... 7=周日
   })();
-  hilog.info(DOMAIN, TAG, 'buildFormData: now.getDay=' + now.getDay() + ' localDay=' + localDay);
 
   const hh: string = now.getHours() < 10 ? '0' + now.getHours() : String(now.getHours());
   const mm: string = now.getMinutes() < 10 ? '0' + now.getMinutes() : String(now.getMinutes());
@@ -728,7 +720,6 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
   const dayOfWeek: number = now.getDay();
   form.isWeekend = (localDay === 6 || localDay === 7); // localDay: 6=周六 7=周日
   form.showTomorrow = showTomorrow;
-  hilog.info(DOMAIN, TAG, 'buildFormData: rawDayOfWeek=' + dayOfWeek + ' localDay=' + localDay + ' cacheLen=' + (cache ? cache.length : 0));
 
   // ── 加载手动添加课程 ──
   mergeCustomCourses(form, context);
@@ -749,8 +740,6 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
         form.isEmpty = form.todayNames.length === 0;
     sortEntries(form.todayNames, form.todayTimes, form.todayRooms, form.todayTeachers, form.todayStarts);
     sortEntries(form.tomorrowNames, form.tomorrowTimes, form.tomorrowRooms, form.tomorrowTeachers, form.tomorrowStarts);
-    hilog.info(DOMAIN, TAG, 'buildFormData done (no cache): today=' + form.todayCount + ' tomorrow=' + form.tomorrowCount +
-      ' examToday=' + form.todayExamCount + ' examTomorrow=' + form.tomorrowExamCount);
     return form;
   }
 
@@ -775,7 +764,6 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
       return form;
     }
 
-    hilog.info(DOMAIN, TAG, 'buildFormData: rows.length=' + rows.length + ' currentWeek=' + currentWeek);
 
     // ── 诊断：打印所有周一（SKXQ=1）课程及其周次过滤结果 ──
     const todayWkDay: number = localDay;
@@ -783,15 +771,11 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
       const rd: Record<string, Object> = rows[di] as Record<string, Object>;
       // 打印前3行的所有字段名，确认 SKXQ 字段名
       if (di < 3) {
-        hilog.info(DOMAIN, TAG, 'MONDAY_FIELDS[' + di + '] keys=' + Object.keys(rd).join(','));
       }
       const wd: number = parseInt(String(rd['SKXQ'] || rd['skxq'] || '0')) || 0;
       if (wd === todayWkDay) {
         const skzc_raw: string = String(rd['SKZC'] || '');
         const wl: boolean[] = parseWeekStr(skzc_raw, skzc_raw.length);
-        hilog.info(DOMAIN, TAG, 'MONDAY diag[' + di + ']: KCM=' + String(rd['KCM'] || '') +
-          ' SKZC=' + skzc_raw + ' SKZC_len=' + skzc_raw.length +
-          ' weekList[' + currentWeek + ']=' + wl[currentWeek]);
       }
     }
 
@@ -813,12 +797,10 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
 
       // 采样前3行打印字段值
       if (i < 3) {
-        hilog.info(DOMAIN, TAG, 'row[' + i + '] SKXQ=' + weekday + ' SKZC=' + skzc + ' KCM=' + name);
       }
       // 诊断：所有今天的行
       const weekList: boolean[] = parseWeekStr(skzc, skzc.length);
       if (weekday === localDay) {
-        hilog.info(DOMAIN, TAG, 'MAIN_LOOP_TODAY[' + i + '] KCM=' + name + ' SKZC=' + skzc + ' weekList[13]=' + weekList[currentWeek]);
       }
 
       if (weekday < 1 || weekday > 7 || startSec < 1) {
@@ -866,8 +848,6 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
     form.tomorrowExamCount = form.tomorrowTypes.filter((t: string) => t === 'exam').length;
 
         form.isEmpty = form.todayNames.length === 0;
-    hilog.info(DOMAIN, TAG, 'buildFormData done: today=' + form.todayCount + ' tomorrow=' + form.tomorrowCount +
-      ' rows=' + totalRows + ' weekdaySkip=' + weekdayFiltered + ' weekSkip=' + weekFiltered);
 
   } catch (e) {
     hilog.error(DOMAIN, TAG, 'parse cache failed: ' + JSON.stringify(e));
@@ -878,7 +858,6 @@ function buildFormData(cache: string | null, showTomorrow: boolean, context: com
 
 export default class EntryFormAbility extends FormExtensionAbility {
   onAddForm(want: Want) {
-    hilog.info(DOMAIN, TAG, 'onAddForm');
     const formId: string = want.parameters?.['ohos.extra.param.key.form_identity'] as string || '';
     const cache: string | null = readClassCache(this.context);
     const data: FormDataClass = buildFormData(cache, false, this.context);
@@ -889,19 +868,16 @@ export default class EntryFormAbility extends FormExtensionAbility {
   }
 
   onUpdateForm(formId: string): void {
-    hilog.info(DOMAIN, TAG, 'onUpdateForm formId=' + formId);
     const cache: string | null = readClassCache(this.context);
     const data: FormDataClass = buildFormData(cache, showTomorrowFlag, this.context);
     formProvider.updateForm(formId, formBindingData.createFormBindingData(data))
       .then(() => {
-        hilog.info(DOMAIN, TAG, 'updateForm success');
         formProvider.setFormNextRefreshTime(formId, 5).catch((_: Error) => {});
       })
       .catch((err: Error) => { hilog.error(DOMAIN, TAG, 'updateForm failed: ' + JSON.stringify(err)); });
   }
 
   onFormEvent(formId: string, message: string): void {
-    hilog.info(DOMAIN, TAG, 'onFormEvent formId=' + formId + ' msg=' + message);
     // 解析卡片交互消息：箭头点击发 { msgTest: 'toggle' }，需翻转 showTomorrowFlag 后重建
     try {
       const parsed: object = JSON.parse(message) as object;
@@ -923,14 +899,12 @@ export default class EntryFormAbility extends FormExtensionAbility {
     const data: FormDataClass = buildFormData(cache, showTomorrowFlag, this.context);
     formProvider.updateForm(formId, formBindingData.createFormBindingData(data))
       .then(() => {
-        hilog.info(DOMAIN, TAG, 'formEvent update success');
         formProvider.setFormNextRefreshTime(formId, 5).catch((_: Error) => {});
       })
       .catch((err: Error) => { hilog.error(DOMAIN, TAG, 'formEvent update failed: ' + JSON.stringify(err)); });
   }
 
   onRemoveForm(formId: string): void {
-    hilog.info(DOMAIN, TAG, 'onRemoveForm formId=' + formId);
   }
 
   onAcquireFormState(want: Want): formInfo.FormState {

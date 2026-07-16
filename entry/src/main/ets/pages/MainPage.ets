@@ -54,8 +54,6 @@ interface DailyItem {
 
 const TAG: string = 'MainPage';
 const DOMAIN: number = 0xFF00;
-// [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
-const DIAG2: boolean = false;
 
 interface ElecData {
   remain?: string;
@@ -589,9 +587,6 @@ AppStorage.set('loginStatus', 'offline');
     // 原先仅 tryRefreshPreview（有 ct_updated 变化守卫），编辑后唯一一次重赋发生在主页不可见时，
     // 返回后 onPageShow 因 ct_updated 已相等而不重载 → UI 停留旧帧，须重进 App 才刷新。
     // 这里改为可见即重载，确保 previewCells 在可见态重赋、触发重渲染。
-    if (DIAG2) {
-      hilog.info(DOMAIN, TAG, '[DIAG2] onPageShow → loadClassPreview(可见重载)');
-    }
     this.loadClassPreview();
     // 检查裁剪页面返回的图片
     const croppedPath: string = AppStorage.get<string>('cropped_bg_path') ?? '';
@@ -607,9 +602,6 @@ AppStorage.set('loginStatus', 'offline');
   private tryRefreshPreview(): void {
     const current: string = AppStorage.get('ct_updated') as string || '';
     if (current !== this._lastCtUpdated && current.length > 0) {
-      if (DIAG2) {
-        hilog.info(DOMAIN, TAG, '[DIAG2] tryRefreshPreview 触发重载 ct_updated: ' + this._lastCtUpdated + ' -> ' + current);
-      }
       this._lastCtUpdated = current;
       this.loadClassPreview();
     }
@@ -1339,15 +1331,6 @@ AppStorage.set('loginStatus', 'expired');
       // 同步更新日历快照（供 CalendarSyncService.autoSync 读取，实现登录后自动同步）
       CalendarSyncService.saveClassGridSnapshot(this.toSlimGrid(grid), 'MainPage.loadClassPreview');
       this.previewLoaded = true;
-      if (DIAG2) {
-        let expN = 0, examN = 0, cusN = 0, couN = 0;
-        let keyList: string = '';
-        for (const c of this.previewCells) {
-          if (c.isExam) examN++; else if (c.isExperiment) expN++; else if (c.isCustom) cusN++; else couN++;
-          if (keyList.length > 0) keyList += ', ';
-          keyList += ('[' + c.cellKey + ']');
-        }
-      }
     } catch (e) {
       this.previewLoaded = true;
     }
@@ -1478,15 +1461,6 @@ AppStorage.set('loginStatus', 'expired');
       const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
       const text: string = decoder.decodeToString(new Uint8Array(buf));
       const items: Object[] = JSON.parse(text) as Object[];
-      // [DIAG2] 统计自定义列表里各类型数量（type 0=课程 1=考试 2=实验），确认编辑 exp->course 是否真的落盘为 type=0
-      if (DIAG2) {
-        let t0: number = 0, t1: number = 0, t2: number = 0;
-        for (let i = 0; i < items.length; i++) {
-          const it: Record<string, Object> = items[i] as Record<string, Object>;
-          const tp: number = (it['type'] as number) || 0;
-          if (tp === 1) t1++; else if (tp === 2) t2++; else t0++;
-        }
-      }
       for (let i = 0; i < items.length; i++) {
         const item: Record<string, Object> = items[i] as Record<string, Object>;
         const type: number = (item['type'] as number) || 0;
@@ -2938,7 +2912,6 @@ AppStorage.set('loginStatus', 'not_logged_in');
       .onClick(() => { this.pageInfo.clear();
         this.pageInfo.pushPath({ name: 'ClassTablePage', onPop: () => {
           // 课表页弹出、主页已可见：同步重载预览（不可用 setTimeout，@State 赋值在定时器中不触发重渲染）
-          if (DIAG2) { hilog.info(DOMAIN, TAG, '[DIAG2] ClassTablePage.onPop → loadClassPreview(可见重载)'); }
           this.loadClassPreview();
         } }); })
     } else if (this.previewLoaded && this.previewCells.length === 0) {
@@ -2970,7 +2943,6 @@ AppStorage.set('loginStatus', 'not_logged_in');
       .onClick(() => { this.pageInfo.clear();
         this.pageInfo.pushPath({ name: 'ClassTablePage', onPop: () => {
           // 课表页弹出、主页已可见：同步重载预览（不可用 setTimeout，@State 赋值在定时器中不触发重渲染）
-          if (DIAG2) { hilog.info(DOMAIN, TAG, '[DIAG2] ClassTablePage.onPop → loadClassPreview(可见重载)'); }
           this.loadClassPreview();
         } }); })
     }

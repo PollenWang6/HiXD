@@ -5,12 +5,10 @@ const DOMAIN = 0x0000;
 
 export default class EntryBackupAbility extends BackupExtensionAbility {
   async onBackup() {
-    hilog.info(DOMAIN, 'HiXD_Backup', 'onBackup ok');
     await Promise.resolve();
   }
 
   async onRestore(bundleVersion: BundleVersion) {
-    hilog.info(DOMAIN, 'HiXD_Backup', 'onRestore ok %{public}s', JSON.stringify(bundleVersion));
     await Promise.resolve();
   }
 }

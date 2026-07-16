@@ -22,8 +22,6 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const CT_TAG: string = 'ClassTablePage';
 const CT_DOMAIN: number = 0xFF00;
-// [DIAG2] 诊断日志开关：排查①实验编辑为课程后主页预告不刷新 ②导入日历实验数抖动(0/4) 的问题（排查完可关）
-const CT_DIAG2: boolean = false;
 
 // 课程卡片背景色（降低饱和度，白色文字）
 const CLASS_COLORS: string[] = ['#559BD6', '#AA68B8', '#E87F5A', '#6EAE6E', '#D86687', '#3EA8BC', '#D6B23E', '#82AD5A', '#8E6EBB', '#3EA6D6'];
@@ -645,10 +643,6 @@ export struct ClassTablePage {
   // 实验=0 后立刻被导出页读到）。课表页编辑后已通过 ct_updated 通知 MainPage 轮询重写快照，
   // 无需本页再写。保留 7 处调用点不动，仅此处不再落盘，避免误覆盖。
   private saveClassGridSnapshot(): void {
-    if (CT_DIAG2) {
-      hilog.info(CT_DOMAIN, CT_TAG,
-        '[DIAG2] ClassTablePage.saveClassGridSnapshot 已禁用 → 快照改由 MainPage 唯一写入(避免 0/4 抖动)');
-    }
   }
 
   // 获取真实日历周次（不受用户滑动切换影响）
@@ -1487,9 +1481,6 @@ export struct ClassTablePage {
       // 页面隐藏（用户返回主页）时，通知主页刷新课表预览
       const flag: string = String(Date.now()) + '_nav_back';
       AppStorage.setOrCreate('ct_updated', flag);
-      if (CT_DIAG2) {
-        hilog.info(CT_DOMAIN, CT_TAG, '[DIAG2] onHidden 返回主页 bump ct_updated=' + flag);
-      }
     })
     .onBackPressed(() => {
       if (this.showAddCourseDialog) {
@@ -2710,12 +2701,6 @@ export struct ClassTablePage {
       this.customList.push(this.cellToItem(cell));
     }
     this.saveCustomList();
-    // [DIAG2] 记录本次保存的类型（0课程/1考试/2实验）+ 是否编辑，确认 exp->course 编辑真正落盘为 type=0
-    if (CT_DIAG2) {
-      const savedType: number = cell.isExam ? 1 : (cell.isExperiment ? 2 : 0);
-      hilog.info(CT_DOMAIN, CT_TAG, '[DIAG2] 保存自定义 编辑=' + (this.editingCustomIndex >= 0) + ' type=' + savedType
-        + ' name=' + cell.name + ' day=' + cell.day + ' start=' + cell.startSection + ' 自定义总数=' + this.customList.length);
-    }
     this.loadCustomCourses(this.classGrid);
     this.buildCellCache();
     this.saveClassGridSnapshot();

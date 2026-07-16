@@ -582,13 +582,9 @@ export struct LibraryPage {
             list = (dMap['list'] as Object[]) || [];
           }
           // [诊断] 把馆藏副本关键字段打出来，确认“借出-应还日期”已被正确拆分
-          hilog.info(0xFF00, 'LibDiag', 'recordId=%{public}s holdings=%{public}d',
-            recordId, list.length);
           for (let i: number = 0; i < list.length; i++) {
             const h: Record<string, Object> = list[i] as Record<string, Object>;
             const parsed = this.parseHoldingStatus(String(h['processType'] ?? ''));
-            hilog.info(0xFF00, 'LibDiag', 'HOLD[%{public}d/%{public}d] status=%{public}s due=%{public}s shelf=%{public}s',
-              i, list.length, parsed.status, parsed.dueDate, String(h['urlName'] ?? ''));
             holdings.push({
               itemId: String(h['itemId'] ?? ''),
               callNo: String(h['callNo'] ?? ''),
@@ -1059,7 +1055,6 @@ export struct LibraryPage {
     this.clearLibLoginTimeout();
     // 超时兜底：CAS 网关/网络异常时避免无限停在网上
     this.libLoginTimeoutId = setTimeout(() => {
-      console.info('[HiXD-Lib] lib login TIMEOUT(40s) mode=' + this.libLoginMode);
       if (this.showLibLogin) {
         // 关键修复：超时不再 stopLibFetchLoop()！
         // 冷启动首次取数需先过 CAS SSO + 滑块验证（人工操作常 > 40s），
@@ -1137,7 +1132,6 @@ export struct LibraryPage {
       const raw: Record<string, object> = JSON.parse(jsonStr);
       const data: Record<string, object> = (raw['data'] as Record<string, object>) || {};
       const rawList: Record<string, string>[] = (data['searchResult'] as Record<string, string>[]) || [];
-      console.info('[HiXD-Lib] parseHistory jsonLen=' + jsonStr.length + ' searchResultLen=' + rawList.length);
       const result: HistoryItem[] = [];
       for (let i = 0; i < rawList.length; i++) {
         result.push(this.makeHistoryItem(rawList[i]));
@@ -1182,7 +1176,6 @@ export struct LibraryPage {
       const raw: Record<string, object> = JSON.parse(jsonStr);
       const data: Record<string, object> = (raw['data'] as Record<string, object>) || {};
       const rawList: Record<string, string>[] = (data['searchResult'] as Record<string, string>[]) || [];
-      console.info('[HiXD-Lib] parseBorrow jsonLen=' + jsonStr.length + ' searchResultLen=' + rawList.length);
       const result: BorrowItem[] = [];
       for (let i = 0; i < rawList.length; i++) {
         result.push(this.makeBorrowItem(rawList[i]));
@@ -1258,11 +1251,9 @@ export struct LibraryPage {
             }
             if (msg.indexOf('LIBNOTREADY') === 0) {
               // jwt 尚未就绪（SPA 未初始化完 / CAS SSO 未完成），注入循环会 1.5s 后自动重试，此处仅打点便于诊断
-              console.info('[HiXD-Lib] LIBNOTREADY (jwt 未就绪，等待重试) mode=' + this.libLoginMode);
               return true;
             }
             if (msg.indexOf('LIBERR:') === 0) {
-              console.info('[HiXD-Lib] LIBERR=' + msg.substring(7, 207));
               this.stopLibFetchLoop();
               this.errorMsg = '借阅信息获取失败，请点“重新登录”重试';
               this.historyLoaded = true;
@@ -1354,7 +1345,6 @@ export struct LibraryPage {
       this.historyLoaded = true;
       this.errorMsg = '';
       this.fetchHistoryCovers(result);
-      console.info('[HiXD-Lib] loadHistoryViaHttp SUCCESS count=' + result.length);
       return true;
     } catch (e) {
       console.error('[HiXD-Lib] loadHistoryViaHttp ERROR: ' + e);
@@ -1480,7 +1470,6 @@ export struct LibraryPage {
       PreferenceUtil.putString('lib_summary', result.length + '|' + overdue);
       this.errorMsg = '';
       this.fetchBorrowCovers(result);
-      console.info('[HiXD-Lib] loadBorrowViaHttp SUCCESS count=' + result.length);
       return true;
     } catch (e) {
       console.error('[HiXD-Lib] loadBorrowViaHttp ERROR: ' + e);
@@ -2521,8 +2510,6 @@ export struct LibraryPage {
                     }
                   }.alignItems(HorizontalAlign.End).width(80)
                     .onAppear(() => {
-                      hilog.info(0xFF00, 'LibDiag', 'RENDER type=%{public}s dueDate=%{public}s',
-                        h.processType, h.dueDate);
                     })
                 }.width('100%').padding({ top: 8, bottom: 8 }).alignItems(VerticalAlign.Top)
                 Divider().color('#F2F2F2')
