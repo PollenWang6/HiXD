@@ -1721,14 +1721,6 @@ AppStorage.set('loginStatus', 'expired');
     const startTime: string = SECTION_TIMES[section - 1][0];
     return parseInt(startTime.substring(0, 2)) * 60 + parseInt(startTime.substring(3, 5));
   }
-  private openUrl(url: string) {
-    try {
-      this.context.openLink(url);
-    } catch (e) {
-      // openLink 失败时回退
-    }
-  }
-
   // 平板侧边栏
   @Builder
   Sidebar() {
