@@ -61,10 +61,16 @@ export struct EmptyClassroomPage {
     this.loadBuildings();
   }
 
-  async loadBuildings(): Promise<void> {
+  onPageShow(): void {
+    if (this.buildings.length === 0) {
+      this.loadBuildings(true);
+    }
+  }
+
+  async loadBuildings(forceRefresh: boolean = false): Promise<void> {
     this.loadingBuildings = true; this.errorMsg = '';
     try {
-      this.buildings = await this.ehallsvc.getEmptyClassroomBuildings();
+      this.buildings = await this.ehallsvc.getEmptyClassroomBuildings(forceRefresh);
       if (this.buildings.length > 0) {
         // 恢复上次选择的楼栋
         const lastBld = PreferenceUtil.getString('empty_classroom_last_building');

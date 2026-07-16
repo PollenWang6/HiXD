@@ -1347,8 +1347,6 @@ AppStorage.set('loginStatus', 'expired');
           if (keyList.length > 0) keyList += ', ';
           keyList += ('[' + c.cellKey + ']');
         }
-        hilog.info(DOMAIN, TAG, '[DIAG2] loadClassPreview 完成 预览条数=' + this.previewCells.length
-          + ' (课程' + couN + ' 实验' + expN + ' 考试' + examN + ' 自定义' + cusN + ') keys=' + keyList);
       }
     } catch (e) {
       this.previewLoaded = true;
@@ -1488,7 +1486,6 @@ AppStorage.set('loginStatus', 'expired');
           const tp: number = (it['type'] as number) || 0;
           if (tp === 1) t1++; else if (tp === 2) t2++; else t0++;
         }
-        hilog.info(DOMAIN, TAG, '[DIAG2] mergeCustomPreview 读自定义列表 总数=' + items.length + ' 课程(0)=' + t0 + ' 考试(1)=' + t1 + ' 实验(2)=' + t2);
       }
       for (let i = 0; i < items.length; i++) {
         const item: Record<string, Object> = items[i] as Record<string, Object>;

@@ -34,10 +34,10 @@ export class EmptyClassroomService {
     }
 
     const appPath = '/jwapp/sys/kxjas';
-    this.appSessionUrl[appId] = appPath;
 
     const cookiesBefore = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesBefore.toLowerCase().includes('jsessionid')) {
+      this.appSessionUrl[appId] = appPath;
       return;
     }
 
@@ -52,6 +52,7 @@ export class EmptyClassroomService {
 
     const cookiesAfter1 = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesAfter1.toLowerCase().includes('jsessionid')) {
+      this.appSessionUrl[appId] = appPath;
       return;
     }
 
@@ -73,8 +74,12 @@ export class EmptyClassroomService {
     }
 
     const cookiesFinal = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
-    const hasModAuth = cookiesFinal.toLowerCase().includes('mod_auth_cas');
     const hasJsession = cookiesFinal.toLowerCase().includes('jsessionid');
+    if (hasJsession) {
+      this.appSessionUrl[appId] = appPath;
+    } else {
+      throw new Error('空教室服务暂不可用，请先完成登录后重试');
+    }
   }
 
   private readonly _appCtx: AppPostContext = new AppPostContext(
@@ -88,12 +93,9 @@ export class EmptyClassroomService {
     return sharedAppPost(this._appCtx, path, body);
   }
 
-  async getEmptyClassroomBuildings(): Promise<BuildingInfo[]> {
+  async getEmptyClassroomBuildings(forceRefresh?: boolean): Promise<BuildingInfo[]> {
     await this.init();
     return this.cache.getOrFetch<BuildingInfo[]>('er_buildings', async (): Promise<BuildingInfo[]> => {
-      // 注意：jxlcx.do 必须 POST，且 *order 要放在 body 里。
-      // 原实现用 GET 把 *order 拼进 URL 查询串（含未编码的 *），
-      // 会触发 NETSTACK 参数校验 401，导致楼栋列表拉取失败。
       const resp = await this.appPost('/jwapp/sys/kxjas/modules/kxjas/jxlcx.do', {
         '*order': '+XXXQDM,+PX,+JXLDM',
       });
@@ -107,7 +109,7 @@ export class EmptyClassroomService {
         }
       }
       return out;
-    }, 60 * 60 * 1000);
+    }, 60 * 60 * 1000, forceRefresh);
   }
 
   async searchEmptyClassrooms(

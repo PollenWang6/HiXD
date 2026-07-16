@@ -319,7 +319,6 @@ export struct CalendarExportPage {
         }
       }
     }
-    hilog.info(DOMAIN, TAG, '[DIAG] 课表源数据扫描完成：有效cell=' + cellTotal + ' 检出重复格=' + dupTotal);
   }
 
   calcDbMins(startTime: Date, dbH: number, dbM: number): number {

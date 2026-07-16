@@ -37,8 +37,10 @@ const EXAM_COLORS_DK: string[] = ['#4A1A1A', '#3A1818', '#3A1A1A', '#4A1A1A', '#
 const DAY_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const DAY_COUNT = 7;
 const SECTION_COUNT = 11;
-// 课表格子水平间隙（百分比，相对周宽），提升视觉透气感
+// 课表格子水平间隙（百分比，相对周宽）
 const CELL_GAP: number = 2;
+// 课表格子垂直间隙（px）
+const CELL_GAP_V: number = 4;
 
 // 分隔行：午休(第4-5节间)、放学(第8-9节间)
 const BREAK_HEIGHT: number = 32;
@@ -2120,11 +2122,11 @@ export struct ClassTablePage {
                       .alignItems(HorizontalAlign.Start).justifyContent(FlexAlign.Center)
                       .position({
                         x: `${(day - 1) * (100 / 7) + (cell.isExam && cell.examColumnSpan > 1 ? cell.examColumnIndex * (100 / 7 / cell.examColumnSpan) : 0) + CELL_GAP / 2}%`,
-                        y: cell.isExam ? cell.examPixelY : this.getSectionY(cell.startSection)
+                        y: cell.isExam ? cell.examPixelY : this.getSectionY(cell.startSection) + CELL_GAP_V
                       })
                       .size({
                         width: `${cell.isExam && cell.examColumnSpan > 1 ? (100 / 7 / cell.examColumnSpan - CELL_GAP) : (100 / 7 - CELL_GAP)}%`,
-                        height: cell.isExam ? cell.examPixelH : this.getSectionSpanHeight(cell.startSection, cell.endSection)
+                        height: cell.isExam ? cell.examPixelH : this.getSectionSpanHeight(cell.startSection, cell.endSection) - CELL_GAP_V
                       })
                       .border((cell.day === this._todayDay && this.currentWeek === this.getRealCurrentWeek() &&
                         cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&

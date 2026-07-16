@@ -289,9 +289,7 @@ export struct LibraryPage {
         'libCode': libCode,
         'subtenancySource': '3'
       };
-      console.info('[HiXD-Lib] scanSubtenancy body=' + JSON.stringify(body));
       const resp = await LibspSessionService.postJson('/find/credit/scanSubtenancy', body, session);
-      console.info('[HiXD-Lib] scanSubtenancy raw resp: ' + resp.body);
       const data: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
       const dataObj: Record<string, Object> = (data['data'] as Record<string, Object>) || {};
       const checkMsg: string = (dataObj['checkResultMessage'] as string) || '';
@@ -1224,12 +1222,10 @@ export struct LibraryPage {
         .onConsole((event): boolean => {
           if (event && event.message) {
             const msg: string = event.message.getMessage();
-            console.info('[HiXD-Lib] onConsole: ' + msg.substring(0, 200));
             const parsed = LibspSessionService.parseConsole(msg);
             if (parsed.kind === 'session' && parsed.payload) {
               try {
                 const s: LibspSession = JSON.parse(parsed.payload) as LibspSession;
-                console.info('[HiXD-LibDiag] LIBSESSION parsed: userId=' + (s.userId||'(empty)') + ' libCode=' + (s.libCode||'(empty)') + ' groupCode=' + (s.groupCode||'(empty)'));
                 if (s.jwt && s.jwtHeader) {
                   LibspSessionService.saveSession(s);
                   this._libspSession = s;
@@ -1252,14 +1248,11 @@ export struct LibraryPage {
               return true;
             }
             if (msg.indexOf('LIBBORROW:') === 0) {
-              // 注意：'LIBBORROW:' 共 10 个字符，须 substring(10) 才能保留开头的 '{'，
-              // 否则 JSON.parse 会抛异常导致当前借阅解析失败（历史用 'LIBHIST:' 8 字符对应 substring(8)）。
-              console.info('[HiXD-Lib] LIBBORROW raw=' + msg.substring(10, 511));
+              // 注意：'LIBBORROW:' 共 10 个字符，须 substring(10) 才能保留开头的 '{'
               this.onLibBorrowReceived(msg.substring(10));
               return true;
             }
             if (msg.indexOf('LIBRENEW:') === 0) {
-              console.info('[HiXD-Lib] LIBRENEW raw=' + msg.substring(9, 511));
               this.onLibRenewReceived(msg.substring(9));
               return true;
             }
@@ -1508,7 +1501,6 @@ export struct LibraryPage {
         const raw: Record<string, Object> = resp.json<Record<string, Object>>();
         const data: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
         const url = String(data['duxiuImageUrl'] ?? '');
-        console.info('[HiXD-Lib] cover result len=' + url.length + ' isbn=' + isbn + ' doc=' + docNumber + ' url=' + url);
         return url;
       }
     } catch (e) {
