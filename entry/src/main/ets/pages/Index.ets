@@ -41,30 +41,6 @@ const USER_AGREEMENT_TEXT: string =
   '七、联系方式\n' +
   'pollenwang666@petalmail.com';
 
-const PRIVACY_POLICY_TEXT: string =
-  '本隐私政策说明本软件在用户信息处理方面的原则。核心特点是：不传输您的任何个人信息至任何服务器。\n\n' +
-  '一、信息收集与使用\n' +
-  '1.1 本软件不含任何追踪器或第三方分析 SDK，不收集使用数据。\n\n' +
-  '1.2 为实现功能，本软件在本地收集和处理以下信息：\n' +
-  '• 登录：收集学号和密码，加密后仅存储在本地设备\n' +
-  '• 课表和考试：获取课表及考试信息，仅保存在本地\n' +
-  '• 个人信息：从学校学工系统获取姓名、学号、专业等，仅存储在本地用于展示\n' +
-  '• 自定义背景：读取您选择的图片文件，仅保存在本地\n\n' +
-  '1.3 所有数据处理均限于本地设备完成，不上传至任何外部服务器。\n\n' +
-  '二、信息存储与安全\n' +
-  '2.1 所有数据仅存储在本地。退出登录或卸载应用后可清除。\n\n' +
-  '2.2 网络通信使用 HTTPS 加密。本地数据受系统沙盒保护。建议为设备设置锁屏密码。\n\n' +
-  '三、权限说明\n' +
-  '• 相机权限：宿舍水机扫码绑定设备\n' +
-  '• 日历权限（可选）：课程和考试提醒，仅读取本软件创建的日程\n' +
-  '• 网络权限：访问学校教务系统\n' +
-  '以上权限均不会收集个人隐私数据。\n\n' +
-  '四、您的权利\n' +
-  '数据仅在本地存储，您可直接通过设备管理数据。可随时退出登录清除所有本地信息。\n\n' +
-  '五、隐私政策变更\n' +
-  '将通过应用更新说明等方式提前公示。\n\n' +
-  '六、联系方式\n' +
-  'pollenwang666@petalmail.com';
 
 // 协议查看器视图模型（供嵌套自定义弹窗复用本地协议文本）
 @ObservedV2
@@ -182,7 +158,7 @@ struct Index {
       { text: '欢迎使用 HiXD！在使用本应用前，请您仔细阅读并同意', type: TextType.PLAIN },
       { text: '《用户协议》', type: TextType.ACTION, onAction: () => this.openPolicy('user') },
       { text: '和', type: TextType.PLAIN },
-      { text: '《隐私政策》', type: TextType.ACTION, onAction: () => this.openPolicy('privacy') },
+      { text: '《隐私政策》', type: TextType.ACTION, onAction: () => this.openExternal('https://pollenwang6.github.io/HiXD/privacy.html') },
       {
         text: '。\n\n本应用需要您使用学号和密码登录西安电子科技大学统一身份认证系统，' +
           '以获取课表、成绩等教务数据。您的账号密码仅用于校内认证，不会上传至任何第三方服务器。',
@@ -209,11 +185,21 @@ struct Index {
     this.controller.openSheetDialog();
   }
 
+  // 跳转外部链接（隐私政策在线版等）
+  private openExternal(url: string): void {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      ctx.openLink(url).catch(() => {});
+    } catch (_e) {
+      // 无法拉起浏览器时忽略
+    }
+  }
+
   // 复用本地协议文本，以置顶自定义弹窗展示（稳定盖在同意弹窗之上）
   private openPolicy(type: string): void {
     const vm: PolicyVM = new PolicyVM();
     vm.title = type === 'user' ? '用户协议' : '隐私政策';
-    vm.content = type === 'user' ? USER_AGREEMENT_TEXT : PRIVACY_POLICY_TEXT;
+    vm.content = USER_AGREEMENT_TEXT;
     const node: ComponentContent<PolicyVM> =
       new ComponentContent<PolicyVM>(this.uiContext, wrapBuilder(buildPolicyDialog), vm);
     PolicyDialogHolder.node = node;

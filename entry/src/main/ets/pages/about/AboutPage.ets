@@ -48,6 +48,15 @@ export struct AboutPage {
     this.checkingUpdate = false;
   }
 
+  // 跳转在线版隐私政策（单一来源，与 AGC 提交网址一致）
+  private openPrivacyPolicy(): void {
+    try {
+      this.context.openLink('https://pollenwang6.github.io/HiXD/privacy.html').catch(() => {});
+    } catch (_e) {
+      // 无法拉起浏览器时忽略
+    }
+  }
+
   build() {
     NavDestination() {
       Scroll() {
@@ -80,17 +89,19 @@ export struct AboutPage {
           .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
           .margin({ left: 16, right: 16, top: 8 })
 
-          // 隐私政策
+          // 隐私政策（跳转在线版，单一来源）
           Column() {
-            Text('隐私政策').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
-              .padding({ left: 16, top: 14, bottom: 10 })
-            Divider().color('#E0E0E0').strokeWidth(0.5).margin({ left: 16, right: 16 })
-            Text('本隐私政策旨在向您说明本软件在用户信息处理方面的原则、方式及范围。本软件的核心特点是：不传输您的任何个人信息或使用数据至我们的服务器或任何第三方服务器，请您放心使用。\n\n一、信息收集与使用\n1.1 本软件在运行过程中，我们不收集任何使用情况数据或分析数据，不含任何追踪器或第三方分析 SDK。\n\n1.2 为实现以下功能，本软件将在本地收集和处理相关信息：\n• 当您使用"登录"功能时，本软件会收集您输入的学号与密码，将其加密后仅存储在您的本地设备中，不会上传至任何服务器。\n• 当您使用"自动获取课表和考试信息"功能时，本软件会获取您的课表与考试相关信息，仅保存在您的本地设备中。\n• 当您使用"个人信息展示"功能时，本软件从学校学工系统获取您的姓名、学号、专业、学院、年级、性别等信息，仅存储在本地用于界面展示。\n• 当您使用"自定义课表背景"功能时，本软件将读取并保存您通过系统图片选择器选择的图片文件，仅保存在您的本地设备中，不会上传至任何服务器。\n\n1.3 所有功能涉及的数据处理（访问、存储、计算）均严格限于您的本地设备内部完成。我们不将任何本地存储的信息传输至外部服务器、网络或第三方。\n\n二、信息存储与安全\n2.1 本软件的所有数据均保存在您的本地设备上。退出登录或卸载应用后，所有本地数据将被清除。\n\n2.2 所有网络通信使用 HTTPS 加密传输。本地数据存储在应用沙盒内，受到系统级安全保护。我们建议您为设备设置锁屏密码以加强本机安全。\n\n三、权限说明\n本软件申请以下权限，均不会收集个人隐私数据：\n• 相机权限：用于宿舍水机扫码绑定设备，仅在使用扫码功能时调用\n• 日历权限（可选）：用于写入课程和考试提醒，仅读取由本软件创建的日程\n• 网络权限：用于访问学校教务系统\n• 手势检测权限：用于“智感握持”功能，检测您握持设备的左右手，以便调整交互按钮位置；检测过程全部在本机完成，不上传任何数据\n• 运动状态权限：配合“智感握持”功能感知设备运动状态以优化交互效果；全部在本机完成，不上传任何数据\n\n四、您的权利\n4.1 因所有数据仅在本地存储，您可直接通过设备管理数据，无需通过我们行使查询、更正、删除等权利。\n\n4.2 您可随时在"我的"页面退出登录，清除所有本地账号信息和缓存数据。\n\n4.3 若对本软件隐私保护有疑问，可通过下方联系方式与我们联系。\n\n五、隐私政策变更\n5.1 若因法律法规变化或功能调整需要变更本隐私政策，将通过应用更新说明等方式提前公示。涉及信息收集方式的变更将在您明确同意后才生效。\n\n六、联系方式\n如有隐私相关问题，请联系：\npollenwang666@petalmail.com')
-              .fontSize(13).fontColor(ThemeColors.textSecondary).lineHeight(22)
-              .padding({ left: 16, right: 16, top: 8, bottom: 14 })
+            Row() {
+              Column() {
+                Text('隐私政策').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+                Text('点击查看完整隐私政策').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+              }.layoutWeight(1)
+              Text('›').fontSize(20).fontColor('#CCCCCC')
+            }.width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
           }.borderRadius(12).clip(true).backgroundColor(ThemeColors.bgCard)
           .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
           .margin({ left: 16, right: 16, top: 12 })
+          .onClick(() => this.openPrivacyPolicy())
         }
         .padding({ bottom: 30 })
       }
