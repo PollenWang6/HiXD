@@ -537,7 +537,6 @@ struct MainPage {
       if (this.loginStatus === 'checking' || this.loginStatus === 'online') {
         this.loginStatus = 'offline';
 AppStorage.set('loginStatus', 'offline');
-        this.isLoggedIn = false;
       }
     }
   }
@@ -665,13 +664,11 @@ AppStorage.set('loginStatus', 'expired');
           await this.doRelogin();
           return;
         }
-        this.isLoggedIn = false;
         this.loginStatus = 'not_logged_in';
 AppStorage.set('loginStatus', 'not_logged_in');
       } catch (_netErr) {
         this.loginStatus = 'offline';
 AppStorage.set('loginStatus', 'offline');
-        this.isLoggedIn = false;
         this.startRetryTimer();
       }
     } catch (e) {
@@ -682,7 +679,6 @@ AppStorage.set('loginStatus', 'offline');
         this.loginStatus = 'offline';
 AppStorage.set('loginStatus', 'offline');
       }
-      this.isLoggedIn = false;
       this.startRetryTimer();
     }
   }
@@ -3043,13 +3039,13 @@ AppStorage.set('loginStatus', 'not_logged_in');
           } else if (this.loginStatus === 'expired') {
             Text('登录已过期').fontSize(11).fontColor(this.accentBgIsLight() ? '#C62828' : '#CC8080')
           } else if (this.loginStatus === 'not_logged_in') {
-            Text('未登录').fontSize(11).fontColor(this.accentTextColor() + 'CC')
+            Text('未登录').fontSize(11).fontColor(this.accentTextColor())
           } else if (this.loginStatus === 'offline') {
             Text('离线模式').fontSize(11).fontColor(this.accentBgIsLight() ? '#BF6A00' : '#FFCC80')
           } else if (this.loginStatus === 'timeout') {
             Text('登录超时').fontSize(11).fontColor(this.accentBgIsLight() ? '#C62828' : '#CC8080')
           } else if (this.loginStatus === 'checking') {
-            Text('正在验证...').fontSize(11).fontColor(this.accentTextColor() + 'CC')
+            Text('正在验证...').fontSize(11).fontColor(this.accentTextColor())
           }
         }
         Blank()
@@ -3063,7 +3059,7 @@ AppStorage.set('loginStatus', 'not_logged_in');
             }
           }.width(32).height(32)
           Text(this.userDisplayName || this.username || '已登录').fontSize(13)
-            .fontColor(this.accentTextColor() + 'CC').margin({ left: 8 })
+            .fontColor(this.accentTextColor()).margin({ left: 8 })
         } else {
           Button(this.loginStatus === 'expired' || this.loginStatus === 'timeout' ? '重新登录' : '登录')
             .height(28).fontSize(12).fontColor('#FFFFFF')

@@ -1272,11 +1272,6 @@ export struct LibraryPage {
           LoadingProgress().width(48).height(48).color(this.accentColor)
           Text('正在加载借阅信息...').fontSize(14)
             .fontColor(ThemeColors.textPrimary).margin({ top: 14 })
-          Text('取消').fontSize(13)
-            .fontColor(this.themeIsDark ? '#9E9E9E' : '#888888')
-            .padding({ left: 16, right: 16, top: 6, bottom: 6 })
-            .margin({ top: 22 })
-            .onClick(() => { this.stopLibLoginPoll(); })
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center)

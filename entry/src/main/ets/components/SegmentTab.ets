@@ -121,6 +121,7 @@ export struct SegmentTab {
       .index(this.currentIndex)
       .indicator(false)
       .loop(false)
+      .effectMode(EdgeEffect.Spring)
       .onAreaChange((_old: Area, newArea: Area) => {
         this.swiperWidth = newArea.width as number;
       })
