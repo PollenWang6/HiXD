@@ -2,7 +2,7 @@
   "app": {
     "bundleName": "com.HiXD.myapplication",
     "vendor": "PollenWang",
-    "versionCode": 1040100,
+    "versionCode": 1040101,
     "versionName": "1.4.1",
     "minAPIVersion": 23,
     "targetAPIVersion": 23,
