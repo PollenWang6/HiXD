@@ -3,16 +3,26 @@ import { PreferenceUtil } from '../utils/PreferenceUtil';
 import { SemesterUtil } from './EhallService';
 import { calendarManager } from '@kit.CalendarKit';
 import { common } from '@kit.AbilityKit';
+import { SEC_START, SEC_END } from '../pages/MainPage';
 export interface SlimCell {
   name: string; teacher: string; classroom: string; day: number;
-  startSection: number; endSection: number; weekList: boolean[];
+  startSection: number; endSection: number; startTime: string; endTime: string;
+  weekList: boolean[];
   isExam: boolean; isExperiment: boolean;
   experimentProject: string; examDate: string; examTimeDesc: string; examSeat: string;
   weekNum: number; // 实验/考试所属周（普通课程为 0，跨多周不填）
 }
 
-const ST: string[] = ['', '8:30-9:15', '9:20-10:05', '10:25-11:10', '11:15-12:00',
-  '14:00-14:45', '14:50-15:35', '15:55-16:40', '16:45-17:30', '19:00-19:45', '19:55-20:35', '20:40-21:25'];
+// 统一定时解析：优先 startTime/endTime，存量数据回退 section→SEC_START
+function getTimeFromCell(cell: SlimCell, isStart: boolean): string {
+  if (isStart && cell.startTime) return cell.startTime;
+  if (!isStart && cell.endTime) return cell.endTime;
+  const sec = isStart ? cell.startSection : cell.endSection;
+  if (sec > 0 && sec < SEC_START.length) return isStart ? SEC_START[sec] : SEC_END[sec];
+  return '08:00';
+}
+
+// ST replaced by SEC_START/SEC_END import
 const DC: number = 7;
 const SC: number = 11;
 
@@ -236,14 +246,14 @@ export class CalendarSyncService {
           for (let w = 0; w < cell.weekList.length; w++) {
             if (!cell.weekList[w]) { continue; }
             const dt: Date = new Date(mon);
-            dt.setDate(mon.getDate() + w * 7 + (d - 1));
-            const sp: string[] = ST[cell.startSection].split('-');
-            const ep: string[] = ST[cell.endSection].split('-');
+            dt.setDate(mon.getDate() + (w - 1) * 7 + (d - 1));
+            const sp: string[] = getTimeFromCell(cell, true).split(':');
+            const ep: string[] = getTimeFromCell(cell, false).split(':');
             if (sp.length < 2 || ep.length < 2) { continue; }
             const stT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(sp[0].split(':')[0]), parseInt(sp[0].split(':')[1]), 0);
+              parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
+              parseInt(ep[0]), parseInt(ep[1]), 0);
             const key: string = CalendarSyncService.cellKey(cell, stT.getTime());
             needed[key] = true;
             if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
@@ -282,14 +292,14 @@ export class CalendarSyncService {
           for (let w = 0; w < cell.weekList.length; w++) {
             if (!cell.weekList[w]) { continue; }
             const dt: Date = new Date(mon);
-            dt.setDate(mon.getDate() + w * 7 + (d - 1));
-            const sp: string[] = ST[cell.startSection].split('-');
-            const ep: string[] = ST[cell.endSection].split('-');
+            dt.setDate(mon.getDate() + (w - 1) * 7 + (d - 1));
+            const sp: string[] = getTimeFromCell(cell, true).split(':');
+            const ep: string[] = getTimeFromCell(cell, false).split(':');
             if (sp.length < 2 || ep.length < 2) { continue; }
             const stT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(sp[0].split(':')[0]), parseInt(sp[0].split(':')[1]), 0);
+              parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
+              parseInt(ep[0]), parseInt(ep[1]), 0);
             const key: string = CalendarSyncService.cellKey(cell, stT.getTime());
             needed[key] = true;
             if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }

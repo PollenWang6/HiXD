@@ -44,6 +44,8 @@ const APP_PATH_MAP: Map<string, string> = new Map([
 
 export class SemesterUtil {
   static getSemesterStartDate(semCodeOrYear: string, termPart?: string): Date {
+    // 1) 校历兜底（西电标准开学日，已核对：春季 3/2、秋季 9/1，对齐到所在周周一）。
+    //    这是经过用户确认的可靠基准，作为“唯一真相来源”的退路。
     let y: number, t: number;
     if (termPart === undefined) {
       const p = semCodeOrYear.split('-');
@@ -55,12 +57,35 @@ export class SemesterUtil {
       y = parseInt(termPart === '1' ? p[0] : p[1]);
       t = parseInt(termPart);
     }
-    // 秋季 9月1日，春季 3月2日，调整到最近的周一
-    const start = t === 1 ? new Date(y, 8, 1) : new Date(y, 2, 2);
-    const dow = start.getDay();
-    const add = dow === 0 ? -6 : dow === 1 ? 0 : 1 - dow;
-    start.setDate(start.getDate() + add);
-    return start;
+    const fbBase = t === 1 ? new Date(y, 8, 1) : new Date(y, 2, 2);
+    const fbdow = fbBase.getDay();
+    const fbadd = fbdow === 0 ? -6 : fbdow === 1 ? 0 : 1 - fbdow;
+    fbBase.setDate(fbBase.getDate() + fbadd);
+    const fb: Date = fbBase;
+
+    // 2) 真实开学日（preloadAllData 从 ehall API 抓的 XQKSRQ）：参考 Flutter 用真实开学日，
+    //    但 ehall 的 cxjcs.do 偶尔会返回错学期/偏一周的值。仅当其与校历兜底偏差 ≤6 天时才采用，
+    //    否则回退校历，避免日历整体偏移一周。
+    const realSd: string = PreferenceUtil.getString('semester_start_date', '');
+    if (realSd.length >= 10) {
+      const dp: string[] = realSd.substring(0, 10).split('-');
+      if (dp.length === 3) {
+        const ry: number = parseInt(dp[0]);
+        const rm: number = parseInt(dp[1]);
+        const rd: number = parseInt(dp[2]);
+        if (!isNaN(ry) && !isNaN(rm) && !isNaN(rd) && rm >= 1 && rm <= 12 && rd >= 1 && rd <= 31) {
+          const base = new Date(ry, rm - 1, rd);
+          const bdow = base.getDay();
+          const badd = bdow === 0 ? -6 : bdow === 1 ? 0 : 1 - bdow;
+          base.setDate(base.getDate() + badd);
+          const diffDays: number = Math.abs(Math.round((base.getTime() - fb.getTime()) / 86400000));
+          if (diffDays <= 6) {
+            return base;
+          }
+        }
+      }
+    }
+    return fb;
   }
 
   static calcCurrentWeekFromNow(): number {

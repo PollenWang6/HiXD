@@ -320,7 +320,9 @@ export class ClassService {
       await this.init();
       await this.activateAppSession(EHALL_APP_CLASS_TABLE);
       const parts: string[] = semCode.split('-');
-      const body: Record<string, string> = {'XN': parts[0] + '-' + parts[1], 'XQ': parts[2]};
+      const xn: string = parts[0] + '-' + parts[1];
+      const xq: string = parts[2];
+      const body: Record<string, string> = {'XN': xn, 'XQ': xq};
       const resp: HttpResponse = await this.appPost(
         '/jwapp/sys/wdkb/modules/jshkcb/cxjcs.do', body);
       const data: Record<string, Object> = JSON.parse(resp.body) as Record<string, Object>;
@@ -328,6 +330,20 @@ export class ClassService {
       const cxjcs: Record<string, Object> = datas['cxjcs'] as Record<string, Object>;
       const rows: Object[] = cxjcs['rows'] as Object[];
       if (rows.length > 0) {
+        // 优先匹配 XN+XQ 都一致的那一行（cxjcs 可能返回多学期，rows[0] 未必是当前学期）
+        for (let i = 0; i < rows.length; i++) {
+          const r: Record<string, Object> = rows[i] as Record<string, Object>;
+          const rXn: string = String(r['XN'] ?? '');
+          const rXq: string = String(r['XQ'] ?? '');
+          if (rXn === xn && rXq === xq) {
+            const date: string = String(r['XQKSRQ'] ?? '');
+            if (date.length >= 10) {
+              console.info('[XQKSRQ_DIAG] matched row ' + i + ' -> ' + date);
+              return date;
+            }
+          }
+        }
+        // 回退：取首行
         const r0: Record<string, Object> = rows[0] as Record<string, Object>;
         const date: string = String(r0['XQKSRQ'] ?? '');
         return date;

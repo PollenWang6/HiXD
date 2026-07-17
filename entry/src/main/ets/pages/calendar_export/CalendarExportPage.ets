@@ -1,14 +1,12 @@
 import { AccentColors } from '../../utils/AccentColors';
 // CalendarExportPage.ets
 import { ThemeColors } from '../../utils/ThemeColors';
+import { SEC_START, SEC_END } from '../MainPage';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { SemesterUtil } from '../../services/EhallService';
+import { ClassService } from '../../services/ClassService';
 import { calendarManager } from '@kit.CalendarKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-
-const TAG: string = 'CalendarExportPage';
-const DOMAIN: number = 0xFF00;
 
 interface SlimCell {
   name: string;
@@ -17,6 +15,8 @@ interface SlimCell {
   day: number;
   startSection: number;
   endSection: number;
+  startTime: string;    // 开始钟点 HH:MM
+  endTime: string;      // 结束钟点 HH:MM
   weekList: boolean[];
   isExam: boolean;
   isExperiment: boolean;
@@ -32,13 +32,19 @@ interface ExportStats {
   failCount: number;
 }
 
-const ST: string[] = [
-  '', '8:30-9:15', '9:20-10:05', '10:25-11:10', '11:15-12:00',
-  '14:00-14:45', '14:50-15:35', '15:55-16:40', '16:45-17:30',
-  '19:00-19:45', '19:55-20:35', '20:40-21:25'
-];
+// ST replaced by SEC_START/SEC_END from MainPage; see getTimeFromCell helper
 const DC: number = 7;
 const SC: number = 11;
+
+// 统一定时解析：优先 cell.startTime/endTime，存量数据回退 section 查表
+// 返回 "HH:MM" 格式
+function getTimeFromCell(cell: SlimCell, isStart: boolean): string {
+  if (isStart && cell.startTime) return cell.startTime;
+  if (!isStart && cell.endTime) return cell.endTime;
+  const sec = isStart ? cell.startSection : cell.endSection;
+  if (sec > 0 && sec < SEC_START.length) return isStart ? SEC_START[sec] : SEC_END[sec];
+  return '08:00';
+}
 
 // 提醒选项预设
 const REMINDER_OPTIONS: number[] = [5, 10, 15, 20, 30, 60];
@@ -337,12 +343,31 @@ export struct CalendarExportPage {
         // ignore
       }
 
+      // 全量重写前先清空本日历既有事件，避免旧事件（如旧版"晚一周"残留）与新事件并存导致看起来仍错位
+      try {
+        const prevEvts: calendarManager.Event[] = await cal.getEvents();
+        for (let pe = 0; pe < prevEvts.length; pe++) {
+          if (prevEvts[pe].id !== undefined) {
+            try { await cal.deleteEvent(prevEvts[pe].id); } catch (_e2) { /* 忽略 */ }
+          }
+        }
+      } catch (_e) { /* 忽略 */ }
+
       const sem: string = SemesterUtil.getCurrentSemesterCode();
+      // 确保使用 ehall API 返回的真实开学日（XQKSRQ），与 Flutter traintime_pda 一致；
+      // 若预加载未写入则现场向 ehall 补齐，失败则退回校历近似
+      if (PreferenceUtil.getString('semester_start_date', '').length < 10) {
+        try {
+          const apiDate: string | null = await ClassService.getInstance().getSemesterStartDateFromApi(sem);
+          if (apiDate && apiDate.length >= 10) {
+            PreferenceUtil.putString('semester_start_date', apiDate);
+          }
+        } catch (_e) { /* 忽略，getSemesterStartDate 内部会走兜底 */ }
+      }
       const sd: Date = SemesterUtil.getSemesterStartDate(sem);
       const sw: number = PreferenceUtil.getNumber('week_swift', 0);
       const mon: Date = new Date(sd);
       mon.setDate(sd.getDate() + (sd.getDay() === 0 ? -6 : 1 - sd.getDay()) + sw * 7);
-
       const existMap: Record<string, number[]> = {};
       try {
         const evts: calendarManager.Event[] = await cal.getEvents();
@@ -442,14 +467,14 @@ export struct CalendarExportPage {
           for (let w = 0; w < cell.weekList.length; w++) {
             if (!cell.weekList[w]) { continue; }
             const dt: Date = new Date(mon);
-            dt.setDate(mon.getDate() + w * 7 + (d - 1));
-            const sp: string[] = ST[cell.startSection].split('-');
-            const ep: string[] = ST[cell.endSection].split('-');
+            dt.setDate(mon.getDate() + (w - 1) * 7 + (d - 1));
+            const sp: string[] = getTimeFromCell(cell, true).split(':');
+            const ep: string[] = getTimeFromCell(cell, false).split(':');
             if (sp.length < 2 || ep.length < 2) { continue; }
             const stT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(sp[0].split(':')[0]), parseInt(sp[0].split(':')[1]), 0);
+              parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
+              parseInt(ep[0]), parseInt(ep[1]), 0);
             const title: string = cell.name;
             const desc: string = (cell.classroom ? '教室: ' + cell.classroom : '') +
               (cell.teacher ? (cell.classroom ? ' | ' : '') + '教师: ' + cell.teacher : '');
@@ -502,14 +527,14 @@ export struct CalendarExportPage {
           for (let wi = 0; wi < expWeeks.length; wi++) {
             const w: number = expWeeks[wi];
             const dt: Date = new Date(mon);
-            dt.setDate(mon.getDate() + w * 7 + (d - 1));
-            const sp: string[] = ST[cell.startSection].split('-');
-            const ep: string[] = ST[cell.endSection].split('-');
+            dt.setDate(mon.getDate() + (w - 1) * 7 + (d - 1));
+            const sp: string[] = getTimeFromCell(cell, true).split(':');
+            const ep: string[] = getTimeFromCell(cell, false).split(':');
             if (sp.length < 2 || ep.length < 2) { continue; }
             const stT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(sp[0].split(':')[0]), parseInt(sp[0].split(':')[1]), 0);
+              parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
+              parseInt(ep[0]), parseInt(ep[1]), 0);
             const title: string = '🧪 ' + cell.name;
             const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
               (cell.experimentProject ? ' 项目: ' + cell.experimentProject : '');
@@ -611,14 +636,14 @@ export struct CalendarExportPage {
           for (let w = 0; w < cell.weekList.length; w++) {
             if (!cell.weekList[w]) { continue; }
             const dt: Date = new Date(mon);
-            dt.setDate(mon.getDate() + w * 7 + (d - 1));
-            const sp: string[] = ST[cell.startSection].split('-');
-            const ep: string[] = ST[cell.endSection].split('-');
+            dt.setDate(mon.getDate() + (w - 1) * 7 + (d - 1));
+            const sp: string[] = getTimeFromCell(cell, true).split(':');
+            const ep: string[] = getTimeFromCell(cell, false).split(':');
             if (sp.length < 2 || ep.length < 2) { continue; }
             const stT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(sp[0].split(':')[0]), parseInt(sp[0].split(':')[1]), 0);
+              parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
+              parseInt(ep[0]), parseInt(ep[1]), 0);
             const key: string = this.cellKey(cell, stT.getTime());
             needed[key] = true;
             if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
@@ -669,14 +694,14 @@ export struct CalendarExportPage {
           for (let wi = 0; wi < expWeeks.length; wi++) {
             const w: number = expWeeks[wi];
             const dt: Date = new Date(mon);
-            dt.setDate(mon.getDate() + w * 7 + (d - 1));
-            const sp: string[] = ST[cell.startSection].split('-');
-            const ep: string[] = ST[cell.endSection].split('-');
+            dt.setDate(mon.getDate() + (w - 1) * 7 + (d - 1));
+            const sp: string[] = getTimeFromCell(cell, true).split(':');
+            const ep: string[] = getTimeFromCell(cell, false).split(':');
             if (sp.length < 2 || ep.length < 2) { continue; }
             const stT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(sp[0].split(':')[0]), parseInt(sp[0].split(':')[1]), 0);
+              parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
-              parseInt(ep[1].split(':')[0]), parseInt(ep[1].split(':')[1]), 0);
+              parseInt(ep[0]), parseInt(ep[1]), 0);
             const key: string = this.cellKey(cell, stT.getTime());
             needed[key] = true;
             if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }

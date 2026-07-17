@@ -1,4 +1,4 @@
-﻿import { AccentColors } from '../../utils/AccentColors';
+import { AccentColors } from '../../utils/AccentColors';
 import { menuOptions } from '../../utils/MaterialKit';
 // ClassTablePage.ets — 支持点击查看所有冲突课程版（已修复重叠课程覆盖问题）
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -11,6 +11,7 @@ import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { CalendarSyncService } from '../../services/CalendarSyncService';
 import { WeekChip } from '../../components/WeekChip';
+import { SEC_START, SEC_END } from '../MainPage';
 
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -74,6 +75,8 @@ class CustomCourseItem {
   day: number = 0;
   startSection: number = 0;
   endSection: number = 0;
+  startTime: string = '';    // 开始钟点 HH:MM
+  endTime: string = '';      // 结束钟点 HH:MM
   weekList: number[] = [];
   colorIndex: number = 0;
   type: number = 0;          // 0=课程, 1=考试, 2=实验
@@ -90,6 +93,8 @@ class ClassCell {
   day: number = 0;
   startSection: number = 0;
   endSection: number = 0;
+  startTime: string = '';    // 开始钟点 HH:MM（实验优先用此字段）
+  endTime: string = '';      // 结束钟点 HH:MM
   weekList: boolean[] = [];
   weekDesc: string = '';
   kch: string = '';
@@ -164,6 +169,8 @@ export struct ClassTablePage {
   @State addCourseDay: number = 0;
   @State addCourseStartSection: number = 0;
   @State addCourseEndSection: number = 0;
+  @State addCourseStartTime: string = '';   // 选择的时间 HH:MM
+  @State addCourseEndTime: string = '';
   // 考试专用
   @State addExamDate: string = '';       // yyyy-MM-dd
   @State addExamTimeStart: string = '';  // HH:MM
@@ -480,28 +487,30 @@ export struct ClassTablePage {
         }
       }
 
-      // Step 3: 同步实验和考试（仅在首登/无缓存时后台同步）
-      if (this._preloadWasRunning || !this.hasCache) {
-        this.syncProgress = '正在同步实验数据...';
-        let expCount = 0;
-        try {
+      // Step 3: 同步实验和考试
+      // [FIX] 无论首登还是后台刷新，重渲染课表后都必须重新合并实验/考试。
+      // 否则后台刷新用纯课程重建 classGrid 会覆盖掉已合并的实验，导致实验"一闪即消失"。
+      this.syncProgress = '正在同步实验数据...';
+      let expCount = 0;
+      try {
+        if (this._preloadWasRunning || !this.hasCache) {
           expCount = await ExperimentService.getInstance().preloadDirect();
-          if (expCount > 0) { this.mergeExperimentDataIntoGrid(); this.buildCellCache(); }
-        } catch (_e) { /* ignore */ }
-        try { await this.mergePhysicsExperiments(); } catch (_e) { /* ignore */ }
+        }
+        if (expCount > 0 || this.hasCache) {
+          this.mergeExperimentDataIntoGrid();
+          this.buildCellCache();
+        }
+      } catch (_e) { /* ignore */ }
+      try { await this.mergePhysicsExperiments(); } catch (_e) { /* ignore */ }
 
-        this.syncProgress = '正在同步考试数据...';
-        this.loadExamDataInPlace().then((examCount: number) => {
-          this.syncProgress = '';
-          this.loading = false;
-        }).catch((e: Error) => {
-          this.syncProgress = '';
-          this.loading = false;
-        });
-      } else {
-        this.loading = false;
+      this.syncProgress = '正在同步考试数据...';
+      this.loadExamDataInPlace().then((examCount: number) => {
         this.syncProgress = '';
-      }
+        this.loading = false;
+      }).catch((e: Error) => {
+        this.syncProgress = '';
+        this.loading = false;
+      });
 
       // 首次登录：预加载实验/考试数据可能还未就绪，轮询等待后合并
       if (this._preloadWasRunning && !this._preloadDone) {
@@ -768,6 +777,8 @@ export struct ClassTablePage {
         cell.day = weekday;
         cell.startSection = startSec;
         cell.endSection = endSec;
+        cell.startTime = startSec > 0 && startSec <= 11 ? SEC_START[startSec] : '';
+        cell.endTime = endSec > 0 && endSec <= 11 ? SEC_END[endSec] : '';
         cell.weekList = weekList;
         cell.weekDesc = '第' + weekNum + '周';
         cell.kch = item['courseCode'] || '';
@@ -824,6 +835,11 @@ export struct ClassTablePage {
         cell.day = item.day;
         cell.startSection = item.startSection;
         cell.endSection = item.endSection;
+        cell.startTime = item.startTime || '';
+        cell.endTime = item.endTime || '';
+        // 旧数据兼容：有 section 无 time 时用 SEC_START/SEC_END 填充
+        if (!cell.startTime && cell.startSection > 0 && cell.startSection <= 11) cell.startTime = SEC_START[cell.startSection];
+        if (!cell.endTime && cell.endSection > 0 && cell.endSection <= 11) cell.endTime = SEC_END[cell.endSection];
         cell.isCustom = true;
         // 新字段 type
         const itType: number = item.type || 0;
@@ -1217,7 +1233,7 @@ export struct ClassTablePage {
                 selectedIndexes: this.addCourseSegSel,
                 onItemClicked: (idx: number) => {
                   this.addCourseType = idx;
-                  if (idx === 1) this.initExamDefaults();
+                  if (idx === 1 || idx === 2) this.initExamDefaults();
                 }
               })
               .width('100%')
@@ -1240,7 +1256,15 @@ export struct ClassTablePage {
                 Button(this.editingCustomIndex >= 0 ? '保存' : '添加').layoutWeight(1)
                   .backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).fontColor('#FFFFFF')
                   .onClick(() => { this.addCustomCourse(); })
-              }.margin({ top: 16 }).width('100%')
+              }.margin({ top: 12 }).width('100%')
+
+              // 表单校验提示
+              if (this.addFormToast.length > 0) {
+                Text(this.addFormToast)
+                  .fontSize(12).fontColor('#FF5252')
+                  .width('100%').textAlign(TextAlign.Center)
+                  .margin({ top: 8 })
+              }
             }
             .width('92%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
             .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetY: 10 })
@@ -1554,22 +1578,48 @@ export struct ClassTablePage {
         .onSelect((idx: number) => { this.addCourseDay = idx; })
         .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
     }.width('100%')
-    Row() {
-      Text('开始').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
-      Select(this.buildSectionOptions())
-        .value(this.getSectionValue(this.addCourseStartSection))
-        .selected(this.addCourseStartSection)
-        .onSelect((idx: number) => { this.addCourseStartSection = idx; })
-        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
-    }.width('100%')
-    Row() {
-      Text('结束').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
-      Select(this.buildSectionOptions())
-        .value(this.getSectionValue(this.addCourseEndSection))
-        .selected(this.addCourseEndSection)
-        .onSelect((idx: number) => { this.addCourseEndSection = idx; })
-        .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
-    }.width('100%')
+
+    if (this.addCourseType === 0) {
+      // 课程：选节次
+      Row() {
+        Text('开始').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+        Select(this.buildSectionOptions())
+          .value(this.getSectionValue(this.addCourseStartSection))
+          .selected(this.addCourseStartSection)
+          .onSelect((idx: number) => { this.addCourseStartSection = idx; })
+          .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+      }.width('100%')
+      Row() {
+        Text('结束').fontSize(14).fontColor(ThemeColors.textSecondary).width(64)
+        Select(this.buildSectionOptions())
+          .value(this.getSectionValue(this.addCourseEndSection))
+          .selected(this.addCourseEndSection)
+          .onSelect((idx: number) => { this.addCourseEndSection = idx; })
+          .layoutWeight(1).backgroundColor(ThemeColors.bgInput).borderRadius(8)
+      }.width('100%')
+    } else {
+      // 实验：选时间
+      Column() {
+        Text('时间').fontSize(14).fontColor(ThemeColors.textSecondary).width('100%').margin({ bottom: 4 })
+        Row({ space: 10 }) {
+          TimePicker({
+            selected: this.addCourseStartTime.length > 0 ? this.parseTime(this.addCourseStartTime) : new Date(2026, 0, 1, 8, 30)
+          })
+            .onChange((v: TimePickerResult) => {
+              this.addCourseStartTime = String(v.hour || 8).padStart(2, '0') + ':' + String(v.minute || 0).padStart(2, '0');
+            })
+            .layoutWeight(1)
+          Text('—').fontSize(16).fontColor(ThemeColors.textSecondary)
+          TimePicker({
+            selected: this.addCourseEndTime.length > 0 ? this.parseTime(this.addCourseEndTime) : new Date(2026, 0, 1, 9, 15)
+          })
+            .onChange((v: TimePickerResult) => {
+              this.addCourseEndTime = String(v.hour || 9).padStart(2, '0') + ':' + String(v.minute || 0).padStart(2, '0');
+            })
+            .layoutWeight(1)
+        }.width('100%').height(56)
+      }.width('100%')
+    }
   }
 
   // ===== 添加弹窗：考试表单 =====
@@ -2587,8 +2637,8 @@ export struct ClassTablePage {
         this.showAddToast('开始时间不能晚于或等于结束时间');
         return;
       }
-    } else {
-      // 课程/实验验证
+    } else if (this.addCourseType === 0) {
+      // 课程验证（节次）
       if (this.addCourseStartSection > this.addCourseEndSection) {
         this.showAddToast('开始节次不能大于结束节次');
         return;
@@ -2609,6 +2659,29 @@ export struct ClassTablePage {
       }
       if (this.addCourseEndSection === 0) {
         this.showAddToast('请选择结束节次');
+        return;
+      }
+    } else {
+      // 实验验证（时间 HH:MM）
+      const startT: string = this.addCourseStartTime.trim();
+      const endT: string = this.addCourseEndTime.trim();
+      const timeRe = /^(\d{1,2}):(\d{2})$/;
+      if (!timeRe.test(startT) || !timeRe.test(endT)) {
+        this.showAddToast('请输入正确的时间格式，如 08:30');
+        return;
+      }
+      if (startT >= endT) {
+        this.showAddToast('开始时间不能晚于或等于结束时间');
+        return;
+      }
+      const weekList: boolean[] = this.addCourseWeekList;
+      const hasAnyWeek: boolean = weekList.some((v: boolean) => v);
+      if (!hasAnyWeek) {
+        this.showAddToast('请输入有效的上课周次');
+        return;
+      }
+      if (this.addCourseDay === 0) {
+        this.showAddToast('请选择星期');
         return;
       }
     }
@@ -2653,14 +2726,16 @@ export struct ClassTablePage {
       if (cell.endSection === 0) cell.endSection = cell.startSection;
       cell.weekDesc = this.addExamDate;
       cell.colorIndex = Math.floor(Math.random() * (ThemeColors.isDark ? EXAM_COLORS_DK : EXAM_COLORS).length);
-    } else {
-      // 课程或实验
+    } else if (this.addCourseType === 0) {
+      // 课程：节次 → 时间
       cell.isExam = false;
-      cell.isExperiment = (this.addCourseType === 2);
+      cell.isExperiment = false;
       cell.teacher = this.addCourseTeacher;
       cell.day = this.addCourseDay;
       cell.startSection = this.addCourseStartSection;
       cell.endSection = this.addCourseEndSection;
+      cell.startTime = this.addCourseStartSection > 0 && this.addCourseStartSection <= 11 ? SEC_START[this.addCourseStartSection] : '';
+      cell.endTime = this.addCourseEndSection > 0 && this.addCourseEndSection <= 11 ? SEC_END[this.addCourseEndSection] : '';
       cell.weekList = this.addCourseWeekList;
       cell.weekDesc = this.formatWeekDesc(this.addCourseWeekList);
       cell.examDate = '';
@@ -2669,6 +2744,26 @@ export struct ClassTablePage {
       cell.examPixelY = 0;
       cell.examPixelH = 0;
       cell.colorIndex = Math.floor(Math.random() * CLASS_COLORS.length);
+    } else {
+      // 实验：时间 → 节次
+      cell.isExam = false;
+      cell.isExperiment = true;
+      cell.teacher = this.addCourseTeacher;
+      cell.day = this.addCourseDay;
+      cell.startTime = this.addCourseStartTime;
+      cell.endTime = this.addCourseEndTime;
+      cell.startSection = this.timeToSec(this.addCourseStartTime);
+      cell.endSection = this.timeToSec(this.addCourseEndTime, true);
+      cell.weekList = this.addCourseWeekList;
+      cell.weekDesc = this.formatWeekDesc(this.addCourseWeekList);
+      cell.examDate = '';
+      cell.examTimeDesc = '';
+      cell.examSeat = '';
+      cell.examPixelY = 0;
+      cell.examPixelH = 0;
+      cell.colorIndex = Math.floor(Math.random() * CLASS_COLORS.length);
+      if (cell.startSection === 0) cell.startSection = 1;
+      if (cell.endSection < cell.startSection) cell.endSection = cell.startSection;
     }
 
     // 生成唯一 ID（编辑时保留原 ID）
@@ -2703,10 +2798,10 @@ export struct ClassTablePage {
 
   // 保存自定义课程到本地文件
 
-  /** 打开添加弹窗前预填考试默认值（DatePicker/TimePicker onChange 不触发初始值） */
+  /** 打开添加弹窗前预填默认值（DatePicker/TimePicker onChange 不触发初始值） */
   private initExamDefaults(): void {
-    // 考试弹窗打开时预填今天日期和时间默认值
     if (this.addCourseType === 1) {
+      // 考试
       const now = new Date();
       if (this.addExamDate.length === 0) {
         const y = now.getFullYear();
@@ -2717,6 +2812,10 @@ export struct ClassTablePage {
       }
       if (this.addExamTimeStart.length === 0) this.addExamTimeStart = '08:30';
       if (this.addExamTimeEnd.length === 0) this.addExamTimeEnd = '10:30';
+    } else if (this.addCourseType === 2) {
+      // 实验：预填开始/结束时间
+      if (this.addCourseStartTime.length === 0) this.addCourseStartTime = '08:30';
+      if (this.addCourseEndTime.length === 0) this.addCourseEndTime = '09:15';
     }
   }
 
@@ -2731,6 +2830,8 @@ export struct ClassTablePage {
     this.addCourseDay = 0;
     this.addCourseStartSection = 0;
     this.addCourseEndSection = 0;
+    this.addCourseStartTime = '';
+    this.addCourseEndTime = '';
     this.addExamDate = '';
     this.addExamTimeStart = '';
     this.addExamTimeEnd = '';
@@ -2763,6 +2864,27 @@ export struct ClassTablePage {
     return opts;
   }
 
+  // 时间字符串→节次索引（1-11），找不到返回 1
+  private timeToSec(time: string, isEnd: boolean = false): number {
+    if (!time) return isEnd ? 11 : 1;
+    const m = time.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return isEnd ? 11 : 1;
+    const mins = parseInt(m[1]) * 60 + parseInt(m[2]);
+    // 遍历 SEC_START/SEC_END 找匹配区间
+    for (let s = 1; s <= 11; s++) {
+      const sParts = SEC_START[s].split(':');
+      const eParts = SEC_END[s].split(':');
+      const sMins = parseInt(sParts[0]) * 60 + parseInt(sParts[1]);
+      const eMins = parseInt(eParts[0]) * 60 + parseInt(eParts[1]);
+      if (isEnd) {
+        if (mins >= sMins && mins <= eMins + 5) return s;  // +5 容差
+      } else {
+        if (mins >= sMins - 5 && mins <= eMins) return s;
+      }
+    }
+    return isEnd ? 11 : 1;
+  }
+
   private getDayValue(): string {
     const v: string[] = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
     return this.addCourseDay > 0 && this.addCourseDay < v.length ? v[this.addCourseDay] : '请选择星期';
@@ -2789,6 +2911,8 @@ export struct ClassTablePage {
     item.day = cell.day;
     item.startSection = cell.startSection;
     item.endSection = cell.endSection;
+    item.startTime = cell.startTime || '';
+    item.endTime = cell.endTime || '';
     // Normalize to 26 elements (1-indexed: index 0 unused, indices 1-25 = weeks 1-25)
     const wl: number[] = [];
     for (let i = 0; i < 26; i++) wl.push(0);
@@ -2857,6 +2981,8 @@ export struct ClassTablePage {
     this.addCourseDay = cell.day;
     this.addCourseStartSection = cell.startSection;
     this.addCourseEndSection = cell.endSection;
+    this.addCourseStartTime = cell.startTime || (cell.startSection > 0 && cell.startSection <= 11 ? SEC_START[cell.startSection] : '');
+    this.addCourseEndTime = cell.endTime || (cell.endSection > 0 && cell.endSection <= 11 ? SEC_END[cell.endSection] : '');
     this.addCourseWeekList = cell.weekList.map((v: boolean) => v);
     this.addExamDate = cell.examDate || '';
     if (cell.examTimeDesc && cell.examTimeDesc.indexOf('-') >= 0) {
@@ -2936,6 +3062,8 @@ export struct ClassTablePage {
           cell.day = d;
           cell.startSection = s;
           cell.endSection = e;
+          cell.startTime = s > 0 && s <= 11 ? SEC_START[s] : '';
+          cell.endTime = e > 0 && e <= 11 ? SEC_END[e] : '';
           cell.teacher = it['teacher'] || '';
           cell.isExperiment = true;
           cell.isPhysics = true;

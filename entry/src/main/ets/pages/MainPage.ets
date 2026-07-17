@@ -78,6 +78,11 @@ const SECTION_TIMES: string[][] = [
   ['20:40', '21:25'],  // 第11节
 ];
 
+// 节次→时间 共享表（1-indexed，与 SECTION_TIMES 对齐，两端一致）
+// Production: PreviewCell/ClassCell/SlimCell/CustomCourseItem 创生时从此表填充 startTime/endTime
+export const SEC_START: string[] = ['', '08:30','09:20','10:25','11:15','14:00','14:50','15:55','16:45','19:00','19:55','20:40'];
+export const SEC_END:   string[] = ['', '09:15','10:05','11:10','12:00','14:45','15:35','16:40','17:30','19:45','20:35','21:25'];
+
 // 预览卡片用的轻量数据结构
 class PreviewCell {
   name: string = '';
@@ -87,6 +92,8 @@ class PreviewCell {
   day: number = 0;        // 1-7 周一~周日
   startSection: number = 0; // 1-11
   endSection: number = 0;   // 1-11
+  startTime: string = '';   // 开始钟点 HH:MM（实验/考试优先用此字段，跳过 section→time 转换）
+  endTime: string = '';     // 结束钟点 HH:MM
   isExperiment: boolean = false;
   isCustom: boolean = false;
   isExam: boolean = false;
@@ -1253,6 +1260,8 @@ AppStorage.set('loginStatus', 'expired');
             day: c.day,
             startSection: c.startSection,
             endSection: c.endSection,
+            startTime: c.startTime ?? '',
+            endTime: c.endTime ?? '',
             weekList: c.weekList,
             isExam: c.isExam,
             isExperiment: c.isExperiment,
@@ -1394,6 +1403,8 @@ AppStorage.set('loginStatus', 'expired');
         cell.day = weekday;
         cell.startSection = startSec;
         cell.endSection = endSec > startSec ? endSec : startSec;
+        cell.startTime = startSec > 0 && startSec <= 11 ? SEC_START[startSec] : '';
+        cell.endTime = endSec > 0 && endSec <= 11 ? SEC_END[endSec] : '';
         cell.isExperiment = true;
         const expWeek: number = parseInt(item['week']) || 0;
         cell.weekNum = expWeek;
@@ -1432,6 +1443,8 @@ AppStorage.set('loginStatus', 'expired');
         cell.day = weekday;
         cell.startSection = startSec;
         cell.endSection = endSec > startSec ? endSec : startSec;
+        cell.startTime = startSec > 0 && startSec <= 11 ? SEC_START[startSec] : '';
+        cell.endTime = endSec > 0 && endSec <= 11 ? SEC_END[endSec] : '';
         cell.isExperiment = true;
         const phyWeek: number = parseInt(item['week']) || 0;
         cell.weekNum = phyWeek;
@@ -1521,6 +1534,8 @@ AppStorage.set('loginStatus', 'expired');
         cell.day = day;
         cell.startSection = startSec;
         cell.endSection = endSec > startSec ? endSec : startSec;
+        cell.startTime = startSec > 0 && startSec <= 11 ? SEC_START[startSec] : '';
+        cell.endTime = endSec > 0 && endSec <= 11 ? SEC_END[endSec] : '';
         cell.isCustom = true;
         // 自定义 type=2 为实验：与 ClassTablePage.loadCustomCourses 对齐，必须打 isExperiment 标记
         // （否则预览会误判为 isCustom 显示「📌自定」，且日历快照/导出按 isExperiment 计数与导入都会漏掉）
