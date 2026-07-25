@@ -430,6 +430,15 @@ export struct ExperimentPage {
             Button('\u8fdb\u5165\u5b9e\u9a8c\u7cfb\u7edf').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(40).margin({top:20}).onClick(()=>{this.doHttpSSOAndFetch();})
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
         } else if (this.pageState===PageState.SUCCESS) {
+          // 固定刷新行（考勤查询同款）
+          Row() {
+            Text('').layoutWeight(1)
+            Button('刷新')
+              .fontSize(12).height(30)
+              .backgroundColor(this.accentColor + '18').fontColor(this.accentColor)
+              .borderRadius(15).padding({ left: 12, right: 12 })
+              .onClick(() => { PreferenceUtil.putString(CACHE_KEY, ''); this.doHttpSSOAndFetch(); })
+          }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
           if (this.showCacheBanner) {
             Row() {
               Text(this.errorMsg.length > 0 ? '⚠ ' + this.errorMsg : '📦 当前显示缓存数据').fontSize(12).fontColor('#E65100')
@@ -454,13 +463,11 @@ export struct ExperimentPage {
               Button('\u5237\u65b0').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(36).margin({top:20}).onClick(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.doHttpSSOAndFetch();})
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
           } else {
-            Refresh({refreshing:$$this.isRefreshing}) {
-              Scroll() {
-                Column() {
-                  ForEach(this.cards, (card:ExpCard)=>{this.ExpCardBuilder(card)},(card:ExpCard)=>card.date+'_'+card.sectionName)
-                }.width('100%').padding({left:16,right:16,top:8,bottom:16})
-              }.width('100%').layoutWeight(1)
-            }.onRefreshing(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.isRefreshing=false;this.doHttpSSOAndFetch();})
+            Scroll() {
+              Column() {
+                ForEach(this.cards, (card:ExpCard)=>{this.ExpCardBuilder(card)},(card:ExpCard)=>card.date+'_'+card.sectionName)
+              }.width('100%').padding({left:16,right:16,top:8,bottom:16})
+            }.width('100%').layoutWeight(1)
           }
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)

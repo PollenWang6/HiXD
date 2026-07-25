@@ -35,6 +35,17 @@ export interface LibspConsoleResult {
   payload?: string;   // 附带文本（JSON 字符串 / 错误信息）
 }
 
+// 借阅列表请求体（显式接口，规避 arkts-no-untyped-obj-literals）
+interface LoanListReq {
+  page: number;
+  rows: number;
+  searchType: number;
+  searchContent: string;
+  sortType: number;
+  startDate: Object | null;
+  endDate: Object | null;
+}
+
 export class LibspSessionService {
   // 西电 libsp 新系统基址
   static readonly BASE: string = 'https://findxidian.libsp.cn';
@@ -205,4 +216,69 @@ export class LibspSessionService {
     }
     return { kind: 'unknown' };
   }
+
+  // ============ 主页卡片：当前借阅概况（在借数 / 逾期数） ============
+  // JWT 会话有效时直连 /find/loanInfo/loanList 拉最新；无会话/失败返回 null（调用方降级显示缓存）。
+  static async fetchBorrowSummary(): Promise<LibspBorrowSummary | null> {
+    const session: LibspSession | null = LibspSessionService.getSession();
+    if (!session) { return null; }
+    const body: LoanListReq = {
+      page: 1, rows: 999, searchType: 1, searchContent: '', sortType: 0,
+      startDate: null, endDate: null
+    };
+    let resp: HttpResponse;
+    try {
+      resp = await LibspSessionService.postJson('/find/loanInfo/loanList', body, session);
+    } catch (e) {
+      return null;
+    }
+    if (resp.statusCode !== 200) {
+      await LibspSessionService.clearSession();
+      return null;
+    }
+    let raw: Record<string, Object>;
+    try {
+      raw = JSON.parse(resp.body) as Record<string, Object>;
+    } catch (e) {
+      return null;
+    }
+    if (raw['success'] !== true) {
+      await LibspSessionService.clearSession();
+      return null;
+    }
+    const dataObj: Record<string, Object> = (raw['data'] as Record<string, Object>) || {};
+    const rawList: Record<string, string>[] = (dataObj['searchResult'] as Record<string, string>[]) || [];
+    const borrow: number = rawList.length;
+    let overdue: number = 0;
+    const todayStr: string = LibspSessionService.todayKey();
+    for (const r of rawList) {
+      const nr: string = LibspSessionService.fmtDateShort(String(r['normReturnDate'] || ''));
+      if (nr.length >= 10 && nr < todayStr) { overdue++; }
+    }
+    return { borrow, overdue };
+  }
+
+  // 纯函数副本（同源 LibraryPage.fmtDateShort / todayKey）
+  private static fmtDateShort(raw: string): string {
+    const m: RegExpMatchArray | null = raw.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+    if (m) {
+      const mm: string = m[2].length === 1 ? '0' + m[2] : m[2];
+      const dd: string = m[3].length === 1 ? '0' + m[3] : m[3];
+      return m[1] + '-' + mm + '-' + dd;
+    }
+    return raw.substring(0, 10);
+  }
+
+  private static todayKey(): string {
+    const d: Date = new Date();
+    const m: string = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day: string = d.getDate().toString().padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+}
+
+// 主页卡片借阅概况
+export interface LibspBorrowSummary {
+  borrow: number;   // 在借数
+  overdue: number;  // 逾期数（应还日期已过的）
 }

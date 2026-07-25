@@ -12,6 +12,7 @@ import { common } from '@kit.AbilityKit';
 import { image } from '@kit.ImageKit';
 import { scanCore, scanBarcode } from '@kit.ScanKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 
 import Want from '@ohos.app.ability.Want';
 
@@ -152,6 +153,15 @@ export struct LibraryPage {
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
+
+  private isTablet(): boolean {
+    return deviceInfo.deviceType === 'tablet';
+  }
+
+  // 列表转 Grid 后的列数：手机单列、平板双列（卡片较宽，双列足够）
+  private gridColumns(): number {
+    return this.isTablet() ? 2 : 1;
+  }
 
   @Builder buildWhiteTitle(t: string) {
     Row() {
@@ -1189,6 +1199,7 @@ export struct LibraryPage {
         if (nr.length >= 10 && nr < todayStr) overdue++;
       }
       PreferenceUtil.putString('lib_summary', result.length + '|' + overdue);
+      AppStorage.set('home_data_dirty', String(Date.now()));
       this.errorMsg = '';
     } catch (e) {
       this.errorMsg = '当前借阅解析失败，请下拉重试';
@@ -1463,6 +1474,7 @@ export struct LibraryPage {
         if (nr.length >= 10 && nr < todayStr) overdue++;
       }
       PreferenceUtil.putString('lib_summary', result.length + '|' + overdue);
+      AppStorage.set('home_data_dirty', String(Date.now()));
       this.errorMsg = '';
       this.fetchBorrowCovers(result);
       return true;
@@ -1796,7 +1808,7 @@ export struct LibraryPage {
             .constraintSize({ maxWidth: 220 })
             .margin({ right: 8, bottom: 8 })
             .onClick(() => { this.applyHistory(item); })
-        }, (item: SearchHistoryItem, idx?: number) => `hist_${idx}_${item.w}`)
+        }, (item: SearchHistoryItem) => 'sh_' + item.f + '_' + item.w)
       }.width('100%').padding({ left: 16, right: 16, top: 4, bottom: 10 })
     }
     .width('100%')
@@ -1863,9 +1875,9 @@ export struct LibraryPage {
           })
         } else if (this.books.length > 0) {
           // 有数据：显示列表（翻页时列表保留，底部追加 loading）
-          List({ space: 4 }) {
+          Grid() {
             ForEach(this.books, (book: BookItem, idx?: number) => {
-              ListItem() {
+              GridItem() {
                 Row() {
                   if (book.imagePixelMap) {
                     Image(book.imagePixelMap).width(48).height(68)
@@ -1897,7 +1909,6 @@ export struct LibraryPage {
                 }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
                 .borderRadius(12).backgroundColor(ThemeColors.bgCard)
                 .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-                .margin({ left: 14, right: 14, bottom: 8 })
                 .onClick(() => {
                   // 点书先强制收起搜索框键盘与历史浮层（书籍项不可获焦，不会触发 onBlur）
                   this.searchInputController.stopEditing();
@@ -1911,25 +1922,27 @@ export struct LibraryPage {
                     this.bookSheetOffset = 0;
                   });
                 })
-              }.padding({ left: 12, right: 12 })
-            }, (book: BookItem, idx?: number) => `book_${idx}_${book.imageUrl.length > 0 ? '1' : '0'}`)
+              }.padding({ left: 8, right: 8, bottom: 8 })
+            }, (book: BookItem) => 'book_' + (book.isbn || '') + '_' + (book.docNumber || '') + '_' + (book.groupCode || '') + '_' + book.bookName + (book.imageUrl.length > 0 || book.imagePixelMap ? '_c' : ''))
 
             if (this.isSearching) {
-              ListItem() {
+              GridItem() {
                 Row() {
                   LoadingProgress().width(20).height(20).color(this.accentColor)
                   Text('加载中...').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ left: 8 })
                 }.width('100%').height(48).justifyContent(FlexAlign.Center)
-              }.padding({ left: 12, right: 12 })
+              }.padding({ left: 8, right: 8 }).columnStart(0).columnEnd(this.gridColumns() - 1)
             } else if (!this.hasMore && this.searchPage > 0) {
-              ListItem() {
+              GridItem() {
                 Text('— 已经到底了 —').fontSize(12).fontColor('#BBBBBB')
                   .width('100%').height(40).textAlign(TextAlign.Center)
-              }.padding({ left: 12, right: 12 })
+              }.padding({ left: 8, right: 8 }).columnStart(0).columnEnd(this.gridColumns() - 1)
             }
           }.layoutWeight(1)
-          .onReachEnd(() => {
-            if (this.hasMore && !this.isSearching) {
+          .columnsTemplate('1fr '.repeat(this.gridColumns()).trim())
+          .padding({ left: 6, right: 6 })
+          .onScrollIndex((first: number, last: number) => {
+            if (last >= this.books.length - 1 && this.hasMore && !this.isSearching) {
               this.searchBooks(this.searchPage + 1);
             }
           })
@@ -2046,9 +2059,9 @@ export struct LibraryPage {
                 .borderRadius(8).width('100%')
                 .margin({ left: 14, right: 14, bottom: 4 })
             }
-            List({ space: 10 }) {
+            Grid() {
             ForEach(this.borrowList, (borrow: BorrowItem, idx?: number) => {
-              ListItem() {
+              GridItem() {
                 Column() {
                   Row() {
                     // 批量勾选框（仅选择态显示）
@@ -2144,10 +2157,11 @@ export struct LibraryPage {
                 }.width('100%').padding(14)
                 .backgroundColor(ThemeColors.bgCard).borderRadius(12)
                 .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-              }.padding({ left: 14, right: 14, top: 12, bottom: 12 })
-                .margin({ left: 14, right: 14, bottom: 8 })
-            }, (borrow: BorrowItem, idx?: number) => `borrow_${idx}_${borrow.imageUrl.length > 0 ? '1' : '0'}`)
+              }.padding({ left: 8, right: 8, bottom: 12 })
+            }, (borrow: BorrowItem) => 'loan_' + String(borrow.loanId))
           }.layoutWeight(1)
+          .columnsTemplate('1fr '.repeat(this.gridColumns()).trim())
+          .padding({ left: 6, right: 6 })
           .onScroll(() => {
             // 滚动借阅列表时同样收起搜索框键盘与历史浮层
             if (this.searchFocused) {
@@ -2201,13 +2215,15 @@ export struct LibraryPage {
           // 头部（搜索结果/我的借阅 主标签 + 当前借阅/借阅历史 子标签）始终保留，
           // 仅在本内容区（子标签下方）显示状态：取数时显示鸿蒙加载动画，WebView 在背后静默跑。
           if (this.historyList.length > 0) {
-            List({ space: 4 }) {
+            Grid() {
               ForEach(this.historyList, (h: HistoryItem, idx?: number) => {
-                ListItem() {
+                GridItem() {
                   this.historyCard(h)
-                }.padding({ left: 12, right: 12, top: 8, bottom: 8 })
-              })
+                }.padding({ left: 8, right: 8, top: 8, bottom: 8 })
+              }, (h: HistoryItem) => 'hist_' + h.recordId + (h.imageUrl.length > 0 || h.imagePixelMap ? '_c' : ''))
             }.layoutWeight(1)
+            .columnsTemplate('1fr '.repeat(this.gridColumns()).trim())
+            .padding({ left: 6, right: 6 })
             .onScroll(() => {
               if (this.searchFocused) {
                 this.borrowSearchInputController.stopEditing();
@@ -2522,6 +2538,8 @@ export struct LibraryPage {
     .padding({ left: 20, right: 20, top: 20, bottom: 20 })
     .backgroundColor(ThemeColors.bgPage)
     .borderRadius({ topLeft: 20, topRight: 20 })
+    .alignItems(HorizontalAlign.Start)
+    .justifyContent(FlexAlign.Start)
   }
 
   // 借阅详情弹窗内容（当前借阅 / 借阅历史 共用），全部用文字标签，不用 Emoji
@@ -2588,6 +2606,8 @@ export struct LibraryPage {
     .padding({ left: 20, right: 20, top: 20, bottom: 20 })
     .backgroundColor(ThemeColors.bgPage)
     .borderRadius({ topLeft: 20, topRight: 20 })
+    .alignItems(HorizontalAlign.Start)
+    .justifyContent(FlexAlign.Start)
   }
 
   // 详情弹窗单行（文字标签 + 值）
@@ -2612,6 +2632,14 @@ export struct LibraryPage {
     ctx.startAbility(want).catch(() => {
       ToastUtil.show('无法打开链接', 1500);
     });
+  }
+
+  // 页面销毁时清理所有定时器，避免向已销毁组件写状态或持续轮询注入 WebView
+  aboutToDisappear(): void {
+    if (this.libLoginTimeoutId >= 0) { clearTimeout(this.libLoginTimeoutId); this.libLoginTimeoutId = -1; }
+    if (this.libFetchTimer >= 0) { clearInterval(this.libFetchTimer); this.libFetchTimer = -1; }
+    if (this.scanMsgTimer >= 0) { clearTimeout(this.scanMsgTimer); this.scanMsgTimer = -1; }
+    if (this.transferMsgTimer >= 0) { clearTimeout(this.transferMsgTimer); this.transferMsgTimer = -1; }
   }
 
   @Builder

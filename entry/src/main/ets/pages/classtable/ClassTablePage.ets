@@ -33,13 +33,16 @@ const EXP_COLORS_DK: string[] = ['#4A2818', '#3A1818', '#3A2018', '#3A1A18', '#4
 // 考试卡片背景色（红色系）
 const EXAM_COLORS: string[] = ['#D65048', '#BA3838', '#C44240', '#E05250', '#DC6058'];
 const EXAM_COLORS_DK: string[] = ['#4A1A1A', '#3A1818', '#3A1A1A', '#4A1A1A', '#4A1A18'];
+// 课程卡片描边色（比背景亮一档，参考 Flutter Traintime 的 shade300 描边，让方块更有“卡片感”）
+const CLASS_COLORS_BD: string[] = ['#7FB8E6', '#C89AD2', '#F2A385', '#94C994', '#E892AB', '#6FC6D6', '#E6CD72', '#A6C684', '#B296D6', '#6FC2E6'];
+const EXAM_COLORS_BD: string[] = ['#E47C76', '#D06A6A', '#D8706E', '#EA7E7C', '#E6847E'];
 const DAY_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const DAY_COUNT = 7;
 const SECTION_COUNT = 11;
-// 课表格子水平间隙（百分比，相对周宽）
-const CELL_GAP: number = 2;
+// 课表格子水平间隙（百分比，相对周宽）—— 参考 Flutter Traintime：方块间留细缝，更紧凑精致
+const CELL_GAP: number = 1;
 // 课表格子垂直间隙（px）
-const CELL_GAP_V: number = 4;
+const CELL_GAP_V: number = 3;
 
 // 分隔行：午休(第4-5节间)、放学(第8-9节间)
 const BREAK_HEIGHT: number = 32;
@@ -1017,9 +1020,8 @@ export struct ClassTablePage {
   build() {
     NavDestination() {
       Stack() {
-        // 第一层：主页面内容（官方下拉刷新）
-        Refresh({ refreshing: $$this.refreshing }) {
-          Column() {
+        // 第一层：主页面内容
+        Column() {
           this.buildHeader()
           if (this.showCacheBanner) {
             Row() {
@@ -1089,7 +1091,6 @@ export struct ClassTablePage {
           }
         }.width('100%').height('100%').backgroundColor(Color.Transparent)
         .zIndex(0)
-        }.onRefreshing(() => { this.loadTable(true); })
 
         // 第二层：半透明背景遮罩
         if (this.showDetailDialog) {
@@ -1782,6 +1783,14 @@ export struct ClassTablePage {
     return arr[cell.colorIndex % arr.length];
   }
 
+  // 卡片描边色：取比背景亮一档的同色系（参考 Flutter Traintime），让方块边缘有“卡片感”
+  private getCellBorderColor(cell: ClassCell): string {
+    if (cell.isExam) {
+      return EXAM_COLORS_BD[cell.colorIndex % EXAM_COLORS_BD.length];
+    }
+    return CLASS_COLORS_BD[cell.colorIndex % CLASS_COLORS_BD.length];
+  }
+
   // 计算某个节次在含分隔行的网格中的 Y 偏移
   private getSectionY(section: number): number {
     let y = 0;
@@ -2100,14 +2109,14 @@ export struct ClassTablePage {
                   ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
                     ForEach(this._renderCache.get(`${week}_${day}`) ?? [], (cell: ClassCell) => {
                       Column() {
-                        Text(cell.name).fontSize(11)
+                        Text(cell.name).fontSize(12)
                           .fontColor('#FFFFFF')
                           .fontWeight(FontWeight.Medium).maxLines(4)
                           .textOverflow({ overflow: TextOverflow.Ellipsis })
                         // 教室+老师合并显示，参考妮可之记
                         if (cell.classroom || cell.teacher) {
                           Text((cell.classroom ? cell.classroom : '') + (cell.classroom && cell.teacher ? '\n' : '') + (cell.teacher ? cell.teacher : ''))
-                            .fontSize(8)
+                            .fontSize(9)
                             .fontColor('#FFFFFFCC')
                             .margin({ top: 2 })
                         }
@@ -2135,14 +2144,14 @@ export struct ClassTablePage {
                         if (!cell.isExam && this.getCurrentWeekConflictCells(day, cell.startSection).length > 1) {
                           Text('⚠️').fontSize(8).fontColor('#FFFFFF').position({ top: 2, right: 2 })
                         }
-                      }.width('100%').height('100%').padding({ left: 3, right: 3, top: 3, bottom: 3 })
-                      .backgroundColor(this.getCellColor(cell)).borderRadius(6)
+                      }.width('100%').height('100%').padding({ left: 4, right: 4, top: 4, bottom: 4 })
+                      .backgroundColor(this.getCellColor(cell)).borderRadius(8)
                       .opacity(cell.day === this._todayDay &&
                         this.currentWeek === this.getRealCurrentWeek() &&
                         cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
-                        (cell.isExam ? this.getExamStatus(cell) === -1 :
-                          this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1) ? 0.55 : 1)
-                      .alignItems(HorizontalAlign.Start).justifyContent(FlexAlign.Center)
+                          (cell.isExam ? this.getExamStatus(cell) === -1 :
+                          this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1) ? 0.6 : 1)
+                      .alignItems(HorizontalAlign.Start).justifyContent(FlexAlign.Start)
                       .position({
                         x: `${(day - 1) * (100 / 7) + (cell.isExam && cell.examColumnSpan > 1 ? cell.examColumnIndex * (100 / 7 / cell.examColumnSpan) : 0) + CELL_GAP / 2}%`,
                         y: cell.isExam ? cell.examPixelY : this.getSectionY(cell.startSection) + CELL_GAP_V
@@ -2151,12 +2160,15 @@ export struct ClassTablePage {
                         width: `${cell.isExam && cell.examColumnSpan > 1 ? (100 / 7 / cell.examColumnSpan - CELL_GAP) : (100 / 7 - CELL_GAP)}%`,
                         height: cell.isExam ? cell.examPixelH : this.getSectionSpanHeight(cell.startSection, cell.endSection) - CELL_GAP_V
                       })
-                      .border((cell.day === this._todayDay && this.currentWeek === this.getRealCurrentWeek() &&
-                        cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
-                        (cell.isExam ? this.getExamStatus(cell) === 1 :
-                          (this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1))
-                        ? { width: 2, color: (AppStorage.get('accent_color') as string ?? '#2979FF') }
-                        : { width: 0, color: Color.Transparent })
+                      .border({
+                        width: 2,
+                        color: (cell.day === this._todayDay && this.currentWeek === this.getRealCurrentWeek() &&
+                          cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
+                          (cell.isExam ? this.getExamStatus(cell) === 1 :
+                            (this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1))
+                          ? (AppStorage.get('accent_color') as string ?? '#2979FF')
+                          : this.getCellBorderColor(cell)
+                      })
                       .onClick(() => {
                         if (cell.isExam) {
                           this.currentConflictCells = [cell];

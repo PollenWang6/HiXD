@@ -27,18 +27,19 @@ export class ExamService {
    * 激活 app session
    */
   private async activateAppSession(appId: string, force: boolean = false): Promise<void> {
+    const appPath = APP_PATH_MAP.get(appId) || '/jwapp/sys/wdkb';
+
     if (!force && this.appSessionUrl[appId]) {
       return;
     }
-
-    const appPath = APP_PATH_MAP.get(appId) || '/jwapp/sys/wdkb';
-    this.appSessionUrl[appId] = appPath;
-
     const cookiesBefore = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (!force && cookiesBefore.toLowerCase().includes('jsessionid')) {
+      this.appSessionUrl[appId] = appPath;
       return;
     }
 
+    // 需要（重新）建立会话：先确保 CAS 登录态有效（根因修复——陈旧 jsessionid 不会自动触发重登）
+    try { await CasLoginService.getInstance().checkAndAutoLogin(); } catch (e) { /* 忽略，继续尝试 */ }
 
     try {
       const resp = await this.http.get(
@@ -50,6 +51,7 @@ export class ExamService {
 
     const cookiesAfter1 = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
     if (cookiesAfter1.toLowerCase().includes('jsessionid')) {
+      this.appSessionUrl[appId] = appPath;
       return;
     }
 
@@ -71,8 +73,12 @@ export class ExamService {
     }
 
     const cookiesFinal = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
-    const hasModAuth = cookiesFinal.toLowerCase().includes('mod_auth_cas');
     const hasJsession = cookiesFinal.toLowerCase().includes('jsessionid');
+    if (hasJsession) {
+      this.appSessionUrl[appId] = appPath;
+    } else {
+      throw new Error('考试服务暂不可用，请先完成登录后重试');
+    }
   }
 
   private readonly _appCtx: AppPostContext = new AppPostContext(

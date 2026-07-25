@@ -77,6 +77,7 @@ export struct SchoolCardPage {
       this.balance = results[0] as string;
       AppStorage.setOrCreate('card_balance', this.balance);
       PreferenceUtil.putString('card_balance_cached', this.balance);
+      AppStorage.set('home_data_dirty', String(Date.now()));
       this.records = results[1] as PaidRecord[];
       this.loading = false;
     } catch (e) {
@@ -86,6 +87,7 @@ export struct SchoolCardPage {
         this.balance = bal;
         AppStorage.setOrCreate('card_balance', bal);
         PreferenceUtil.putString('card_balance_cached', bal);
+        AppStorage.set('home_data_dirty', String(Date.now()));
         this.loading = false;
       } catch (_e2) {
         this.error = '校园卡加载失败';

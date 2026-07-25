@@ -124,6 +124,7 @@ export struct ExamPage {
       if (items.length > 0) {
         PreferenceUtil.putString('exam_schedule_cache', raw);
         PreferenceUtil.saveSharedFile('exam_schedule', raw);
+        AppStorage.set('home_data_dirty', String(Date.now()));
       } else {
       }
     } catch (e) {
@@ -159,6 +160,7 @@ export struct ExamPage {
       if (items.length > 0) {
         PreferenceUtil.putString('exam_schedule_cache', raw);
         PreferenceUtil.saveSharedFile('exam_schedule', raw);
+        AppStorage.set('home_data_dirty', String(Date.now()));
       }
     } catch (e) {
       // 保持现有数据显示，不覆盖
@@ -202,7 +204,15 @@ export struct ExamPage {
           Column() { Text('🎉').fontSize(48); Text('暂无考试安排').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 }); Text('本学期暂未发布考试信息').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 }); }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else {
-          Refresh({ refreshing: $$this.isRefreshing }) {
+          // 固定刷新行（考勤查询同款）
+          Row() {
+            Text('').layoutWeight(1)
+            Button('刷新')
+              .fontSize(12).height(30)
+              .backgroundColor(this.accentColor + '18').fontColor(this.accentColor)
+              .borderRadius(15).padding({ left: 12, right: 12 })
+              .onClick(() => { this.isRefreshing = true; this.doRefresh(); })
+          }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
           List({ space: 12 }) {
             ForEach(this.arranged, (exam: ExamItemModel, idx?: number) => {
               ListItem() {
@@ -248,11 +258,6 @@ export struct ExamPage {
               }
             }
           }.padding({ left: 16, right: 16, top: 12 }).layoutWeight(1)
-          }
-          .onRefreshing(() => {
-            this.isRefreshing = true;
-            this.doRefresh();
-          })
         }
       }
       .width('100%')

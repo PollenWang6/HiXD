@@ -30,6 +30,8 @@ export struct SegmentTab {
   @Link currentIndex: number;
   @Prop accentColor: string = '#2979FF';
   onTabChange?: (index: number) => void = undefined;
+  // 再次点击「已激活」的 tab 时触发（用于论坛：回到顶部并刷新）
+  onReTap?: (index: number) => void = undefined;
   @BuilderParam content: () => void = this.defaultContent;
 
   // 胶囊/指示器进度（单位：页）。0 = 第0页，1 = 第1页，可带小数做滑动跟随。
@@ -87,7 +89,10 @@ export struct SegmentTab {
             .height(44)
             .justifyContent(FlexAlign.Center)
             .onClick(() => {
-              if (this.currentIndex === idx) return;
+              if (this.currentIndex === idx) {
+                if (this.onReTap) { this.onReTap(idx); }
+                return;
+              }
               this.swiperCtrl.changeIndex(idx, true);
             })
           }, (tab: string, idx: number) => `seg_${idx}_${tab}`)
@@ -151,11 +156,10 @@ export struct SegmentTab {
 
   getTextActive(idx: number): number {
     const progress: number = this.textProgress + this.textSwipeProgress;
-    if (idx === 0) {
-      return Math.max(0, 1 - progress);
-    } else {
-      return Math.max(0, Math.min(1, progress));
-    }
+    // 通用写法：与当前进度的「距离」决定激活度，任意 tab 数都成立
+    // （原 2-tab 公式在 3+ tab 时 progress>1 会让非首 tab 全亮）。
+    // 滑动时 progress 为小数，相邻两 tab 平滑过渡；静止时 progress=currentIndex，仅当前 tab 为 1。
+    return Math.max(0, 1 - Math.abs(idx - progress));
   }
 
   lerpColor(c1: string, c2: string, t: number): string {

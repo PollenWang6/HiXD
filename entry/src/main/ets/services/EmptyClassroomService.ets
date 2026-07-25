@@ -6,6 +6,7 @@ import { EmptyClassroomItem, BuildingInfo, BuildingRow, EmptyClassroomRow,
          EHALL_APP_EMPTY_CLASSROOM } from './Models';
 import { EHALL_HEADERS, extractRaw, sharedAppPost, AppPostContext } from './EhallConstants';
 import { SemesterUtil } from './EhallService';
+import { CasLoginService } from './CasLoginService';
 
 const TAG = 'EmptyClassroomService';
 
@@ -29,18 +30,22 @@ export class EmptyClassroomService {
   static extractRaw(body: string): object[] { return extractRaw(body, TAG); }
 
   private async activateAppSession(appId: string, _force: boolean = false): Promise<void> {
+    const appPath = '/jwapp/sys/kxjas';
+
+    // 已激活且非强制：直接复用，省一次网络
     if (!_force && this.appSessionUrl[appId]) {
       return;
     }
-
-    const appPath = '/jwapp/sys/kxjas';
-
     const cookiesBefore = this.http.getCookiesForDomain('ehall.xidian.edu.cn');
-    if (cookiesBefore.toLowerCase().includes('jsessionid')) {
+    // 非强制且已有 jsessionid：认为可用，跳过（陈旧 jsessionid 仅在强制/失败时才会被下方刷新）
+    if (!_force && cookiesBefore.toLowerCase().includes('jsessionid')) {
       this.appSessionUrl[appId] = appPath;
       return;
     }
 
+    // 需要（重新）建立会话：先确保 CAS 登录态有效（根因修复——陈旧 jsessionid 不会自动触发重登，
+    // 必须由此处主动刷新 MOD_AUTH_CAS，否则后续 appShow 重定向无法签发新的 jsessionid）
+    try { await CasLoginService.getInstance().checkAndAutoLogin(); } catch (e) { /* 忽略，继续尝试 */ }
 
     try {
       const resp = await this.http.get(

@@ -1,6 +1,7 @@
 // EhallConstants.ets — 共享的 ehall 常量（EHALL_HEADERS、APP_PATH_MAP、extractRaw）
 import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
 import { EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE, EHALL_APP_EMPTY_CLASSROOM } from './Models';
+import { CasLoginService } from './CasLoginService';
 
 export const EHALL_HEADERS: Record<string, string> = {
   'Referer': 'http://ehall.xidian.edu.cn/new/index_xd.html',
@@ -43,21 +44,17 @@ export async function sharedAppPost(
   ctx: AppPostContext, path: string, body: Record<string, string>
 ): Promise<HttpResponse> {
   const url = 'https://ehall.xidian.edu.cn' + path;
-  const cookies = ctx.http.getCookiesForDomain('ehall.xidian.edu.cn');
-  const hasCas: boolean = cookies.indexOf('MOD_AUTH_CAS') >= 0;
-  const hasJsession: boolean = cookies.toLowerCase().indexOf('jsessionid') >= 0;
   let resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
 
-  if (resp.isRedirect && resp.location && resp.location.includes('login')) {
-    ctx.appSessionUrl = {};
-    const appId = findAppIdByPath(path);
-    if (appId) {
-      await ctx.activateAppSession(appId, true);
-      resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
-    }
-  }
+  const isAuthFail = (r: HttpResponse): boolean =>
+    (r.isRedirect && r.location != null && r.location.includes('login'))
+    || r.body.trimStart().startsWith('<!') || r.body.trimStart().startsWith('<html');
 
-  if (resp.body.trimStart().startsWith('<!') || resp.body.trimStart().startsWith('<html')) {
+  if (isAuthFail(resp)) {
+    // 根因修复：会话过期时，陈旧 jsessionid 会让 activateAppSession 误判"已登录"而跳过 CAS 重登，
+    // 导致 ehall 接口持续返回登录页 HTML → 解析空 → 页面空白。此处先刷新 CAS 登录态，
+    // 再强制重新激活 app session（清掉陈旧 jsessionid）并重试一次，对齐 Flutter EhallSession 的透明重登。
+    try { await CasLoginService.getInstance().checkAndAutoLogin(); } catch (_) { /* 忽略，继续尝试激活 */ }
     ctx.appSessionUrl = {};
     const appId = findAppIdByPath(path);
     if (appId) {

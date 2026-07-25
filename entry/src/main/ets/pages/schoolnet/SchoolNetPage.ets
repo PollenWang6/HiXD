@@ -95,6 +95,16 @@ export struct SchoolNetPage {
     this.authErrorMsg = '';
     try {
       const info = await this.schoolnet.getCurrentOnlineInfo();
+      // not_online_error：账号未做校园网认证登录，rad_user_info 只回 error/res 字段，无 sum_flow/user_name
+      const hasOnlineData: boolean = !!info['user_name']
+        || Number(info['sum_flow'] || 0) > 0
+        || Number(info['remain_flow'] || 0) > 0
+        || info['is_online'] === 1;
+      if (!hasOnlineData) {
+        this.authOnline = false;
+        this.authErrorMsg = '未检测到校园网在线信息，请先连接西电 WiFi 并完成上网认证后重试';
+        return;
+      }
       this.authOnline = true;
       this.authUsername = String(info['user_name'] || '');
 
@@ -133,6 +143,7 @@ export struct SchoolNetPage {
         }
       }
     } catch (_e) {
+      console.error('[SchoolNetPage] loadAuthData fail: ' + (_e ? (_e as Error).message : _e));
       this.authOnline = false;
       this.authErrorMsg = '无法获取校园网信息（请确认已连接校园网）';
     } finally {
@@ -214,6 +225,7 @@ export struct SchoolNetPage {
       const usage = await this.schoolnet.getZfwUsage();
       this.applyZfwHomeData(usage);
       this.zfwState = 'logged_in';
+      AppStorage.set('home_data_dirty', String(Date.now()));
     } catch (e) {
       this.zfwState = 'error';
       this.zfwErrorMsg = '登录失败，请重试';

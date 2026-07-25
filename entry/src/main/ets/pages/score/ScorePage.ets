@@ -41,6 +41,12 @@ export struct ScorePage {
   @State fabTranslateX: number = 0;  // 悬浮按钮位置：正值靠右，负值靠左
   private fabInitialized: boolean = false;  // 首次布局完成后才做动画
   private screenWidth: number = 360;  // 屏幕宽度（vp），onAreaChange 更新
+
+  // 成绩卡片网格列数：宽屏多列，窄屏单列（对齐 Flutter AlignedGridView count = maxWidth~/cardWidth）
+  private getScoreColumns(): number {
+    if (this.screenWidth <= 0) return 1;
+    return Math.max(1, Math.floor(this.screenWidth / 380));
+  }
   @State selectedIndexes: Set<number> = new Set();
   @State selectedGPA: string = '--';
   @State selectedAvg: string = '--';
@@ -644,9 +650,9 @@ export struct ScorePage {
             }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else {
-            List({ space: 0 }) {
+            Grid() {
               ForEach(this.currentScores, (item: ScoreItemModel, idx?: number) => {
-                ListItem() {
+                GridItem() {
                   Row() {
                     // 选择模式勾选圈
                     if (this.isSelectMode) {
@@ -704,6 +710,7 @@ export struct ScorePage {
                   .alignItems(VerticalAlign.Center)
                   .backgroundColor(this.isSelectMode && this.selectedIndexes.has(idx!) ?
                     (this.themeIsDark ? '#1A2A40' : '#F0F5FF') : ThemeColors.bgCard)
+                  .borderRadius(12)
                   .onClick(() => {
                     if (this.isSelectMode) {
                       if (this.selectedIndexes.has(idx!)) {
@@ -718,11 +725,12 @@ export struct ScorePage {
                   })
                   .animation({ duration: 150, curve: Curve.EaseOut })
                 }
-              }, (item: ScoreItemModel, idx?: number) => `score_${item.xnxqdm}_${item.xskcm}_${idx}`)
+              }, (item: ScoreItemModel) => 'score_' + (item.jxbid || (item.xnxqdm + '_' + item.xskcm)))
             }
-            .divider({ strokeWidth: 0.5, color: ThemeColors.border, startMargin: 16, endMargin: 16 })
+            .columnsGap(12).rowsGap(12)
+            .columnsTemplate('1fr '.repeat(this.getScoreColumns()).trim())
             .layoutWeight(1)
-            .padding({ left: 0, right: 0 })
+            .padding({ left: 0, right: 0, top: 10 })
             .margin({ bottom: this.isSelectMode ? 64 : 0 })
           }
         }

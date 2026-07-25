@@ -26,14 +26,6 @@
         "name": "ohos.permission.INTERNET"
       },
       {
-        "name": "ohos.permission.CAMERA",
-        "reason": "$string:camera_permission_reason",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "inuse"
-        }
-      },
-      {
         "name": "ohos.permission.READ_CALENDAR",
         "reason": "$string:calendar_permission_reason",
         "usedScene": {
@@ -44,22 +36,6 @@
       {
         "name": "ohos.permission.WRITE_CALENDAR",
         "reason": "$string:calendar_permission_reason",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "inuse"
-        }
-      },
-      {
-        "name": "ohos.permission.DETECT_GESTURE",
-        "reason": "$string:detect_gesture_permission_reason",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "inuse"
-        }
-      },
-      {
-        "name": "ohos.permission.ACTIVITY_MOTION",
-        "reason": "$string:activity_motion_permission_reason",
         "usedScene": {
           "abilities": ["EntryAbility"],
           "when": "inuse"

@@ -81,12 +81,20 @@ export class SchoolnetService {
   // ===== 在线状态查询（w.xidian.edu.cn，无需登录） =====
 
   async getCurrentOnlineInfo(): Promise<Record<string, string | number>> {
+    const url: string = 'https://w.xidian.edu.cn/cgi-bin/rad_user_info';
+    // 对齐 Flutter：dio 默认带 Chrome UA，部分校内接口会校验 UA，缺失可能被拦
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+    };
+    console.info('[Schoolnet] getCurrentOnlineInfo -> ' + url + ' (callback=jsonp)');
     const resp: HttpResponse = await this.http.getWithQuery(
-      'https://w.xidian.edu.cn/cgi-bin/rad_user_info',
-      { 'callback': 'jsonp', '_': Date.now().toString() }
+      url,
+      { 'callback': 'jsonp', '_': Date.now().toString() },
+      headers
     );
     let raw: string = resp.body;
     let info: Record<string, string | number> = {};
+    console.info('[Schoolnet] rad_user_info status=' + resp.statusCode + ' raw=' + (raw || '').substring(0, 300));
 
     if (raw.charCodeAt(0) === 0xFEFF || raw.startsWith('\uFEFF')) {
       raw = raw.substring(1);
@@ -147,6 +155,12 @@ export class SchoolnetService {
       info['start_time'] = parseInt(String(info['acct_start_time'])) || 0;
     }
 
+    if (Object.keys(info).length === 0) {
+      console.warn('[Schoolnet] rad_user_info parsed EMPTY, raw=' + (raw || '').substring(0, 300));
+    }
+    if (info['error'] === 'not_online_error' || info['res'] === 'not_online_error') {
+      console.info('[Schoolnet] rad_user_info -> not_online_error（账号未做校园网认证登录，无 sum_flow/user_name 等字段）');
+    }
     return info;
   }
 

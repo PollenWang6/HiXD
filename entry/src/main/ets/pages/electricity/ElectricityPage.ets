@@ -8,6 +8,7 @@ import cryptoFramework from '@ohos.security.cryptoFramework';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService } from '../../services/CasLoginService';
+import { ElectricityService, ElecFullResult, ElecFullBundle, ElecDailyItem } from '../../services/ElectricityService';
 import { SegmentTab } from '../../components/SegmentTab';
 
 const TAG: string = 'ElectricityPage';
@@ -110,10 +111,11 @@ export struct ElectricityPage {
   private ssoDone: boolean = false;
   private cachedApiHeaders: Record<string, string> = {};
   private cachedMetID: string = '';
+  private ssoTimeoutId: number = -1;   // SSO 看门狗计时器 id（-1 表示未启用）
 
   async aboutToAppear(): Promise<void> {
     await CasLoginService.getInstance().syncCookiesToWebView();
-    this.webViewSrc = SSO_ENTRY;
+    this.webViewSrc = 'about:blank';
     this.customStartStr = this.dayShift(30);
     this.customEndStr = this.dayShift(0);
     const silent: boolean = AppStorage.Get('electricity_silent') as boolean;
@@ -123,8 +125,92 @@ export struct ElectricityPage {
       return;
     }
     if (this.elCache.length > 0) {
+      // 有缓存先秒显，后台再用 HTTP 静默刷新覆盖
       this.onCacheChanged();
+      this.loadViaHttp(true);
+    } else {
+      // 无缓存：纯 HTTP 主路径（仿 Flutter 纯 HTTP OAuth），失败再回退 WebView SSO
+      this.loadViaHttp(false);
     }
+  }
+
+  // 主取数路径：纯 HTTP 拉全量水电数据（与 Flutter 同款，无需 WebView SSO 拿 code）。
+  // silentRefresh=true 时不转圈（用于有缓存时的后台刷新）；false 时显示加载并超时回退 SSO。
+  private async loadViaHttp(silentRefresh: boolean): Promise<void> {
+    if (!silentRefresh) {
+      this.isLoading = true;
+      this.loadError = '';
+    }
+    const bundle: ElecFullBundle | null = await ElectricityService.fetchFullEnergyInfo();
+    if (bundle && bundle.result.remain.length > 0) {
+      this.applyResult(bundle);
+      return;
+    }
+    // HTTP 取数失败（多半未登录 CAS）→ 回退 WebView SSO
+    if (!silentRefresh) {
+      this.fallbackToSso();
+    } else if (this.isLoading) {
+      this.isLoading = false; // 有缓存的静默刷新失败：保持缓存显示，不报错
+    }
+  }
+
+  // 将服务返回的全量结果映射到页面状态，并写回缓存（electricity_cache / electricity_cache_v2）。
+  private applyResult(bundle: ElecFullBundle): void {
+    const r: ElecFullResult = bundle.result;
+    this.cachedApiHeaders = bundle.apiHeaders;
+    this.balance = r.remain;
+    this.metID = r.metID;
+    this.readDate = r.date;
+    this.dailyItems = [];
+    for (let i: number = 0; i < r.daily.length; i++) {
+      const d: ElecDailyItem = r.daily[i];
+      this.dailyItems.push({ date: d.date, prevDate: d.prevDate, use: d.use || '0.00', startNum: d.startNum || '', endNum: d.endNum || '' });
+    }
+    this.displayDaily = this.dailyItems.slice(0, 7);
+    this.waterBalance = r.waterRemain;
+    this.waterMetID = r.waterMetID;
+    this.waterReadDate = r.waterDate;
+    this.waterDailyItems = [];
+    for (let i: number = 0; i < r.waterDaily.length; i++) {
+      const d: ElecDailyItem = r.waterDaily[i];
+      this.waterDailyItems.push({ date: d.date, prevDate: d.prevDate, use: d.use || '0.00', startNum: d.startNum || '', endNum: d.endNum || '' });
+    }
+    this.waterDisplayDaily = this.waterDailyItems.slice(0, 7);
+    this.cachedMetID = r.metID;
+    this.activePreset = 30;
+    this.isLoading = false;
+    this.loadError = '';
+    const cache: ElecCache = {
+      remain: r.remain, metID: r.metID, nodeID: r.nodeID, date: r.date,
+      daily: this.dailyItems, error: '', waterRemain: r.waterRemain, waterMetID: r.waterMetID, waterDate: r.waterDate, waterDaily: this.waterDailyItems
+    };
+    AppStorage.setOrCreate('electricity_cache', JSON.stringify(cache));
+    PreferenceUtil.putString('electricity_cache_v2', JSON.stringify(cache));
+    AppStorage.set('home_data_dirty', String(Date.now()));
+    if (this.isSilent) {
+      this.isSilent = false;
+      this.pageInfo.pop();
+    }
+  }
+
+  // HTTP 取数失败兜底：加载 WebView 走 SSO 登录拿 code（仅极端未登录场景触发）。
+  private fallbackToSso(): void {
+    this.webViewSrc = SSO_ENTRY;
+    this.webController.loadUrl(SSO_ENTRY);
+    this.startSsoWatchdog();
+  }
+
+  // SSO 看门狗：WebView 走 SSO 拿 code 偶发因 CAS cookie 失效而卡住不回调，
+  // 导致 isLoading 恒 true 无限转圈。超时则停止转圈并提示刷新。
+  private startSsoWatchdog(): void {
+    if (this.ssoTimeoutId >= 0) { clearTimeout(this.ssoTimeoutId); }
+    this.ssoTimeoutId = setTimeout(() => {
+      if (!this.ssoDone) {
+        this.loadError = '登录缴费系统超时，请点击刷新重试';
+        this.isLoading = false;
+      }
+      this.ssoTimeoutId = -1;
+    }, 15000);
   }
 
   onCacheChanged(): void {
@@ -171,6 +257,7 @@ export struct ElectricityPage {
   }
 
   aboutToDisappear(): void {
+    if (this.ssoTimeoutId >= 0) { clearTimeout(this.ssoTimeoutId); this.ssoTimeoutId = -1; }
     try { web_webview.WebviewController.removeAllCache(false); } catch (_e) { /* ignore */ }
   }
 
@@ -321,6 +408,7 @@ export struct ElectricityPage {
       const cache: ElecCache = { remain: remain, metID: metID, nodeID: nodeID, date: readDate, daily: daily, error: '', waterRemain: waterRemain, waterMetID: waterMetID, waterDate: waterDate, waterDaily: waterDaily };
       AppStorage.setOrCreate('electricity_cache', JSON.stringify(cache));
       PreferenceUtil.putString('electricity_cache_v2', JSON.stringify(cache));
+      AppStorage.set('home_data_dirty', String(Date.now()));
       this.balance = remain;
       this.metID = metID;
       this.readDate = readDate;
@@ -445,8 +533,10 @@ export struct ElectricityPage {
     this.dailyItems = [];
     this.activePreset = 30;
     this.ssoDone = false;
+    if (this.ssoTimeoutId >= 0) { clearTimeout(this.ssoTimeoutId); this.ssoTimeoutId = -1; }
     AppStorage.setOrCreate('electricity_cache', '');
-    this.webController.loadUrl(SSO_ENTRY);
+    // 主路径仍是纯 HTTP；失败会自动回退 WebView SSO（带看门狗，不会无限转圈）
+    this.loadViaHttp(false);
   }
 
   private fmtDate(d: string): string {
@@ -649,6 +739,7 @@ export struct ElectricityPage {
               const code: string = this.extractCode(event.url);
               if (code.length > 0) {
                 this.ssoDone = true;
+                if (this.ssoTimeoutId >= 0) { clearTimeout(this.ssoTimeoutId); this.ssoTimeoutId = -1; }
                 this.fetchData(code);
               }
             }

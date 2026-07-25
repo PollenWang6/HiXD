@@ -20,6 +20,8 @@ import { EmptyClassroomPage } from './emptyclassroom/EmptyClassroomPage';
 import { LibraryPage } from './library/LibraryPage';
 import { SchoolCardPage } from './schoolcard/SchoolCardPage';
 import { SchoolNetPage } from './schoolnet/SchoolNetPage';
+import { HomeDataProvider, HomeSnapshot } from '../services/HomeDataProvider';
+import { SchoolCardService } from '../services/SchoolCardService';
 import { ElectricityPage } from './electricity/ElectricityPage';
 import { PortalWebPage } from './portal/PortalWebPage';
 import { FaqPage } from './faq/FaqPage';
@@ -45,6 +47,21 @@ import { VersionService, VersionInfo } from '../services/VersionService';
 import { CalendarSyncService, SlimCell } from '../services/CalendarSyncService';
 import networkUtil from '../utils/NetworkUtil';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+// 睿思论坛（2026-07-19 接入）
+import { RuisiPage } from './ruisi/RuisiPage';
+import { RuisiTopicDetailPage } from './ruisi/RuisiTopicDetailPage';
+import { RuisiTopicListPage } from './ruisi/RuisiTopicListPage';
+import { RuisiSearchPage } from './ruisi/RuisiSearchPage';
+import { RuisiNewPostPage } from './ruisi/RuisiNewPostPage';
+import { RuisiForumListPage } from './ruisi/RuisiForumListPage';
+import { RuisiUserPage } from './ruisi/RuisiUserPage';
+import { RuisiMyPostsPage } from './ruisi/RuisiMyPostsPage';
+import { RuisiFavoritesPage } from './ruisi/RuisiFavoritesPage';
+import { RuisiMessagesPage } from './ruisi/RuisiMessagesPage';
+import { RuisiChatPage } from './ruisi/RuisiChatPage';
+import { RuisiSettingsPage } from './ruisi/RuisiSettingsPage';
+import { RuisiAboutPage } from './ruisi/RuisiAboutPage';
+import { TopicDetailParam, TopicListParam, UserParam, UserThreadsParam, PmParam, NewPostParam } from '../services/RuisiModels';
 
 // 每日用电数据模型
 interface DailyItem {
@@ -257,6 +274,34 @@ struct MainPage {
   @State userRefreshing: boolean = false; // 用户信息刷新中
   @StorageLink('card_balance') cardBalance: string = ''; // 校园卡余额（由 SchoolCardPage WebView 写入 AppStorage）
   @State homeRefreshing: boolean = false;  // 主页下拉刷新
+  // 首页数据卡：用 @StorageLink 绑定 AppStorage。
+  // 之前用 @State（无论类实例还是基础类型）在 Refresh/Scroll 深嵌套下偶发观察失效→卡片不刷新。
+  // @StorageLink 是全局可观察存储，跨任意嵌套层级必定触发重渲染，最稳。
+  @StorageLink('home_card_balance') snapCardBalance: string = '—';
+  @StorageLink('home_card_consume') snapCardConsume: string = '—';
+  @StorageLink('home_card_consume_date') snapCardConsumeDate: string = '—';
+  @StorageLink('home_elec_remain') snapElecRemain: string = '—';
+  @StorageLink('home_elec_readtime') snapElecReadTime: string = '—';
+  @StorageLink('home_water_remain') snapWaterRemain: string = '—';
+  @StorageLink('home_elec_room') snapElecRoom: string = '—';
+  @StorageLink('home_lib_borrow') snapLibBorrow: string = '—';
+  @StorageLink('home_lib_overdue') snapLibOverdue: string = '—';
+  @StorageLink('home_exam_name') snapExamName: string = '—';
+  @StorageLink('home_exam_countdown') snapExamCountdown: string = '—';
+  @StorageLink('home_exam_date') snapExamDate: string = '—';
+  @StorageLink('home_exam_has_upcoming') snapExamHasUpcoming: boolean = false;
+  @StorageLink('home_att_danger') snapAttDanger: number = 0;
+  @StorageLink('home_att_normal') snapAttNormal: number = 0;
+  @StorageLink('home_att_unknown') snapAttUnknown: number = 0;
+  @StorageLink('home_att_hasdata') snapAttHasData: boolean = false;
+  @StorageLink('home_net_used') snapNetUsed: string = '—';
+  @StorageLink('home_net_devices') snapNetDevices: string = '—';
+  @State homeLoading: boolean = false;    // 首页数据后台获取中（控制加载动画）
+  // 付款码弹窗
+  @State showPayCode: boolean = false;
+  @State payCodeLoading: boolean = false;
+  @State payCodeBase64: string = '';
+  @State payCodeError: string = '';
   @State userDormitory: string = '';   // 宿舍
   @State userStudentType: string = ''; // 学生类别
   @State userClassName: string = '';   // 班级
@@ -273,6 +318,7 @@ struct MainPage {
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
   @StorageLink('ct_updated') @Watch('onCtUpdated') ctUpdated: string = '';
   private _lastCtUpdated: string = '';
+  private _lastHomeDirty: string = '';
   private _ctPollId: number = 0;
   // 网络回调绑定引用（startListen/stopListen 须用同一引用才能正确解绑）
   private onNetworkChangeHandler: (available: boolean) => void = this.onNetworkChange.bind(this);
@@ -372,7 +418,7 @@ struct MainPage {
   // ==================== 菜单排序 ====================
   @State homeSortOn: boolean = false;
   @State homeMenuOrder: string[] =
-    ['EmptyClass', 'Library', 'SchoolCard', 'Seat', 'Electricity', 'Water', 'Experiment', 'Exam', 'Attendance', 'Score', 'SchoolNet', 'Sport'];
+    ['EmptyClass', 'Library', 'SchoolCard', 'Sport', 'Electricity', 'Water', 'Experiment', 'Exam', 'Attendance', 'Score', 'SchoolNet', 'Seat'];
   @State portalSortOn: boolean = false;
   @State portalMenuOrder: string[] =
     ['Dianfei', 'Dingshui', 'Baoxiu', 'Space', 'Portal', 'Ruisi', 'Physics', 'Mail', 'Net', 'SchoolCardWeb'];
@@ -501,10 +547,12 @@ struct MainPage {
     // TGC 优先 → 密码兜底，一步完成
     this.checkLogin();
     this.loadClassPreview();
+    this.refreshHomeData();
     // 课表子页（课程表）编辑后返回时，onPageShow/@Watch 不会触发（@Entry 宿主在 NavDestination 之上不重入生命周期），
     // 故用轻量轮询 ct_updated：tryRefreshPreview 仅在 ct_updated 变化时重载预览+快照，无变化则空转（字符串比较）。
     this._lastCtUpdated = AppStorage.get('ct_updated') as string || '';
-    this._ctPollId = setInterval(() => { this.tryRefreshPreview(); }, 1000);
+    this._lastHomeDirty = AppStorage.get('home_data_dirty') as string || '';
+    this._ctPollId = setInterval(() => { this.tryRefreshPreview(); this.tryRefreshHomeData(); }, 1000);
     this.initCacheDirs();
     // 后台检查版本更新（不阻塞 UI）
     this.checkVersionUpdate();
@@ -611,6 +659,19 @@ AppStorage.set('loginStatus', 'offline');
     if (current !== this._lastCtUpdated && current.length > 0) {
       this._lastCtUpdated = current;
       this.loadClassPreview();
+    }
+  }
+
+  // 首页数据脏标记轮询：子页（电费/图书馆/校园卡等）取数写入缓存后 bump home_data_dirty，
+  // 主页在返回时（NavDestination 返回不触发 onPageShow，故用轮询）检测到变化即重拉 refreshHomeData，
+  // 既重读最新缓存（电费/图书馆/校园卡余额），也把会话已就绪的后台任务（考试/考勤/校园网/消费）再跑一遍。
+  // 对齐 Flutter 首页 onResume 重查本地数据的做法。
+  private tryRefreshHomeData(): void {
+    const current: string = AppStorage.get('home_data_dirty') as string || '';
+    if (current !== this._lastHomeDirty && current.length > 0) {
+      console.error('[HomeData] dirty 触发重拉: ' + current);
+      this._lastHomeDirty = current;
+      this.refreshHomeData();
     }
   }
 
@@ -928,6 +989,66 @@ AppStorage.set('loginStatus', 'expired');
       this.loadClassPreview();
       CalendarSyncService.autoSync(getContext(this) as common.UIAbilityContext);
     }).catch((e: Error) => {
+    });
+    // ===== 首页常用数据卡：登录成功后即拉取（每次登录动作都触发） =====
+    this.refreshHomeData();
+  }
+
+  // 首页常用数据卡加载：cache-first 秒显 + 后台并发轻刷。
+  // 各字段在 HomeDataProvider.load() 内部「就绪即写入 AppStorage」，卡片各自独立显示，
+  // 不再等所有请求完成后一次性刷新（避免多个加载动画同时转）。
+  // homeLoading=true 仅在「整体仍在拉取」期间用于未就绪卡片的转圈。
+  private refreshHomeData(): void {
+    console.info('[HomeData] refreshHomeData START');
+    this.homeLoading = true;
+    HomeDataProvider.load()
+      .catch((e: Error) => {
+        console.error('[HomeData] load failed: ' + (e ? e.message : e));
+      })
+      .finally(() => {
+        this.homeLoading = false;
+      });
+  }
+
+  // 考勤卡摘要（按课程真实聚合，不造假周统计）
+  private attSummary(): string {
+    if (!this.snapAttHasData) { return '暂无'; }
+    let s: string = `危险 ${this.snapAttDanger} · 正常 ${this.snapAttNormal}`;
+    if (this.snapAttUnknown > 0) {
+      s += ` · 未知 ${this.snapAttUnknown}`;
+    }
+    return s;
+  }
+
+  // 考试卡：是否还有未开始的考试
+  private examHasUpcoming(): boolean {
+    return this.snapExamHasUpcoming && this.snapExamName !== '—';
+  }
+  // 考试卡大标题：未取数→'—'，有未考→科目名，无未考→'暂无'
+  private examBig(): string {
+    if (this.snapExamName === '—') { return '—'; }
+    return this.examHasUpcoming() ? this.snapExamName : '暂无';
+  }
+  // 考试卡副信息：有未考→倒计时·日期；无未考→'X门已结束'
+  private examSub(): string {
+    if (this.snapExamName === '—') { return ''; }
+    return this.examHasUpcoming() ? (this.snapExamCountdown + ' · ' + this.snapExamDate) : this.snapExamCountdown;
+  }
+
+  // 校园卡付款码弹窗：复用 SchoolCardService.getQRCodeBase64()（与 SchoolCardPage 同款）
+  private openPayCode(): void {
+    this.showPayCode = true;
+    if (this.payCodeBase64.length > 0) { return; }  // 已取到，直接展示
+    this.payCodeLoading = true;
+    this.payCodeError = '';
+    SchoolCardService.getInstance().getQRCodeBase64().then((b64: string) => {
+      this.payCodeBase64 = b64;
+    }).catch((e: Error) => {
+      const msg: string = (e && e.message) ? e.message : '';
+      this.payCodeError = msg.indexOf('登录') >= 0 || msg.length === 0
+        ? '获取失败，请先在「校园卡」页登录' : ('获取失败：' + msg);
+    }).finally(() => {
+      this.payCodeLoading = false;
     });
   }
 
@@ -1904,7 +2025,7 @@ AppStorage.set('loginStatus', 'expired');
 
   // 侧边栏菜单点击路由
   @Builder
-  navDestinationBuilder(name: string) {
+  navDestinationBuilder(name: string, param: Object) {
     if (name === 'ClassTablePage') {
       ClassTablePage({ pageInfo: this.pageInfo })
     } else if (name === 'ExperimentPage') {
@@ -1957,6 +2078,32 @@ AppStorage.set('loginStatus', 'expired');
       SportPage({ pageInfo: this.pageInfo })
     } else if (name === 'SeatPage') {
       SeatPage({ pageInfo: this.pageInfo, isTablet: this.isTablet })
+    } else if (name === 'RuisiTopicDetail') {
+      RuisiTopicDetailPage({ pageInfo: this.pageInfo, tid: (param as TopicDetailParam).tid })
+    } else if (name === 'RuisiTopicList') {
+      RuisiTopicListPage({ pageInfo: this.pageInfo, fid: (param as TopicListParam).fid, forumName: (param as TopicListParam).name })
+    } else if (name === 'RuisiSearch') {
+      RuisiSearchPage({ pageInfo: this.pageInfo })
+    } else if (name === 'RuisiNewPost') {
+      RuisiNewPostPage({ pageInfo: this.pageInfo, initFid: (param as NewPostParam)?.fid ?? 0, initForumName: (param as NewPostParam)?.forumName ?? '' })
+    } else if (name === 'RuisiForumList') {
+      RuisiForumListPage({ pageInfo: this.pageInfo })
+    } else if (name === 'RuisiUser') {
+      RuisiUserPage({ pageInfo: this.pageInfo, targetUid: (param as UserParam)?.uid ?? 0, targetUsername: (param as UserParam)?.username ?? '' })
+    } else if (name === 'RuisiMyPosts') {
+      RuisiMyPostsPage({ pageInfo: this.pageInfo })
+    } else if (name === 'RuisiUserThreads') {
+      RuisiMyPostsPage({ pageInfo: this.pageInfo, targetUid: (param as UserThreadsParam)?.uid ?? 0, mode: (param as UserThreadsParam)?.mode ?? 'me' })
+    } else if (name === 'RuisiFavorites') {
+      RuisiFavoritesPage({ pageInfo: this.pageInfo })
+    } else if (name === 'RuisiMessages') {
+      RuisiMessagesPage({ pageInfo: this.pageInfo })
+    } else if (name === 'RuisiChat') {
+      RuisiChatPage({ pageInfo: this.pageInfo, tuid: (param as PmParam)?.tuid ?? 0, username: (param as PmParam)?.username ?? '' })
+    } else if (name === 'RuisiSettings') {
+      RuisiSettingsPage({ pageInfo: this.pageInfo })
+    } else if (name === 'RuisiAbout') {
+      RuisiAboutPage({ pageInfo: this.pageInfo })
     }
   }
 
@@ -2046,8 +2193,13 @@ AppStorage.set('loginStatus', 'expired');
             .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
           TabContent() {
+            RuisiPage({ pageInfo: this.pageInfo })
+          }.tabBar(this.TabBuilder(2, '💬', '睿思论坛'))
+            .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+
+          TabContent() {
             this.MyTab()
-          }.tabBar(this.TabBuilder(2, '👤', '我的'))
+          }.tabBar(this.TabBuilder(3, '👤', '我的'))
             .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         }
         .vertical(false)
@@ -2064,8 +2216,8 @@ AppStorage.set('loginStatus', 'expired');
         })
         .onAnimationStart((_index: number, targetIndex: number) => {
           this.currentIndex = targetIndex;
-          if (targetIndex === 0) { this.loadClassPreview(); }
-          else if (targetIndex === 2) { this.updateCacheSize(); this.refreshThemeLabel(); }
+          if (targetIndex === 0) { this.loadClassPreview(); this.refreshHomeData(); }
+          else if (targetIndex === 3) { this.updateCacheSize(); this.refreshThemeLabel(); }
         })
         .width('100%')
         .layoutWeight(1)
@@ -2082,8 +2234,13 @@ AppStorage.set('loginStatus', 'expired');
             .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
           TabContent() {
+            RuisiPage({ pageInfo: this.pageInfo })
+          }.tabBar(this.TabBuilder(2, '💬', '睿思论坛'))
+            .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+
+          TabContent() {
             this.MyTab()
-          }.tabBar(this.TabBuilder(2, '👤', '我的'))
+          }.tabBar(this.TabBuilder(3, '👤', '我的'))
             .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         }
         .scrollable(false)
@@ -2093,8 +2250,8 @@ AppStorage.set('loginStatus', 'expired');
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onChange((index: number) => {
           this.currentIndex = index;
-          if (index === 0) { this.loadClassPreview(); }
-          else if (index === 2) { this.updateCacheSize(); this.refreshThemeLabel(); this.loadUserInfo(); }
+          if (index === 0) { this.loadClassPreview(); this.refreshHomeData(); }
+          else if (index === 3) { this.updateCacheSize(); this.refreshThemeLabel(); this.loadUserInfo(); }
         })
         .width('100%')
         .layoutWeight(1)
@@ -3029,8 +3186,9 @@ AppStorage.set('loginStatus', 'not_logged_in');
   // ==================== 主页 Tab ====================
   @Builder
   HomeTab() {
-    Column() {
+    Stack() {
       // 顶部导航栏
+      Column() {
       Row() {
         Column() {
           Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
@@ -3077,52 +3235,124 @@ AppStorage.set('loginStatus', 'not_logged_in');
       .width('100%').height(52 + this.statusBarHeight).padding({ left: 20, right: 16, top: this.statusBarHeight })
       .backgroundColor(this.accentColor)
 
-      // 课表预览卡片
-      // 课表预览卡片（ct_updated 变化时由 @Watch('onCtUpdated') 触发刷新）
-      this.ClassPreviewCard()
-
-      // 电费查询已移至功能菜单
-
-      // 功能菜单列表(始终显示)
-      Column() {
-        Refresh({ refreshing:
-        $$this.homeRefreshing }) {
-          List({ space: 8 }) {
-          ForEach(this.homeMenuOrder, (name: string, idx: number) => {
-            ListItem() {
-              Row() {
-                if (this.homeSortOn) {
-                  Column({ space: 2 }) {
-                    Text('⬆').fontSize(14).onClick(() => { this.homeMenuMoveUp(idx); })
-                    Text('⬇').fontSize(14).onClick(() => { this.homeMenuMoveDown(idx); })
-                  }.width(28).alignItems(HorizontalAlign.Center).margin({ right: 4 })
-                }
-                this.HomeMenuItemByName(name)
-              }.width('100%')
-            }
-          }, (name: string) => name)
-
-          // 排序
-          ListItem() {
-            Row() {
-              Blank()
-              Text(this.homeSortOn ? '完成' : '⇅ 排序').fontSize(13).fontColor(this.accentColor)
-            }.width('100%').padding({ right: 6, top: 4, bottom: 4 })
-            .onClick(() => { this.homeSortOn = !this.homeSortOn; })
+      // ===== 新版首页：课表预览 + 常用数据卡 + 更多模块 =====
+      Refresh({ refreshing: $$this.homeRefreshing }) {
+        Scroll() {
+          Column() {
+            this.ClassPreviewCard()
+            this.HomeDataSection()
           }
-          ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 60 : 48)
+          .width('100%').padding({ bottom: 160 })
         }
-        .padding({ left: 16, right: 16, top: 8 })
-        .layoutWeight(1)
-        }
-        .onRefreshing(() => {
-          this.homeRefreshing = true;
-          this.checkLogin();
-          setTimeout(() => { this.homeRefreshing = false; }, 2000);
-        })
-      }.width('100%').layoutWeight(1)
+        .width('100%').layoutWeight(1).align(Alignment.TopStart).edgeEffect(EdgeEffect.Spring)
+      }
+      .onRefreshing(() => {
+        this.homeRefreshing = true;
+        this.refreshHomeData();
+        setTimeout(() => { this.homeRefreshing = false; }, 1500);
+      })
+      }
+      .width('100%').height('100%')
     }
     .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+
+    if (this.showPayCode) {
+       this.PayCodeOverlay()
+    }
+  }
+
+  // ==================== 首页常用数据卡 + 更多模块 ====================
+  @Builder
+  HomeDataSection() {
+    // 常用
+    Row() {
+      Text('常用').fontSize(16).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+      Blank()
+      if (this.homeLoading) {
+        LoadingProgress().width(18).height(18).color(this.accentColor)
+      }
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
+
+    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
+      // 校园卡（全宽，定制：余额/上笔消费标签 + 付款码）
+      Column() {
+        this.SchoolCardHomeCard()
+      }.width('100%').margin({ bottom: 12 })
+      // 考勤（全宽，自定义重设计：危险/正常/未知三色统计）
+      Column() {
+        this.AttendanceHomeCard()
+      }.width('100%').margin({ bottom: 12 })
+      // 电费（半宽）：剩余按 kWh 显示，附上次读表时间，不展示水费
+      Column() {
+        HomeDataCard({
+          icon: '⚡', title: '电费', tag: '余额',
+          big: this.snapElecRemain === '—' ? '—' : this.snapElecRemain + ' kWh',
+          sub: this.snapElecReadTime === '—' ? '' : ('上次读数 ' + this.snapElecReadTime),
+          color: '#FF6D00', loading: this.homeLoading,
+          onTap: () => { this.homeMenuItemClick('Electricity'); }
+        })
+      }.width('calc(50% - 6px)').margin({ bottom: 12 })
+      // 图书馆（半宽）
+      Column() {
+        HomeDataCard({
+          icon: '📚', title: '图书馆', tag: '在借',
+          big: this.snapLibBorrow + ' 本',
+          sub: '逾期 ' + this.snapLibOverdue, color: '#8E24AA', loading: this.homeLoading,
+          onTap: () => { this.homeMenuItemClick('Library'); }
+        })
+      }.width('calc(50% - 6px)').margin({ bottom: 12 })
+      // 最近考试（半宽）：无未考则"暂无" + "X门已结束"
+      Column() {
+        HomeDataCard({
+          icon: '📝', title: '最近考试',
+          big: this.examBig(),
+          sub: this.examSub(), color: '#FB8C00', loading: this.homeLoading,
+          onTap: () => { this.homeMenuItemClick('Exam'); }
+        })
+      }.width('calc(50% - 6px)').margin({ bottom: 12 })
+      // 校园网（半宽）：数据来自认证系统当前上网用户（无需密码）
+      Column() {
+        HomeDataCard({
+          icon: '🌐', title: '校园网',
+          big: this.snapNetUsed,
+          sub: this.snapNetDevices, color: '#00ACC1', loading: this.homeLoading,
+          onTap: () => { this.homeMenuItemClick('SchoolNet'); }
+        })
+      }.width('calc(50% - 6px)').margin({ bottom: 12 })
+    }
+    .width('100%').padding({ left: 16, right: 16 })
+
+    // 更多模块（只放不在"更多功能"Tab 里的模块，避免重复入口）
+    Text('更多模块').fontSize(16).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+      .width('100%').padding({ left: 16, right: 16, top: 20, bottom: 8 })
+    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
+      Column() { this.MoreModuleTile('📝', '成绩', 'Score') }.width('calc(25% - 9px)').margin({ bottom: 12 })
+      Column() { this.MoreModuleTile('🏫', '空闲教室', 'EmptyClass') }.width('calc(25% - 9px)').margin({ bottom: 12 })
+      Column() { this.MoreModuleTile('🔬', '实验', 'Experiment') }.width('calc(25% - 9px)').margin({ bottom: 12 })
+      Column() { this.MoreModuleTile('🪑', '座位', 'Seat') }.width('calc(25% - 9px)').margin({ bottom: 12 })
+      Column() { this.MoreModuleTile('🏀', '体育', 'Sport') }.width('calc(25% - 9px)').margin({ bottom: 12 })
+    }
+    .width('100%').padding({ left: 16, right: 16, bottom: 24 })
+  }
+
+  // HomeDataCard 已抽为文件级 @Component（见 MainPage.ets 末尾）：
+  // @Builder 入参不具响应性，父级 @StorageLink 重渲染时卡片仍停在初始 '—'，故改用 @Component + @Prop。
+
+  @Builder
+  MoreModuleTile(icon: string, title: string, name: string) {
+    Column() {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(44).height(44).fill(this.accentColor + '14')
+        Text(icon).fontSize(22)
+      }
+      Text(title).fontSize(12).fontColor(ThemeColors.textPrimary).margin({ top: 6 })
+    }
+    .width('100%').padding({ top: 12, bottom: 12 })
+    .backgroundColor(ThemeColors.bgCard).borderRadius(12)
+    .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+    .alignItems(HorizontalAlign.Center)
+    .onClick(() => { this.homeMenuItemClick(name); })
   }
 
   // ==================== 更多功能 Tab ====================
@@ -3161,13 +3391,162 @@ AppStorage.set('loginStatus', 'not_logged_in');
           }.width('100%').padding({ right: 6, top: 4, bottom: 4 })
           .onClick(() => { this.portalSortOn = !this.portalSortOn; })
         }
-        ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 60 : 48)
+        ListItem().height(deviceInfo.distributionOSApiVersion >= 60100 ? 120 : 108)
       }
       .padding({ left: 16, right: 16, top: 8 })
       .layoutWeight(1)
 
     }
     .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+  }
+
+  // 考勤首页卡片（全宽重设计）：左图标+标题，右三色统计（危险/正常/未知）
+  @Builder
+  AttendanceHomeCard() {
+    Row() {
+      Row() {
+        Stack({ alignContent: Alignment.Center }) {
+          Circle().width(30).height(30).fill('#E91E6320')
+          Text('✅').fontSize(15)
+        }
+        Column() {
+          Text('考勤').fontSize(13).fontColor(ThemeColors.textSecondary)
+          Text(this.snapAttHasData ? '按课程聚合' : '暂无数据').fontSize(11)
+            .fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+        }.alignItems(HorizontalAlign.Start).margin({ left: 8 }).layoutWeight(1)
+      }.layoutWeight(1).margin({ right: 12 })
+
+      if (this.snapAttHasData) {
+        Row() {
+          this.AttStat(String(this.snapAttDanger), '危险', '#E53935')
+          this.AttStat(String(this.snapAttNormal), '正常', '#43A047')
+          this.AttStat(String(this.snapAttUnknown), '未知', '#9E9E9E')
+        }.alignItems(VerticalAlign.Center)
+      } else if (this.homeLoading) {
+        LoadingProgress().width(22).height(22).color('#E91E63')
+      } else {
+        Text('—').fontSize(22).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+      }
+    }
+    .width('100%').height(88).padding(12)
+    .backgroundColor(ThemeColors.bgCard).borderRadius(12)
+    .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => { this.homeMenuItemClick('Attendance'); })
+  }
+
+  @Builder
+  AttStat(value: string, label: string, color: string) {
+    Column() {
+      Text(value).fontSize(22).fontWeight(FontWeight.Bold).fontColor(color)
+      Text(label).fontSize(11).fontColor(ThemeColors.textSecondary).margin({ top: 2 })
+    }.alignItems(HorizontalAlign.Center).margin({ left: 10, right: 10 })
+  }
+
+  // 校园卡首页卡片（定制：明确「余额」「上笔消费」标签，两列利用全宽空间，右上付款码）
+  @Builder
+  SchoolCardHomeCard() {
+    Column() {
+      // 顶行：图标 + 标题（左）｜ 付款码按钮（右）
+      Row() {
+        Row() {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle().width(30).height(30).fill('#FF6D0022')
+            Text('💳').fontSize(15)
+          }
+          Text('校园卡').fontSize(13).fontColor(ThemeColors.textSecondary)
+            .margin({ left: 8 }).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.layoutWeight(1)
+        .onClick(() => { this.homeMenuItemClick('SchoolCard'); })
+
+        Button('付款码')
+          .height(30).borderRadius(15)
+          .backgroundColor('#FF6D00').fontColor('#FFFFFF')
+          .fontSize(12).padding({ left: 14, right: 14 })
+          .onClick(() => { this.openPayCode(); })
+      }.width('100%')
+
+      // 主体：左「余额」大数字，右「上笔消费」
+      Row() {
+        Column() {
+          Text('余额').fontSize(11).fontColor(ThemeColors.textSecondary)
+          if (this.homeLoading && this.snapCardBalance === '—') {
+            LoadingProgress().width(22).height(22).color('#FF6D00').margin({ top: 6 })
+          } else {
+            Text(this.snapCardBalance === '—' ? '—' : '¥' + this.snapCardBalance)
+              .fontSize(26).fontWeight(FontWeight.Bold).fontColor('#FF6D00')
+              .margin({ top: 4 }).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }
+        .width(110).alignItems(HorizontalAlign.Start)
+
+        Column() {
+          Row() {
+            Text('上笔消费').fontSize(12).fontColor(ThemeColors.textSecondary)
+            Text(this.snapCardConsume)
+              .fontSize(15).fontColor(ThemeColors.textPrimary)
+              .margin({ left: 6 }).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }.alignItems(VerticalAlign.Center)
+
+          Text(this.snapCardConsumeDate)
+            .fontSize(14).fontColor(ThemeColors.textSecondary)
+            .margin({ top: 4 }).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ left: 38 })
+      }.width('100%').margin({ top: 12 })
+      .onClick(() => { this.homeMenuItemClick('SchoolCard'); })
+    }
+    .width('100%').padding(14)
+    .backgroundColor(ThemeColors.bgCard).borderRadius(12)
+    .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // 校园卡付款码弹窗（遮罩 + 居中卡片，复用 SchoolCardService 付款码）
+  @Builder
+  PayCodeOverlay() {
+    Stack() {
+      Column().width('100%').height('100%').backgroundColor('#CC000000')
+        .onClick(() => { this.showPayCode = false; })
+      Column() {
+        Row() {
+          Text('校园卡付款码').fontSize(16).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+          Blank()
+          Button() {
+            Image($r('app.media.close')).width(18).height(18).fillColor(ThemeColors.textSecondary)
+          }
+          .width(32).height(32).borderRadius(16).backgroundColor('#F0F0F0')
+          .onClick(() => { this.showPayCode = false; })
+        }.width('100%').padding({ left: 16, right: 12, top: 12, bottom: 8 })
+
+        Divider().color('#EEEEEE').strokeWidth(0.5)
+
+        if (this.payCodeLoading) {
+          LoadingProgress().width(28).height(28).color(this.accentColor)
+            .margin({ top: 40, bottom: 40 })
+        } else if (this.payCodeBase64.length > 0) {
+          Image('data:image/png;base64,' + this.payCodeBase64)
+            .width(220).height(220).objectFit(ImageFit.Contain)
+            .margin({ top: 16, bottom: 8 })
+          Text('向收银员出示此码').fontSize(12).fontColor(ThemeColors.textHint)
+            .margin({ bottom: 16 })
+        } else {
+          Column() {
+            Text(this.payCodeError || '加载失败').fontSize(13).fontColor(ThemeColors.textHint)
+              .width('100%').textAlign(TextAlign.Center)
+            Button('重试').fontSize(13).height(32).backgroundColor(this.accentColor)
+              .fontColor('#FFFFFF').borderRadius(16).padding({ left: 16, right: 16 })
+              .margin({ top: 12 })
+              .onClick(() => { this.openPayCode(); })
+          }.width('100%').padding({ top: 24, bottom: 24 })
+        }
+      }
+      .width(280).padding({ bottom: 12 })
+      .backgroundColor(ThemeColors.bgCard).borderRadius(16)
+      .shadow({ radius: 8, color: '#00000020', offsetY: 2 })
+    }
+    .width('100%').height('100%').alignContent(Alignment.Center)
   }
 
   // ==================== 我的 Tab ====================
@@ -3578,6 +3957,106 @@ AppStorage.set('loginStatus', 'not_logged_in');
     .borderRadius(12).backgroundColor(ThemeColors.bgCard)
     .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
     .onClick(() => { onClick(); })
+  }
+}
+
+// ==================== 首页数据卡（独立组件，@Prop 保证响应）====================
+// 之前用 @Builder + 入参传递，ArkUI 的 @Builder 参数不具响应性：
+// 父级（MainPage 的 @StorageLink）重渲染时，@Builder 入参在首构建后被缓存、不再随父重渲染重算，
+// 导致卡片一直停在初始 '—'（DBG 直接 Text 却能显示正是此因）。
+// 改成 @Component + @Prop 后，父重渲染会把新值自动同步进 @Prop，卡片必更新。
+@Component
+struct HomeDataCard {
+  @Prop icon: string = '';
+  @Prop title: string = '';
+  @Prop big: string = '';
+  @Prop sub: string = '';
+  @Prop color: string = '';
+  @Prop loading: boolean = false;
+  @Prop wide: boolean = false;   // 全宽卡片：横向布局（图标标题在左，大数字在右）
+  @Prop actionLabel: string = '';  // 可选操作按钮文案（如"付款码"），仅全宽卡片展示
+  @Prop tag: string = '';          // 可选小标签（如"余额"/"在借"），显示在标题与大数字之间
+  onTap: () => void = () => { };
+  onAction: () => void = () => { };
+
+  @Builder
+  BigContent() {
+    if (this.loading && (this.big === '—' || this.big.startsWith('—'))) {
+      LoadingProgress().width(22).height(22).color(this.color)
+    } else {
+      Text(this.big).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .fontSize(this.wide ? 24 : 22)
+    }
+  }
+
+  build() {
+    if (this.wide) {
+      // 全宽：左（图标+标题+副信息）｜ 右（大数字）
+      Row() {
+        Column() {
+          Row() {
+            Stack({ alignContent: Alignment.Center }) {
+              Circle().width(30).height(30).fill(this.color + '22')
+              Text(this.icon).fontSize(15)
+            }
+            Text(this.title).fontSize(13).fontColor(ThemeColors.textSecondary)
+              .margin({ left: 8 }).layoutWeight(1)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }.width('100%')
+          if (this.sub && this.sub.length > 0) {
+            Text(this.sub).fontSize(11).fontColor(ThemeColors.textSecondary)
+              .margin({ top: 6 }).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }
+        .layoutWeight(1).alignItems(HorizontalAlign.Start)
+        .margin({ right: 12 })
+
+        Column() {
+          this.BigContent()
+          if (this.actionLabel && this.actionLabel.length > 0) {
+            Button(this.actionLabel)
+              .height(30).borderRadius(15)
+              .backgroundColor(this.color).fontColor('#FFFFFF')
+              .fontSize(12).padding({ left: 14, right: 14 })
+              .margin({ top: 8 })
+              .onClick(() => { this.onAction(); })
+          }
+        }.alignItems(HorizontalAlign.End)
+      }
+      .width('100%').height(88).padding(12)
+      .backgroundColor(ThemeColors.bgCard).borderRadius(12)
+      .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => { this.onTap(); })
+    } else {
+      // 半宽：上（图标+标题）｜ 中（大数字）｜ 底（副信息），固定高度保证等高
+      Column() {
+        Row() {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle().width(30).height(30).fill(this.color + '22')
+            Text(this.icon).fontSize(15)
+          }
+          Text(this.title).fontSize(13).fontColor(ThemeColors.textSecondary)
+            .margin({ left: 8 }).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.width('100%')
+        if (this.tag && this.tag.length > 0) {
+          Text(this.tag).fontSize(11).fontColor(ThemeColors.textSecondary)
+            .margin({ top: 4 })
+        }
+        Column() { this.BigContent() }
+          .margin({ top: 8 }).width('100%')
+        Text(this.sub).fontSize(11).fontColor(ThemeColors.textSecondary)
+          .margin({ top: 6 }).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('100%').height(124).padding(12)
+      .backgroundColor(ThemeColors.bgCard).borderRadius(12)
+      .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+      .justifyContent(FlexAlign.SpaceBetween)
+      .alignItems(HorizontalAlign.Start)
+      .onClick(() => { this.onTap(); })
+    }
   }
 }
 

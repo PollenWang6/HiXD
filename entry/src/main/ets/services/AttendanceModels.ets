@@ -43,17 +43,18 @@ export class ClassAttendance {
 
   // 获取考勤状态
   getAttendanceStatus(): AttendanceStatus {
+    // 到课率解析：兼容空值、'--'/'暂无'、半角%与全角％、前后空白等，避免误判为未知/错状态
+    const rateRaw: string = (this.attendanceRate ?? '').trim();
+    const rateStr: string = rateRaw.replace(/[%％\s]/g, '');
+    const rate: number = parseFloat(rateStr);
+    if (rateStr.length === 0 || isNaN(rate)) {
+      return AttendanceStatus.UNKNOWN;
+    }
     const total: number = this.totalTimes > 0 ? this.totalTimes : (parseInt(this.requiredCheckIn) || 0) * 2;
     const timeToError: number = Math.floor(total / 4);
     const absenceNum: number = parseInt(this.absenceCount) || 0;
     const absenceHours: number = absenceNum * 2; // 每次缺勤 = 2 课时
     const remainHours: number = timeToError - absenceHours;
-    const rateStr: string = this.attendanceRate.replace(' %', '').replace('%', '');
-    const rate: number = parseFloat(rateStr);
-
-    if (isNaN(rate)) {
-      return AttendanceStatus.UNKNOWN;
-    }
     // 可缺勤次数 < 0 → 已超上限 → 取消
     if (remainHours < 0) {
       return AttendanceStatus.INELIGIBLE;

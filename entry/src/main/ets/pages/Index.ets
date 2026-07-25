@@ -56,9 +56,9 @@ struct Index {
   private showConsent(): void {
     const doc: PrivacyDocument = [
       { text: '欢迎使用 HiXD！在使用本应用前，请您仔细阅读并同意', type: TextType.PLAIN },
-      { text: '《用户协议》', type: TextType.ACTION, onAction: () => this.openExternal('https://pollenwang6.github.io/HiXD/user-agreement.html') },
+      { text: '《用户协议》', type: TextType.ACTION, onAction: () => this.openExternal('https://hixdapp.cn/user-agreement.html') },
       { text: '和', type: TextType.PLAIN },
-      { text: '《隐私政策》', type: TextType.ACTION, onAction: () => this.openExternal('https://pollenwang6.github.io/HiXD/privacy.html') },
+      { text: '《隐私政策》', type: TextType.ACTION, onAction: () => this.openExternal('https://hixdapp.cn/privacy.html') },
       {
         text: '。\n\n本应用需要您使用学号和密码登录西电统一身份认证系统，' +
           '以获取课表、成绩等教务数据。您的账号密码仅用于校内认证，不会上传至任何第三方服务器。',

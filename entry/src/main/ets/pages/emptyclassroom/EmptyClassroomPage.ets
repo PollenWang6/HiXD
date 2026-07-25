@@ -99,11 +99,18 @@ export struct EmptyClassroomPage {
     try {
       const rawBody = await this.ehallsvc.searchEmptyClassroomsByDate(this.selectedBuilding, this.selectedDate);
       this.rooms = EmptyClassroomService.extractEmptyClassrooms(rawBody);
+      PreferenceUtil.putString('empty_classroom_last_result', rawBody); // 缓存最后成功结果，失败可回退
       this.applyFilter();
     } catch (e) {
-      this.errorMsg = '加载失败: ' + (e as Error).message;
-      this.rooms = [];
-      this.filteredRooms = [];
+      // 失败回退：保留上次成功的数据，避免空白（对齐 Flutter "保留上次缓存" 的稳定性支柱）
+      if (this.rooms.length === 0) {
+        const cached = PreferenceUtil.getString('empty_classroom_last_result');
+        if (cached.length > 0) {
+          this.rooms = EmptyClassroomService.extractEmptyClassrooms(cached);
+        }
+      }
+      this.applyFilter();
+      this.errorMsg = '加载失败，已显示缓存数据：' + (e as Error).message;
     } finally {
       this.loading = false;
     }

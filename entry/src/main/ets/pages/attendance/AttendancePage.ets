@@ -37,7 +37,63 @@ export struct AttendancePage {
   @State eligible: ClassAttendance[] = [];
   @State unknown: ClassAttendance[] = [];
 
+  // ===== 平板表格视图状态（对齐 Flutter width>800 DataTable）=====
+  @State screenWidth: number = 360;            // 实际内容宽度（vp），onAreaChange 更新
+  @State sortColumn: number = 1;              // 0课程名 1状态 2到课率 3签到 4旷课 5应签
+  @State sortAscending: boolean = true;
+  @State statusFilter: AttendanceStatus | null = null;  // null=全部
+
   private service: AttendanceService = AttendanceService.getInstance();
+
+  // 平板断点：内容宽度 > 800vp 用表格视图（与 Flutter 的 MediaQuery>800 一致）
+  private isTablet(): boolean {
+    return this.screenWidth > 800;
+  }
+
+  // 状态优先级（用于排序，数值越小越危险；对齐 Flutter _getStatusPriority）
+  private statusPriority(s: AttendanceStatus): number {
+    switch (s) {
+      case AttendanceStatus.INELIGIBLE: return 0;
+      case AttendanceStatus.WARNING: return 1;
+      case AttendanceStatus.ELIGIBLE: return 2;
+      default: return 3;
+    }
+  }
+
+  // 取数值字段（用于排序）
+  private numOf(course: ClassAttendance, col: number): number {
+    switch (col) {
+      case 2: return parseFloat(course.attendanceRate.replace('%', '')) || 0;
+      case 3: return parseInt(course.checkInCount) || 0;
+      case 4: return parseInt(course.absenceCount) || 0;
+      case 5: return parseInt(course.requiredCheckIn) || 0;
+      default: return 0;
+    }
+  }
+
+  // 应用过滤 + 排序后的课程列表（平板表格用）
+  // 用普通方法而非 getter：避免 ArkUI 组件上 getter 的边界坑；兜底 this.courses ?? [] 防 undefined
+  private getTableCourses(): ClassAttendance[] {
+    const source: ClassAttendance[] = this.courses ?? [];
+    let list: ClassAttendance[] = source;
+    if (this.statusFilter !== null) {
+      list = list.filter((c: ClassAttendance) => c.getAttendanceStatus() === this.statusFilter);
+    }
+    const col = this.sortColumn;
+    const asc = this.sortAscending;
+    const sorted = list.slice().sort((a: ClassAttendance, b: ClassAttendance) => {
+      let cmp = 0;
+      if (col === 0) {
+        cmp = a.courseName.localeCompare(b.courseName);
+      } else if (col === 1) {
+        cmp = this.statusPriority(a.getAttendanceStatus()) - this.statusPriority(b.getAttendanceStatus());
+      } else {
+        cmp = this.numOf(a, col) - this.numOf(b, col);
+      }
+      return asc ? cmp : -cmp;
+    });
+    return sorted;
+  }
 
     @Builder buildWhiteTitle(t: string) {
     Row() {
@@ -77,6 +133,7 @@ export struct AttendancePage {
       // 从本地课表计算每门课的总课数（对齐 Flutter numberOfClassComputedSignal）
       this.fillTotalTimes();
       this.updateGroups();
+      AppStorage.set('home_data_dirty', String(Date.now()));
     } catch (e) {
       this.errorMsg = '加载失败，请检查登录状态';
     } finally {
@@ -289,6 +346,140 @@ export struct AttendancePage {
     .width('100%').padding({ left: 16, right: 16, top: 2, bottom: 4 })
   }
 
+  // ===== 平板表格视图（对齐 Flutter ClassAttendanceTable）=====
+
+  // 状态筛选条（FilterChip 风格）
+  @Builder
+  StatusFilterBar() {
+    Row() {
+      Text('筛选')
+        .fontSize(14).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
+        .margin({ right: 12 })
+      Scroll() {
+        Row({ space: 8 }) {
+          this.FilterChip('全部', null)
+          this.FilterChip('取消', AttendanceStatus.INELIGIBLE)
+          this.FilterChip('危险', AttendanceStatus.WARNING)
+          this.FilterChip('正常', AttendanceStatus.ELIGIBLE)
+          this.FilterChip('未知', AttendanceStatus.UNKNOWN)
+        }
+      }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+      Blank().layoutWeight(1)
+      Text(this.getTableCourses().length + ' / ' + (this.courses?.length ?? 0) + ' 门')
+        .fontSize(12).fontColor(ThemeColors.textHint)
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+  }
+
+  // 选中态实色背景：比浅描边对比度更高，白字清晰；未知单独配蓝灰色避免与"全部"灰色混淆
+  private chipSelectedBg(target: AttendanceStatus | null): string {
+    switch (target) {
+      case AttendanceStatus.INELIGIBLE: return '#D32F2F';
+      case AttendanceStatus.WARNING: return '#E65100';
+      case AttendanceStatus.ELIGIBLE: return '#2E7D32';
+      case AttendanceStatus.UNKNOWN: return '#455A64';
+      default: return '#616161'; // 全部
+    }
+  }
+
+  // selected 与 onClick 都在 Builder 内部基于 @State statusFilter 直接计算，避免参数式闭包的不稳定
+  @Builder
+  FilterChip(label: string, target: AttendanceStatus | null) {
+    Row() {
+      Text(label)
+        .fontSize(13)
+        .fontWeight(this.statusFilter === target ? FontWeight.Bold : FontWeight.Medium)
+        .fontColor(this.statusFilter === target ? '#FFFFFF' : ThemeColors.textSecondary)
+        .backgroundColor(this.statusFilter === target ? this.chipSelectedBg(target) : ThemeColors.bgInput)
+        .borderRadius(14)
+        .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+    }
+    .onClick(() => { this.statusFilter = target; })
+  }
+
+  // 表头单元格（纯展示：不做点击排序、不显示三角箭头）
+  @Builder
+  HeaderCell(text: string, width: number) {
+    Text(text)
+      .fontSize(13).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      .height(44).width(width).padding({ left: 12, right: 8 })
+  }
+
+  // 数据单元格（固定宽度，外层横向 Scroll 实现可横滑表格）
+  @Builder
+  Cell(content: string, width: number, color?: string, align: HorizontalAlign = HorizontalAlign.Start) {
+    Text(content)
+      .fontSize(13).fontColor(color ?? ThemeColors.textPrimary)
+      .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+      .width(width).padding({ left: 12, right: 8 })
+      .textAlign(align === HorizontalAlign.End ? TextAlign.End : TextAlign.Start)
+  }
+
+  // 表格整体（表头 + 可横滑行列表；对齐 Flutter SingleChildScrollView(horizontal) DataTable）
+  @Builder
+  AttendanceTable() {
+    Scroll() {
+      Column() {
+        // 列宽定义（与 Flutter DataTable 对应）：课程名|状态|到课率|签到|旷课|应签|请假
+        Row() {
+          this.HeaderCell('课程', 220)
+          this.HeaderCell('状态', 96)
+          this.HeaderCell('到课率', 90)
+          this.HeaderCell('签到', 70)
+          this.HeaderCell('旷课', 70)
+          this.HeaderCell('应签', 70)
+          this.HeaderCell('请假', 150)
+        }
+        .width(766).height(44)
+        .backgroundColor(ThemeColors.isDark ? '#152033' : '#F2F5FA')
+        .borderRadius({ topLeft: 8, topRight: 8 })
+
+        if (this.getTableCourses().length === 0) {
+          Text('无匹配课程')
+            .fontSize(14).fontColor(ThemeColors.textHint)
+            .width(766).height(80).textAlign(TextAlign.Center)
+        } else {
+          Column() {
+            ForEach(this.getTableCourses(), (course: ClassAttendance, index: number) => {
+              Row() {
+                this.Cell(course.courseName, 220)
+                // 状态带底色 chip
+                Row() {
+                  Text(course.getStatusLabel())
+                    .fontSize(12).fontWeight(FontWeight.Bold)
+                    .fontColor(course.getStatusColor())
+                    .backgroundColor(course.getStatusColor() + '18')
+                    .borderRadius(8).padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                }.width(96).padding({ left: 12 })
+                this.Cell(course.attendanceRate, 90, course.getStatusColor())
+                this.Cell(course.checkInCount, 70)
+                // 旷课红字（对齐 Flutter 缺勤>0 红色）
+                this.Cell(
+                  course.absenceCount, 70,
+                  (parseInt(course.absenceCount) || 0) > 0 ? '#F44336' : undefined
+                )
+                this.Cell(course.requiredCheckIn, 70)
+                this.Cell('事' + course.personalLeave + ' 病' + course.sickLeave + ' 公' + course.officialLeave, 150)
+              }
+              .width(766).height(52)
+              .backgroundColor(index % 2 === 0 ? ThemeColors.bgCard : (ThemeColors.isDark ? '#101A2B' : '#FAFBFD'))
+              .borderRadius(4)
+              .onClick(() => { this.openDetail(course); })
+            }, (course: ClassAttendance, index: number) =>
+              'att_' + this.courses.indexOf(course) + '_' + course.courseName)
+          }
+          .width(766)
+        }
+      }
+      .alignSelf(ItemAlign.Start)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Auto)
+    .width('100%')
+  }
+
   @Builder
   detailSheetBuilder() {
     Column() {
@@ -352,6 +543,11 @@ export struct AttendancePage {
         Column() {
           Row() {
             Text('').layoutWeight(1)
+            if (this.isTablet()) {
+              Text('表格视图')
+                .fontSize(12).fontColor(ThemeColors.textHint)
+                .margin({ right: 8 })
+            }
             Button('刷新')
               .fontSize(12).height(30)
               .backgroundColor(this.accentColor + '18').fontColor(this.accentColor)
@@ -377,6 +573,18 @@ export struct AttendancePage {
             Column() {
               Text('暂无课程数据').fontSize(15).fontColor(ThemeColors.textHint)
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          } else if (this.isTablet()) {
+            // ===== 平板：表格视图（对齐 Flutter DataTable）=====
+            Scroll() {
+              Column() {
+                this.StatusFilterBar()
+                this.AttendanceTable()
+              }
+              .padding({ left: 16, right: 16, top: 4, bottom: 16 })
+            }
+            .scrollable(ScrollDirection.Vertical)
+            .layoutWeight(1)
+            .align(Alignment.TopStart)
           } else {
             List({ space: 12 }) {
               if (this.ineligible.length > 0) {
@@ -386,7 +594,7 @@ export struct AttendancePage {
                 ListItem() { this.GroupColorBar('#F44336') }
                 ForEach(this.ineligible, (item: ClassAttendance, index: number) => {
                   ListItem() { this.CourseCard(item) }
-                }, (item: ClassAttendance, index: number) => 'i_' + String(index))
+                }, (item: ClassAttendance) => 'i_' + this.courses.indexOf(item) + '_' + item.courseName)
               }
               if (this.warning.length > 0) {
                 ListItem() {
@@ -395,7 +603,7 @@ export struct AttendancePage {
                 ListItem() { this.GroupColorBar('#FF9800') }
                 ForEach(this.warning, (item: ClassAttendance, index: number) => {
                   ListItem() { this.CourseCard(item) }
-                }, (item: ClassAttendance, index: number) => 'w_' + String(index))
+                }, (item: ClassAttendance) => 'w_' + this.courses.indexOf(item) + '_' + item.courseName)
               }
               if (this.eligible.length > 0) {
                 ListItem() {
@@ -404,7 +612,7 @@ export struct AttendancePage {
                 ListItem() { this.GroupColorBar('#4CAF50') }
                 ForEach(this.eligible, (item: ClassAttendance, index: number) => {
                   ListItem() { this.CourseCard(item) }
-                }, (item: ClassAttendance, index: number) => 'e_' + String(index))
+                }, (item: ClassAttendance) => 'e_' + this.courses.indexOf(item) + '_' + item.courseName)
               }
               if (this.unknown.length > 0) {
                 ListItem() {
@@ -413,7 +621,7 @@ export struct AttendancePage {
                 ListItem() { this.GroupColorBar('#9E9E9E') }
                 ForEach(this.unknown, (item: ClassAttendance, index: number) => {
                   ListItem() { this.CourseCard(item) }
-                }, (item: ClassAttendance, index: number) => 'u_' + String(index))
+                }, (item: ClassAttendance) => 'u_' + this.courses.indexOf(item) + '_' + item.courseName)
               }
               ListItem().height(60)
             }
@@ -422,21 +630,43 @@ export struct AttendancePage {
           }
         }
         .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
+        .onAreaChange((oldVal: Area, newVal: Area) => {
+          const w = (newVal.width as number) || 0;
+          if (w > 0) {
+            this.screenWidth = w;
+          }
+        })
 
         if (this.showDetail) {
-          // 背景遮罩
-          Column()
-            .width('100%').height('100%')
-            .backgroundColor('#4D000000')
+          if (this.isTablet()) {
+            // 平板：右侧详情分栏（对齐 Flutter BothSideSheet）
+            Column()
+              .width('100%').height('100%')
+              .backgroundColor('#4D000000')
+              .opacity(this.detailMaskOpacity)
+              .onClick(() => { this.closeDetail(); })
+            Column() {
+              this.detailSheetBuilder()
+            }
+            .width('42%').height('100%')
+            .position({ x: '58%', y: 0 })
+            .backgroundColor(ThemeColors.bgPage)
+            .border({ width: { left: 1 }, color: ThemeColors.border })
             .opacity(this.detailMaskOpacity)
-            .onClick(() => { this.closeDetail(); })
-          // 详情卡片
-          Column() {
-            this.detailSheetBuilder()
+          } else {
+            // 手机：底部弹出 sheet（保持原交互）
+            Column()
+              .width('100%').height('100%')
+              .backgroundColor('#4D000000')
+              .opacity(this.detailMaskOpacity)
+              .onClick(() => { this.closeDetail(); })
+            Column() {
+              this.detailSheetBuilder()
+            }
+            .width('100%').height('70%')
+            .position({ x: 0, y: '30%' })
+            .translate({ y: this.detailSheetOffset + '%' })
           }
-          .width('100%').height('70%')
-          .position({ x: 0, y: '30%' })
-          .translate({ y: this.detailSheetOffset + '%' })
         }
       }
     }

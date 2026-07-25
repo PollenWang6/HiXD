@@ -4,8 +4,8 @@ import { bundleManager } from '@kit.AbilityKit';
 
 const TAG = 'VersionService';
 
-// GitHub raw URL — 首次使用时请替换为你的仓库地址
-const VERSION_JSON_URL = 'https://raw.githubusercontent.com/PollenWang6/HiXD/main/version.json';
+// 自建已备案域名（hixdapp.cn）下的 version.json
+const VERSION_JSON_URL = 'https://hixdapp.cn/version.json';
 
 export interface VersionInfo {
   version: string;

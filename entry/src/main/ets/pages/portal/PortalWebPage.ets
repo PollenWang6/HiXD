@@ -7,6 +7,7 @@ import { ThemeColors } from '../../utils/ThemeColors';
 import { common } from '@kit.AbilityKit';
 import { CasLoginService } from '../../services/CasLoginService';
 import { HttpUtil } from '../../utils/HttpUtil';
+import { ToastUtil } from '../../utils/ToastUtil';
 const TAG = 'PortalWebPage';
 
 // 需要拉起外部 App 的自定义 scheme（微信支付、支付宝等）
@@ -43,6 +44,7 @@ export struct PortalWebPage {
   @Prop useIncognito: boolean = false;  // 隐私模式，cookie 不持久化
   @State uaMode: number = UA_AUTO;  // 当前 UA 模式
   @State needCxLogin: boolean = false;  // 超星需要先登录
+  @State canForward: boolean = false;  // 菜单里是否可前进（避免在菜单子树里直接调 controller 崩 17100001）
 
   private webController: web_webview.WebviewController = new web_webview.WebviewController();
   private context!: common.UIAbilityContext;
@@ -72,39 +74,78 @@ export struct PortalWebPage {
     }
   }
 
+  // 诊断：打印 HttpUtil(原生侧) 与 WebView 的 ids 域是否含 CASTGC，确认注入链路
+  private diagnoseCasSync(tag: string): void {
+    try {
+      const httpIds: string = HttpUtil.getInstance().getAllCookies('ids.xidian.edu.cn');
+      const wvIds: string = web_webview.WebCookieManager.fetchCookieSync('https://ids.xidian.edu.cn');
+      console.info(`[PortalWebPage][${tag}] HttpUtil CASTGC=${httpIds.toUpperCase().includes('CASTGC')} WebView CASTGC=${wvIds.toUpperCase().includes('CASTGC')} len=${wvIds.length}`);
+    } catch (e) {
+      console.error(`[PortalWebPage][${tag}] diagnoseCasSync failed: ${e}`);
+    }
+  }
+
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
-    this.context = getContext(this) as common.UIAbilityContext;
-    if (this.useWeChatUA) {
-      // 移动门户：清除旧脏 cookie + 只同步 CASTGC，避免 route/JSESSIONID/MOD_AUTH_CAS
-      // 污染 xxcapp OpenResty 路由 → 子页面显示随机 hash（如 250bb948bd643d8b18f4c0fdd72a059d）
-      CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
-      const t0 = Date.now();
-      const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
-      await CasLoginService.getInstance().syncCasCookieOnly();
-    } else if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('ignypt') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
-      const t0 = Date.now();
-      const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
-      await CasLoginService.getInstance().syncCookiesToWebView();
-      // 打通主页原生校园网已登录的 zfw 会话到 WebView：
-      // 主页 SchoolNetPage 经 SchoolnetService 用 HttpUtil 单例登录 zfw，会话 cookie 只留在
-      // HttpUtil，WebView 拿不到；且关隐私模式后 WebView 残留脏 cookie → /site/sso 404。
-      // 此处把 HttpUtil 里已登录的 zfw 会话注入 WebView，并先清掉脏 cookie。
-      this.syncZfwSessionToWebView();
-    } else if (this.url.includes('libspace') || this.url.includes('ignypt')) {
-      // libspace/ignypt 对 session cookie 敏感，只同步 CASTGC
-      CasLoginService.getInstance().clearWebViewCookiesForDomain(
-        this.url.includes('libspace') ? 'libspace.xidian.edu.cn' : 'ignypt.xidian.edu.cn'
-      );
-      await CasLoginService.getInstance().checkAndAutoLogin();
-      await CasLoginService.getInstance().syncCasCookieOnly();
-    } else {
+    try {
+      this.context = getContext(this) as common.UIAbilityContext;
+      if (this.useWeChatUA) {
+        // 移动门户：清除旧脏 cookie + 只同步 CASTGC，避免 route/JSESSIONID/MOD_AUTH_CAS
+        // 污染 xxcapp OpenResty 路由 → 子页面显示随机 hash（如 250bb948bd643d8b18f4c0fdd72a059d）
+        CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
+        const t0 = Date.now();
+        const loginOk: boolean = await CasLoginService.getInstance().checkAndAutoLogin();
+        await CasLoginService.getInstance().syncCasCookieOnly();
+      } else if (!this.url.includes('zfw') && !this.url.includes('libspace') && !this.url.includes('ignypt') && !this.url.includes('nav.xdruisi') && !this.url.includes('edu.icoremail.net')) {
+        const t0 = Date.now();
+        await CasLoginService.getInstance().checkAndAutoLogin();
+        if (this.url.includes('order.xidian.edu.cn')) {
+          // 订水系统：经 xxcapp OAuth 的 CAS 单点登录页面（已用本机 Edge 实地验证重定向链
+          // order/thirdoauth/oauth2Xidian → xxcapp cas-login → ids CAS 登录页）。与 ignypt 同理，
+          // 需 xxcapp 已初始化的干净 session：清 order/xxcapp/ignypt 脏 cookie → 预热注入 xxcapp
+          // 干净 session（injectXxcappSession，其内会走 order OAuth 触发 xxcapp 登录）→ 补 CASTGC。
+          CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
+          CasLoginService.getInstance().clearWebViewCookiesForDomain('order.xidian.edu.cn');
+          CasLoginService.getInstance().clearWebViewCookiesForDomain('ignypt.xidian.edu.cn');
+          await CasLoginService.getInstance().injectXxcappSession();
+          await CasLoginService.getInstance().syncCasCookieOnly();
+          this.diagnoseCasSync('order');
+        } else {
+          await CasLoginService.getInstance().syncCookiesToWebView();
+          // 打通主页原生校园网已登录的 zfw 会话到 WebView：
+          // 主页 SchoolNetPage 经 SchoolnetService 用 HttpUtil 单例登录 zfw，会话 cookie 只留在
+          // HttpUtil，WebView 拿不到；且关隐私模式后 WebView 残留脏 cookie → /site/sso 404。
+          // 此处把 HttpUtil 里已登录的 zfw 会话注入 WebView，并先清掉脏 cookie。
+          this.syncZfwSessionToWebView();
+        }
+      } else if (this.url.includes('libspace')) {
+        // libspace 对 session cookie 敏感，只同步 CASTGC
+        CasLoginService.getInstance().clearWebViewCookiesForDomain('libspace.xidian.edu.cn');
+        await CasLoginService.getInstance().checkAndAutoLogin();
+        await CasLoginService.getInstance().syncCasCookieOnly();
+      } else if (this.url.includes('ignypt')) {
+        // ignypt 经 xxcapp OAuth 跨域跳转。根据 FaqPage 历史提示「先进入订水系统完成初始化再进入」
+        // 可知 ignypt 链要求 xxcapp 存在一个已初始化的干净 session，而非清掉后让 WebView 重协商
+        // （重协商的 xxcapp route 与 ignypt 验证链不一致 → 子页随机 hash/抽风）。
+        // 故：清 xxcapp+ignypt 脏 cookie → 预热 xxcapp OAuth 建立干净 session 并注入 WebView
+        // （injectXxcappSession）→ 补注入 CASTGC，让 WebView 直接带干净 xxcapp session + CASTGC 走链。
+        CasLoginService.getInstance().clearWebViewCookiesForDomain('xxcapp.xidian.edu.cn');
+        CasLoginService.getInstance().clearWebViewCookiesForDomain('ignypt.xidian.edu.cn');
+        await CasLoginService.getInstance().checkAndAutoLogin();
+        await CasLoginService.getInstance().injectXxcappSession();
+        await CasLoginService.getInstance().syncCasCookieOnly();
+        this.diagnoseCasSync('ignypt');
+      } else {
+      }
+    } catch (e) {
+      // 任意同步 / cookie 同步异常（如门禁拦截、CAS 服务不可达、WebView cookie 接口异常）
+      // 都不应阻断 WebView 加载，否则会卡在永久转圈 / 白屏。降级为直接加载目标 URL，
+      // 由页面自身登录流程兜底（门禁页 / 登录页会正常显示，而非白屏）。
+      console.error('PortalWebPage cookie 同步失败，降级直接加载:', e);
+    } finally {
+      this.isLoading = false;
+      this.webUrl = this.url;  // 无论成功失败都触发 WebView 加载，避免白屏/永久转圈
     }
-    // ===== 诊断：看 WebView CookieJar 里 xxcapp 实际有什么 =====
-    const wcmDiag = web_webview.WebCookieManager;
-    for (const d of ['xxcapp.xidian.edu.cn', 'ids.xidian.edu.cn']) {
-    }
-    this.webUrl = this.url;  // cookie 就绪，触发 WebView 加载
   }
 
   build() {
@@ -138,6 +179,13 @@ export struct PortalWebPage {
               .onPageEnd((event) => {
                 this.isLoading = false;
                 const pageUrl: string = event ? event.url : this.url;
+                // 诊断：落到 CAS 登录页 = SSO 失败（CASTGC 未注入或已失效）
+                if (pageUrl.includes('ids.xidian.edu.cn/authserver/login')) {
+                  console.error('[PortalWebPage] SSO 失败：WebView 落到 CAS 登录页，CASTGC 未注入或已失效，url=' + pageUrl);
+                  // 水电/订水/移动门户等均借用 App 的西电 CAS 登录态，无独立账号。
+                  // 落 CAS 页即说明 App 登录态已失效，明确提示用户去重新登录 App，避免对着登录页茫然。
+                  ToastUtil.show('西电登录态已失效，请到「我的」重新登录 App 后再访问');
+                }
                 // 超星登录成功后跳转到目标 URL
                 if (this.needCxLogin && !pageUrl.includes('passport2.chaoxing.com/login') && !pageUrl.includes('passport2.chaoxing.com/wlogin')) {
                   this.needCxLogin = false;
@@ -149,6 +197,12 @@ export struct PortalWebPage {
                   this.webController.setCustomUserAgent('');
                 } else if (!this.useWeChatUA) {
                   this.applyUA();  // 页面跳转后重新应用手动选择的 UA
+                }
+                // 同步前进可用性，供右上角菜单读取（菜单子树里不能直接调 controller）
+                try {
+                  this.canForward = this.webController.accessForward();
+                } catch (_e) {
+                  this.canForward = false;
                 }
               })
               .onOverrideUrlLoading((req) => {
@@ -317,8 +371,10 @@ export struct PortalWebPage {
   @Builder WebviewMenu() {
     Menu() {
       MenuItem({ content: '前进', startIcon: $r('app.media.forth') })
-        .enabled(this.webController.accessForward())
-        .onClick(() => { this.webController.forward(); })
+        .enabled(this.canForward)
+        .onClick(() => {
+          try { this.webController.forward(); } catch (_e) { }
+        })
       MenuItem({ content: '切换 UA', builder: this.changeUAMenu(),
         startIcon: $r('app.media.ic_public_rotate_switch'), endIcon: $r('app.media.ic_public_arrow_right') })
         .enabled(!this.useWeChatUA)

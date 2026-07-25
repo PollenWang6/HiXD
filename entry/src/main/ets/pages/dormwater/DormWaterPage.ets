@@ -98,7 +98,7 @@ export struct DormWaterPage {
     try {
       this.devices = await this.svc.getDeviceList();
     } catch (e) {
-      const msg: string = (e as Error).message;
+      const msg: string = (e instanceof Error) ? e.message : String(e);
       if (msg.indexOf('过期') >= 0 || msg.indexOf('登录') >= 0) {
         this.svc.logout();
         this.loggedIn = false;
