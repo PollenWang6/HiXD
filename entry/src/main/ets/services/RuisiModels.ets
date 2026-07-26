@@ -272,6 +272,24 @@ export class FavoriteResult {
   message: string = '';
 }
 
+// ==================== 举报 ====================
+
+/** 举报结果 */
+export class ReportResult {
+  success: boolean = false;
+  message: string = '';
+}
+
+/**
+ * 举报表单（动态解析自真实举报页 misc.php?mod=report&inajax=1）。
+ * 睿思举报无理由分类下拉，仅有一个 JS 生成的确认项（var reasons=['...']）+
+ * 一个自由描述文本框（name=message）。reasons 即该确认项文案数组。
+ */
+export class ReportForm {
+  formhash: string = '';
+  reasons: string[] = [];
+}
+
 export class UploadResult {
   success: boolean = false;
   aid: string = '';   // Discuz 附件 id（随帖/回复提交时引用）

@@ -142,7 +142,7 @@ export struct AboutPage {
                 Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
                 Text('校园助手').fontSize(13).fontColor('#FFFFFF').opacity(0.85).margin({ left: 8 })
               }.width('100%').alignItems(VerticalAlign.Center)
-              Text('西电 · 一站式校园服务').fontSize(12).fontColor('#FFFFFF')
+              Text('一站式校园服务').fontSize(12).fontColor('#FFFFFF')
                 .opacity(0.8).margin({ top: 4 })
               Row() {
                 Text('v' + (this.currentVersion || '?.?.?')).fontSize(11).fontColor('#FFFFFF')

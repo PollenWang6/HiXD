@@ -74,17 +74,6 @@ export struct PortalWebPage {
     }
   }
 
-  // 诊断：打印 HttpUtil(原生侧) 与 WebView 的 ids 域是否含 CASTGC，确认注入链路
-  private diagnoseCasSync(tag: string): void {
-    try {
-      const httpIds: string = HttpUtil.getInstance().getAllCookies('ids.xidian.edu.cn');
-      const wvIds: string = web_webview.WebCookieManager.fetchCookieSync('https://ids.xidian.edu.cn');
-      console.info(`[PortalWebPage][${tag}] HttpUtil CASTGC=${httpIds.toUpperCase().includes('CASTGC')} WebView CASTGC=${wvIds.toUpperCase().includes('CASTGC')} len=${wvIds.length}`);
-    } catch (e) {
-      console.error(`[PortalWebPage][${tag}] diagnoseCasSync failed: ${e}`);
-    }
-  }
-
   // 进入门户页面前刷新 CAS session + 同步 cookie，完成后再加载 WebView
   async aboutToAppear(): Promise<void> {
     try {
@@ -109,7 +98,6 @@ export struct PortalWebPage {
           CasLoginService.getInstance().clearWebViewCookiesForDomain('ignypt.xidian.edu.cn');
           await CasLoginService.getInstance().injectXxcappSession();
           await CasLoginService.getInstance().syncCasCookieOnly();
-          this.diagnoseCasSync('order');
         } else {
           await CasLoginService.getInstance().syncCookiesToWebView();
           // 打通主页原生校园网已登录的 zfw 会话到 WebView：
@@ -134,7 +122,6 @@ export struct PortalWebPage {
         await CasLoginService.getInstance().checkAndAutoLogin();
         await CasLoginService.getInstance().injectXxcappSession();
         await CasLoginService.getInstance().syncCasCookieOnly();
-        this.diagnoseCasSync('ignypt');
       } else {
       }
     } catch (e) {
@@ -179,7 +166,7 @@ export struct PortalWebPage {
               .onPageEnd((event) => {
                 this.isLoading = false;
                 const pageUrl: string = event ? event.url : this.url;
-                // 诊断：落到 CAS 登录页 = SSO 失败（CASTGC 未注入或已失效）
+                // 落到 CAS 登录页 = SSO 失败（CASTGC 未注入或已失效）
                 if (pageUrl.includes('ids.xidian.edu.cn/authserver/login')) {
                   console.error('[PortalWebPage] SSO 失败：WebView 落到 CAS 登录页，CASTGC 未注入或已失效，url=' + pageUrl);
                   // 水电/订水/移动门户等均借用 App 的西电 CAS 登录态，无独立账号。
@@ -428,8 +415,13 @@ export struct PortalWebPage {
 
   setUA(mode: number): void {
     this.uaMode = mode;
-    this.applyUA();
-    this.webController.refresh();
+    // 在「切换 UA」子菜单的 onClick 里调用，上下文与 Web 组件解耦；
+    // 包裹 try/catch 避免 WebviewController 未关联组件时报 17100001 被系统强杀（同类于「前进」菜单项）。
+    try {
+      this.applyUA();
+      this.webController.refresh();
+    } catch (_e) {
+    }
   }
 
   applyUA(): void {

@@ -130,6 +130,15 @@ export struct RuisiTopicDetailPage {
   replyController: TextAreaController = new TextAreaController();
   replySelStart: number = 0;
 
+  // 举报：自管理底部弹层（规避 bindSheet 关闭后无法再次打开的问题），用 @State + if 渲染
+  @State showReportSheet: boolean = false;
+  @State reportReasons: string[] = [];        // 论坛动态理由（睿思为单个确认项文案）
+  @State reportReasonIndex: number = 0;      // 选中的理由下标
+  @State reportMessage: string = '';
+  @State reportTargetPid: number = 0;   // 举报目标楼层 pid（恒 >0，对应 Discuz 帖子回复 rid）
+  @State reportFormhash: string = '';
+  @State reportSubmitting: boolean = false;
+
   // 软键盘避让：键盘弹起时把回复栏整体抬到键盘上方（手动控制，避免系统避让与手动逻辑"跳两次"）
   @State keyboardOffset: number = 0;            // 回复栏底部间距(vp)，等于键盘高度
   private keyboardListener: (height: number) => void = () => {};
@@ -348,6 +357,183 @@ export struct RuisiTopicDetailPage {
     .padding({ top: 24, bottom: 24 })
   }
 
+  // 打开举报面板：按真实协议动态拉取举报表单（rtype/rid/fid/tid）
+  async openReport(targetPid: number): Promise<void> {
+    if (!this.detail) return;
+    this.reportTargetPid = targetPid;
+    this.reportReasons = [];
+    this.reportReasonIndex = 0;
+    this.reportMessage = '';
+    this.reportSubmitting = false;
+    this.showReportSheet = true;
+    try {
+      const api = RuisiApiService.getInstance();
+      const rtype = 'post';
+      const rid = targetPid;
+      const form = await api.getReportForm(rtype, rid, this.tid, this.detail.fid);
+      this.reportReasons = form.reasons;
+      this.reportFormhash = form.formhash;
+      if (this.reportReasons.length > 0) this.reportReasonIndex = 0;
+    } catch (e) {
+      // 不阻塞面板：理由为空时提交仍可带空 report_select
+    }
+  }
+
+  // 关闭举报面板并重置状态（自管理弹层，确保可重复打开）
+  closeReport(): void {
+    this.showReportSheet = false;
+    this.reportReasons = [];
+    this.reportReasonIndex = 0;
+    this.reportMessage = '';
+    this.reportTargetPid = 0;
+    this.reportFormhash = '';
+    this.reportSubmitting = false;
+  }
+
+  // 提交举报（真实协议）
+  async doSubmitReport(): Promise<void> {
+    const rtype = 'post';
+    const rid = this.reportTargetPid;
+    const reason = this.reportReasons.length > 0
+      ? this.reportReasons[this.reportReasonIndex]
+      : '';
+    if (this.reportReasons.length > 0 && (this.reportReasonIndex < 0 || this.reportReasonIndex >= this.reportReasons.length)) {
+      ToastUtil.show('请选择举报理由');
+      return;
+    }
+    this.reportSubmitting = true;
+    try {
+      const detail = this.detail;
+      if (!detail) {
+        ToastUtil.show('页面数据丢失，请重试');
+        return;
+      }
+      const api = RuisiApiService.getInstance();
+      const r = await api.submitReport(
+        rtype,
+        rid,
+        this.tid,
+        detail.fid,
+        reason,
+        this.reportMessage,
+        this.reportFormhash
+      );
+      ToastUtil.show(r.message);
+      if (r.success) this.closeReport();
+    } finally {
+      this.reportSubmitting = false;
+    }
+  }
+
+  // 举报面板（自管理底部弹层，规避 bindSheet 关闭后无法再次打开的问题）
+  @Builder
+  reportOverlayBuilder() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      // 半透明遮罩，点按关闭
+      Column()
+        .width('100%').height('100%')
+        .backgroundColor('rgba(0,0,0,0.45)')
+        .onClick(() => { this.closeReport(); })
+
+      // 底部面板
+      Column() {
+        // 标题栏 + 关闭
+        Row() {
+          Text('举报该楼层')
+            .fontSize(17).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+            .layoutWeight(1)
+          Image($r('app.media.close'))
+            .width(22).height(22).fillColor(ThemeColors.textSecondary).draggable(false)
+            .onClick(() => { this.closeReport(); })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 12, top: 16, bottom: 12 })
+
+        // 内容滚动区
+        Scroll() {
+          Column() {
+            // 论坛确认项 / 理由（睿思为单条确认文案；多理由时可选）
+            if (this.reportReasons.length === 1) {
+              Row() {
+                Text('⚠️').fontSize(14)
+                Text(this.reportReasons[0])
+                  .fontSize(14).fontColor(ThemeColors.textPrimary)
+                  .layoutWeight(1).margin({ left: 6 })
+              }
+              .width('100%')
+              .padding(12)
+              .backgroundColor(ThemeColors.bgInput)
+              .borderRadius(8)
+              .margin({ bottom: 12 })
+            } else if (this.reportReasons.length > 1) {
+              Column() {
+                ForEach(this.reportReasons, (r: string, i: number) => {
+                  Row() {
+                    Text(r)
+                      .fontSize(14).fontColor(ThemeColors.textPrimary)
+                      .layoutWeight(1)
+                    if (this.reportReasonIndex === i) {
+                      Text('✓').fontSize(16).fontColor(this.accentColor)
+                    }
+                  }
+                  .width('100%')
+                  .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+                  .backgroundColor(this.reportReasonIndex === i ? ThemeColors.bgInput : Color.Transparent)
+                  .borderRadius(8)
+                  .onClick(() => { this.reportReasonIndex = i; })
+                }, (r: string) => 'rep_' + r)
+              }
+              .margin({ bottom: 12 })
+            } else {
+              Text('提交后由版主核实处理，感谢你的反馈')
+                .fontSize(13).fontColor(ThemeColors.textSecondary)
+                .margin({ bottom: 12 })
+            }
+
+            Text('举报说明（选填）')
+              .fontSize(13).fontColor(ThemeColors.textSecondary)
+              .alignSelf(ItemAlign.Start)
+              .margin({ bottom: 6 })
+            TextArea({ text: this.reportMessage, placeholder: '请描述具体违规情况' })
+              .fontSize(14).fontColor(ThemeColors.textPrimary)
+              .backgroundColor(ThemeColors.bgInput)
+              .borderRadius(8).height(84)
+              .onChange((v: string) => { this.reportMessage = v; })
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 4 })
+        }
+        .constraintSize({ maxHeight: '55%' })
+
+        // 按钮行
+        Row() {
+          Button('取消')
+            .layoutWeight(1).height(44).borderRadius(22)
+            .backgroundColor(ThemeColors.bgInput)
+            .fontColor(ThemeColors.textPrimary)
+            .margin({ right: 8 })
+            .onClick(() => { this.closeReport(); })
+          Button(this.reportSubmitting ? '提交中...' : '提交举报')
+            .layoutWeight(1).height(44).borderRadius(22)
+            .backgroundColor(this.accentColor)
+            .fontColor(this.accentTextColor())
+            .enabled(!this.reportSubmitting)
+            .onClick(() => { this.doSubmitReport(); })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 12, bottom: 16 })
+      }
+      .width('100%')
+      .backgroundColor(ThemeColors.bgCard)
+      .borderRadius({ topLeft: 16, topRight: 16 })
+      .constraintSize({ maxHeight: '88%' })
+    }
+    .width('100%').height('100%')
+    .position({ top: 0, left: 0 })
+    .zIndex(300)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
   // 从图片 URL 推断相册写入时用的扩展名（jpg/png/gif/bmp/webp/heic）
   private imageExtFromUrl(url: string): string {
     const seg: string = url.split('?')[0];
@@ -561,6 +747,18 @@ export struct RuisiTopicDetailPage {
           this.replyText = '回复 #' + post.floor + ' ' + post.author + '\n';
           this.showReplyInput = true;
         })
+        // 举报该楼（对标论坛每楼「使用道具 / 举报」）
+        Row() {
+          Text('⚠️').fontSize(12)
+          Text('举报')
+            .fontSize(13).fontColor('#E57373')
+            .margin({ left: 2 })
+        }
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .borderRadius(6)
+        .backgroundColor(ThemeColors.bgInput)
+        .margin({ left: 8 })
+        .onClick(() => { this.openReport(post.pid); })
       }
       .width('100%')
       .margin({ top: 0 })
@@ -807,7 +1005,7 @@ export struct RuisiTopicDetailPage {
                 } else if (this.detail && this.page >= this.detail.totalPages && this.detail.posts.length > 0) {
                   ListItem() {
                     Row() { Text('—— 已经到底啦 ——').fontSize(12).fontColor(ThemeColors.textHint) }
-                      .width('100%').height(44).justifyContent(FlexAlign.Center)
+                      .width('100%').height(140).justifyContent(FlexAlign.Center)
                   }
                 }
               }
@@ -1060,6 +1258,10 @@ export struct RuisiTopicDetailPage {
         .position({ top: 0, left: 0 })
         .zIndex(100)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+      }
+      // 举报浮层（自管理，状态由 showReportSheet 控制，可重复打开/关闭）
+      if (this.showReportSheet) {
+        this.reportOverlayBuilder()
       }
       }
       .width('100%').height('100%')

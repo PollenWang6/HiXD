@@ -11,6 +11,7 @@ import {
   PmConversation, ChatMessage, ChatResult, ChatDetailResult, FriendResult,
   PostPageMeta, SearchResult, RuisiConstants, RuisiFileAttachment,
   LoginResult, ReplyResult, NewPostResult, FavoriteResult, UploadResult,
+  ReportResult, ReportForm,
   LoginPageInfo, TopicListResult, CatIndex, ForumTypeOption, RuisiAttachment,
   Smiley
 } from './RuisiModels';
@@ -1665,6 +1666,114 @@ export class RuisiApiService {
       const r3 = new FavoriteResult();
       r3.message = '取消收藏失败';
       return r3;
+    }
+  }
+
+  // ==================== 举报 ====================
+
+  /**
+   * 获取举报表单（真实协议，已实抓确认）。
+   * GET misc.php?mod=report&rtype={rtype}&rid={rid}&tid={tid}&fid={fid}&inajax=1&handlekey=report
+   * 解析：
+   *  - formhash（隐藏域 name="formhash"）
+   *  - 举报理由（JS：var reasons = ['...']，睿思仅一个确认项，非分类下拉）
+   * @param rtype 'post' 举报某楼 | 'thread' 举报整帖
+   * @param rid   帖子/楼层 id（post→pid，thread→tid）
+   * @param tid   帖子 id
+   * @param fid   版块 id
+   */
+  async getReportForm(rtype: string, rid: number, tid: number, fid: number): Promise<ReportForm> {
+    const result = new ReportForm();
+    const url = this.baseUrl(
+      `misc.php?mod=report&rtype=${rtype}&rid=${rid}&tid=${tid}&fid=${fid}&inajax=1&handlekey=report`
+    );
+    try {
+      const resp = await this.http.get(url);
+      if (!resp.isOk || resp.body.length === 0) return result;
+      const body = resp.body;
+      // formhash 隐藏域
+      const fhMatch = body.match(/name=["']formhash["'][^>]*value=["']([a-f0-9]+)["']/i);
+      if (fhMatch) {
+        result.formhash = fhMatch[1];
+        this.http.setFormhash(fhMatch[1]);
+      }
+      // 举报理由：JS 数组 var reasons = ['...']（睿思当前仅一项确认文案）
+      const rjMatch = body.match(/var\s+reasons\s*=\s*\[(.*?)\]/s);
+      if (rjMatch) {
+        const arr = rjMatch[1];
+        const itemRe = /'([^']*)'|"([^"]*)"/g;
+        let im: RegExpExecArray | null;
+        while ((im = itemRe.exec(arr)) !== null) {
+          const t = (im[1] || im[2] || '').trim();
+          if (t.length > 0) result.reasons.push(t);
+        }
+      }
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'getReportForm failed: ' + JSON.stringify(e));
+    }
+    return result;
+  }
+
+  /**
+   * 提交举报（真实协议，已实抓确认）。
+   * POST misc.php?mod=report，表单字段与网页完全一致：
+   *   formhash / referer / reportsubmit=true / rtype / rid / fid / url='' /
+   *   inajax=1 / handlekey=report / report_select=<确认项文案> / message=<描述>
+   * @param rtype    'post' | 'thread'
+   * @param rid      帖子/楼层 id
+   * @param tid      帖子 id
+   * @param fid      版块 id
+   * @param reason   举报理由值（report_select，来自 getReportForm 的 reasons[0]）
+   * @param message  自由描述（对应网页 textarea name=message）
+   * @param formhash 建议传 getReportForm 返回的新鲜值
+   */
+  async submitReport(
+    rtype: string,
+    rid: number,
+    tid: number,
+    fid: number,
+    reason: string,
+    message: string,
+    formhash?: string
+  ): Promise<ReportResult> {
+    const fh = formhash && formhash.length > 0 ? formhash : this.http.getFormhash();
+    const url = this.baseUrl('misc.php?mod=report');
+    const data: Record<string, string> = {
+      'formhash': fh,
+      'referer': this.baseUrl(`forum.php?mod=viewthread&tid=${tid}`),
+      'reportsubmit': 'true',
+      'rtype': rtype,
+      'rid': String(rid),
+      'fid': String(fid),
+      'url': '',
+      'inajax': '1',
+      'handlekey': 'report',
+      'report_select': reason && reason.length > 0 ? reason : '',
+      'message': message && message.length > 0 ? message : '',
+    };
+    const result = new ReportResult();
+    try {
+      const resp = await this.http.post(url, data, {
+        'Referer': this.baseUrl(`forum.php?mod=viewthread&tid=${tid}`),
+        'X-Requested-With': 'XMLHttpRequest',
+      });
+      if (resp.isOk && resp.body.length > 0) {
+        const body = resp.body;
+        if (body.indexOf('举报成功') >= 0 || body.indexOf('succeedhandle') >= 0) {
+          result.success = true;
+          result.message = '举报已提交，感谢反馈';
+          return result;
+        }
+        const errMatch = body.match(/errorhandle_report\('([^']*)'/i)
+          || body.match(/<p[^>]*>([^<]+)<\/p>/i);
+        result.message = errMatch ? errMatch[1].trim() : '举报失败';
+        return result;
+      }
+      result.message = '网络错误';
+      return result;
+    } catch (e) {
+      result.message = '举报失败: ' + String(e);
+      return result;
     }
   }
 

@@ -337,10 +337,9 @@ export class ClassService {
           const rXq: string = String(r['XQ'] ?? '');
           if (rXn === xn && rXq === xq) {
             const date: string = String(r['XQKSRQ'] ?? '');
-            if (date.length >= 10) {
-              console.info('[XQKSRQ_DIAG] matched row ' + i + ' -> ' + date);
-              return date;
-            }
+          if (date.length >= 10) {
+            return date;
+          }
           }
         }
         // 回退：取首行

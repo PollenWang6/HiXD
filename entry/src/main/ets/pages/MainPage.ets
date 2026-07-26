@@ -552,7 +552,7 @@ struct MainPage {
     // 故用轻量轮询 ct_updated：tryRefreshPreview 仅在 ct_updated 变化时重载预览+快照，无变化则空转（字符串比较）。
     this._lastCtUpdated = AppStorage.get('ct_updated') as string || '';
     this._lastHomeDirty = AppStorage.get('home_data_dirty') as string || '';
-    this._ctPollId = setInterval(() => { this.tryRefreshPreview(); this.tryRefreshHomeData(); }, 1000);
+    this._ctPollId = setInterval(() => { this.tryRefreshPreview(); this.tryRefreshHomeData(); }, 2000);
     this.initCacheDirs();
     // 后台检查版本更新（不阻塞 UI）
     this.checkVersionUpdate();
