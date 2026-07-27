@@ -6,8 +6,8 @@
 
 一款为西安电子科技大学学生打造的鸿蒙原生校园工具，集成课表、成绩、考试、实验、空教室、图书馆、校园卡、校园网、电费查询等常用功能于一体。
 
-[![Version](https://img.shields.io/badge/version-1.4.1-blue)](https://github.com/PollenWang6/HiXD)
-[![HarmonyOS](https://img.shields.io/badge/HarmonyOS%207%20(API%2026)-orange)](https://developer.huawei.com/consumer/cn/harmonyos/)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue)](https://github.com/PollenWang6/HiXD)
+[![HarmonyOS](https://img.shields.io/badge/HarmonyOS%20NEXT%20(API%2023)-orange)](https://developer.huawei.com/consumer/cn/harmonyos/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
@@ -35,6 +35,7 @@
 | ⚡ 电费查询 | 宿舍电费余额和用量查询 |
 | 📧 学生邮箱 | icoremail 邮箱入口 |
 | 🎨 主题定制 | 预设主题色 + 自定义色号，深色/浅色独立配色 |
+| 💬 睿思论坛 | 独立论坛账号登录，浏览 / 发帖 / 回帖，帖子图片一键存相册 |
 
 ### 更多功能
 
@@ -66,7 +67,7 @@
 
 ## 技术栈
 
-- **平台**: HarmonyOS 6.0.2 及以上 (API 22+)，目标 API 26 (HarmonyOS 7)
+- **平台**: HarmonyOS NEXT (API 23 及以上)
 - **语言**: ArkTS / ArkUI
 - **网络**: @ohos.net.http + WebView
 - **存储**: @ohos.data.preferences (PreferenceUtil)
