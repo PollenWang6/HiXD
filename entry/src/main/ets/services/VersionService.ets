@@ -1,4 +1,4 @@
-// VersionService.ets — 版本检查（从 GitHub 拉取 version.json 比对）
+// VersionService.ets — 版本检查（从自建已备案域名 hixdapp.cn 拉取 version.json 比对）
 import { http } from '@kit.NetworkKit';
 import { bundleManager } from '@kit.AbilityKit';
 
