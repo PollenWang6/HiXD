@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>实验系统登录</title>
+  <style>
+    body{margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#F5F6FA;font-family:sans-serif}
+    .msg{text-align:center;color:#666;font-size:14px}
+    .spinner{width:36px;height:36px;border:3px solid #e0e0e0;border-top-color:#2979FF;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+<div class="msg">
+  <div class="spinner"></div>
+  <div id="status">正在登录实验系统...</div>
+</div>
+
+<script>
+  // 直接跳转到实验系统，CAS SSO 会通过 WebView 中已注入的 cookie 自动完成认证
+  // 如果 cookie 无效/过期，CAS 会显示登录页，由 onPageEnd 自动填充凭据
+  console.error('__LOGIN_STATUS__正在跳转实验系统...');
+  // 先访问 sysj 根路径获取 session cookie，再跳到 /xidian/test 触发 OAuth
+  var xhr1 = new XMLHttpRequest();
+  xhr1.open('GET', 'https://sysj.xidian.edu.cn/', false);
+  try { xhr1.send(); } catch(e) {}
+  console.error('__LOGIN_STATUS__已获取session，正在跳转...');
+  location.href = 'https://sysj.xidian.edu.cn/xidian/test';
+</script>
+</body>
+</html>

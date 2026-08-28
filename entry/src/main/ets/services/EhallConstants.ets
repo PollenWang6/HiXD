@@ -1,0 +1,134 @@
+// EhallConstants.ets — 共享的 ehall 常量（EHALL_HEADERS、APP_PATH_MAP、extractRaw）
+import { HttpUtil, HttpResponse } from '../utils/HttpUtil';
+import { EHALL_APP_CLASS_TABLE, EHALL_APP_EXAM, EHALL_APP_SCORE, EHALL_APP_EMPTY_CLASSROOM } from './Models';
+import { CasLoginService } from './CasLoginService';
+
+export const EHALL_HEADERS: Record<string, string> = {
+  // Referer 必须 https：西电服务端按 Referer scheme 拼重定向 service 前缀
+  'Referer': 'https://ehall.xidian.edu.cn/new/index_xd.html',
+  'Host': 'ehall.xidian.edu.cn',
+  'Accept': 'application/json, text/javascript, */*; q=0.01',
+  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Connection': 'keep-alive',
+  'X-Requested-With': 'XMLHttpRequest',
+};
+
+export const APP_PATH_MAP: Map<string, string> = new Map([
+  [EHALL_APP_CLASS_TABLE, '/jwapp/sys/wdkb'],
+  [EHALL_APP_EXAM, '/jwapp/sys/studentWdksapApp'],
+  [EHALL_APP_SCORE, '/jwapp/sys/cjcx'],
+  [EHALL_APP_EMPTY_CLASSROOM, '/jwapp/sys/kxjas'],
+]);
+
+export class AppPostContext {
+  readonly http: HttpUtil;
+  readonly activateAppSession: (appId: string, force?: boolean) => Promise<void>;
+  appSessionUrl: Record<string, string>;
+  readonly tag: string;
+
+  constructor(
+    http: HttpUtil,
+    activateAppSession: (appId: string, force?: boolean) => Promise<void>,
+    appSessionUrl: Record<string, string>,
+    tag: string
+  ) {
+    this.http = http;
+    this.activateAppSession = activateAppSession;
+    this.appSessionUrl = appSessionUrl;
+    this.tag = tag;
+  }
+}
+
+/** 共享 ehall 业务 POST — DRY：Class/Score/Exam/EmptyClassroom/Ehall 共用一个实现 */
+export async function sharedAppPost(
+  ctx: AppPostContext, path: string, body: Record<string, string>
+): Promise<HttpResponse> {
+  const url = 'https://ehall.xidian.edu.cn' + path;
+  let resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
+
+  const isAuthFail = (r: HttpResponse): boolean =>
+    (r.isRedirect && r.location != null && r.location.includes('login'))
+    || r.body.trimStart().startsWith('<!') || r.body.trimStart().startsWith('<html');
+
+  if (isAuthFail(resp)) {
+    // 根因修复：会话过期时，陈旧 jsessionid 会让 activateAppSession 误判"已登录"而跳过 CAS 重登，
+    // 导致 ehall 接口持续返回登录页 HTML → 解析空 → 页面空白。此处先刷新 CAS 登录态，
+    // 再强制重新激活 app session（清掉陈旧 jsessionid）并重试一次，对齐 Flutter EhallSession 的透明重登。
+    try { await CasLoginService.getInstance().checkAndAutoLogin(); } catch (_) { /* 忽略，继续尝试激活 */ }
+    ctx.appSessionUrl = {};
+    const appId = findAppIdByPath(path);
+    if (appId) {
+      await ctx.activateAppSession(appId, true);
+      resp = await ctx.http.postForm(url, body, EHALL_HEADERS);
+    }
+  }
+
+  // 重试后仍为登录页/重定向 → 会话确实失效（未登录、信任设备被删、或 jsessionid 陈旧重签失败）。
+  // 必须抛错：否则调用方会把登录页 HTML 当正常数据交给 CacheService.getOrFetch 缓存
+  //（尤其空教室楼栋列表缓存 60min），造成"进去失败一次、之后怎么进都没用"的黏性失败。
+  // 对齐 Flutter EhallSession：会话失效应抛异常暴露，由上层走错误展示/重登，而非静默返回 HTML。
+  if (isAuthFail(resp)) {
+    throw new Error('EHALL_SESSION_EXPIRED');
+  }
+
+  return resp;
+}
+
+/// ── 向后兼容别名（EhallService 内部仍可通过实例方法调用）──
+
+export function findAppIdByPath(path: string): string {
+  if (path.includes('wdkb')) return EHALL_APP_CLASS_TABLE;
+  if (path.includes('studentWdksapApp') || path.includes('wdksap')) return EHALL_APP_EXAM;
+  if (path.includes('cjcx')) return EHALL_APP_SCORE;
+  if (path.includes('kxjas')) return EHALL_APP_EMPTY_CLASSROOM;
+  return '';
+}
+
+export function extractRaw(body: string, tag: string): object[] {
+  try {
+    const obj = JSON.parse(body) as Record<string, object>;
+
+    const datas = obj['datas'];
+    if (datas !== null && typeof datas === 'object') {
+      const datasMap = datas as Record<string, object>;
+      for (const key of Object.keys(datasMap)) {
+        const sub = datasMap[key];
+        if (sub !== null && typeof sub === 'object') {
+          const subMap = sub as Record<string, object>;
+          const rows = subMap['rows'];
+          if (Array.isArray(rows)) {
+            return rows as object[];
+          }
+          const extParams = subMap['extParams'];
+          if (extParams !== null && typeof extParams === 'object') {
+            const extMap = extParams as Record<string, object>;
+            const extRows = extMap['rows'];
+            if (Array.isArray(extRows)) {
+              return extRows as object[];
+            }
+          }
+        }
+      }
+    }
+
+    for (const second of Object.values(obj)) {
+      if (second !== null && typeof second === 'object') {
+        const smap: Record<string, object> = second as Record<string, object>;
+        for (const third of Object.values(smap)) {
+          if (third !== null && typeof third === 'object') {
+            const tmap: Record<string, object> = third as Record<string, object>;
+            const rows = tmap['rows'];
+            if (Array.isArray(rows)) {
+              return rows as object[];
+            }
+          }
+        }
+      }
+    }
+
+    return [];
+  } catch (e) {
+    return [];
+  }
+}

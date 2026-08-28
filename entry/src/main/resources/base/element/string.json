@@ -1,0 +1,56 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "HiXD"
+    },
+    {
+      "name": "calendar_permission_reason",
+      "value": "用于将课程表导入系统日历，方便查看上课提醒"
+    },
+    {
+      "name": "camera_permission_reason",
+      "value": "用于扫描饮水机二维码添加设备"
+    },
+    {
+      "name": "EntryFormAbility_desc",
+      "value": "课程预告桌面卡片"
+    },
+    {
+      "name": "class_preview_card_name",
+      "value": "课程预告"
+    },
+    {
+      "name": "class_preview_card_desc",
+      "value": "显示今天和明天的课程安排"
+    },
+    {
+      "name": "detect_gesture_permission_reason",
+      "value": "用于检测握持手势以调整悬浮按钮位置"
+    },
+    {
+      "name": "activity_motion_permission_reason",
+      "value": "用于感知设备运动状态"
+    },
+    {
+      "name": "exam_countdown_card_name",
+      "value": "考试倒计时"
+    },
+    {
+      "name": "exam_countdown_card_desc",
+      "value": "显示即将到来的考试及倒计时天数"
+    },
+    {
+      "name": "reminder_permission_reason",
+      "value": "用于设置课程上课前提醒通知"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "app": {
+    "bundleName": "com.HiXD.myapplication",
+    "vendor": "王继磊",
+    "versionCode": 1050004,
+    "versionName": "1.5.0",
+    "minAPIVersion": 23,
+    "targetAPIVersion": 23,
+    "apiReleaseType": "Release1",
+    "icon": "$media:layered_image",
+    "label": "$string:app_name"
+  }
+}
