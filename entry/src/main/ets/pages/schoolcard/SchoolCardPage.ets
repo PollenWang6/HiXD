@@ -1,11 +1,11 @@
-import { ToastUtil } from '../../utils/ToastUtil';
+﻿import { ToastUtil } from '../../utils/ToastUtil';
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // SchoolCardPage.ets — 校园卡原生页面（纯 HTTP，对标 Flutter）
 // 余额、付款码、消费记录
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { PaidRecord, SchoolCardService } from '../../services/SchoolCardService';
-import { CasLoginService } from '../../services/CasLoginService';
+import { PaidRecord, SchoolCardService } from '../../services/campus/SchoolCardService';
+import { CasLoginService } from '../../services/auth/CasLoginService';
 import { fmtDate } from '../../utils/DateUtil';
 
 @Component
@@ -36,7 +36,7 @@ export struct SchoolCardPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -113,6 +113,10 @@ export struct SchoolCardPage {
       this.qrBase64 = await this.cardSvc.getQRCodeBase64();
       this.showBarcode = true;
     } catch (e) {
+      // 付款码获取失败不能静默：用户点"显示付款码"无任何反应会被当成 bug
+      const errMsg: string = e instanceof Error ? e.message : String(e);
+      console.warn('[SchoolCardPage] fetchQRCode failed: ' + errMsg);
+      ToastUtil.show('付款码获取失败，请稍后重试');
     } finally {
       this.qrLoading = false;
     }
@@ -164,7 +168,12 @@ export struct SchoolCardPage {
   totalAmount(): string {
     let sum = 0;
     for (const r of this.records) sum += parseFloat(r.money) || 0;
-    return Math.abs(sum).toFixed(2);
+    // 对齐 Flutter school_card_window.moneySunUp：不取 abs，保留收支语义。
+    // 此前 Math.abs(sum) 把混合正负交易时的净额方向吞掉，收支统计失真。
+    if (sum < 0) {
+      return '支出 ¥' + Math.abs(sum).toFixed(2);
+    }
+    return '收入 ¥' + sum.toFixed(2);
   }
 
   build() {
@@ -182,7 +191,7 @@ export struct SchoolCardPage {
             .height(32).borderRadius(16)
             .border({ width: 1, color: '#FFFFFF80' })
             .padding({ left: 14, right: 14 })
-            .onClick(() => {
+            .hoverEffect(HoverEffect.Auto).onClick(() => {
               if (this.showBarcode) {
                 this.showBarcode = false;
               } else {
@@ -255,7 +264,7 @@ export struct SchoolCardPage {
             }
             .padding({ left: 10, right: 10, top: 6, bottom: 6 })
             .borderRadius(6).backgroundColor(ThemeColors.bgPage)
-            .onClick(() => { this.pickDate(0); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.pickDate(0); })
 
             Text('~').fontSize(13).fontColor(ThemeColors.textHint)
 
@@ -265,20 +274,20 @@ export struct SchoolCardPage {
             }
             .padding({ left: 10, right: 10, top: 6, bottom: 6 })
             .borderRadius(6).backgroundColor(ThemeColors.bgPage)
-            .onClick(() => { this.pickDate(1); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.pickDate(1); })
 
             Blank()
             Button('查询').fontSize(13).height(32)
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(6)
               .padding({ left: 14, right: 14 })
-              .onClick(() => { this.onQueryRecords(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.onQueryRecords(); })
           }.width('100%').padding({ left: 18, right: 18, bottom: 10 })
 
           Divider().color('#E8E8E8').strokeWidth(0.5).margin({ left: 18, right: 18 })
 
           if (this.records.length > 0 && !this.loading) {
             Row() {
-              Text('合计 ¥' + this.totalAmount()).fontSize(13).fontWeight(FontWeight.Medium)
+              Text(this.totalAmount()).fontSize(13).fontWeight(FontWeight.Medium)
                 .fontColor('#C2410C')
               Text(' · ').fontSize(13).fontColor(ThemeColors.textHint)
               Text(this.records.length + ' 笔').fontSize(13).fontColor(ThemeColors.textSecondary)
@@ -327,7 +336,7 @@ export struct SchoolCardPage {
             Button('重试').fontSize(14)
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(20)
               .padding({ left: 24, right: 24 })
-              .onClick(() => { this.initData(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.initData(); })
           }.width('100%').position({ x: '50%', y: '45%' }).markAnchor({ x: '50%', y: '50%' })
         }
       }
@@ -345,6 +354,6 @@ export struct SchoolCardPage {
       .borderRadius(10)
       .border({ width: 0.5, color: this.activePreset === days ? this.accentColor : ThemeColors.border })
       .backgroundColor(this.activePreset === days ? (this.accentColor + '18') : Color.Transparent)
-      .onClick(() => { this.setDateRange(days); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.setDateRange(days); })
   }
 }

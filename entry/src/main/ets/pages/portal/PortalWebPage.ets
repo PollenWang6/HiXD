@@ -5,7 +5,7 @@ import { menuOptions } from '../../utils/MaterialKit';
 import web_webview from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { common } from '@kit.AbilityKit';
-import { CasLoginService } from '../../services/CasLoginService';
+import { CasLoginService } from '../../services/auth/CasLoginService';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { ToastUtil } from '../../utils/ToastUtil';
 const TAG = 'PortalWebPage';
@@ -260,7 +260,7 @@ export struct PortalWebPage {
                 Text('⚠️').fontSize(40)
                 Text(this.loadError).fontSize(14).fontColor('#C62828').margin({ top: 8 })
                 Button('重试').margin({ top: 12 })
-                  .onClick(() => {
+                  .hoverEffect(HoverEffect.Auto).onClick(() => {
                     this.loadError = '';
                     this.webController.refresh();
                   })
@@ -319,7 +319,7 @@ export struct PortalWebPage {
       }
       .height(40)
       .width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
 
       Text(this.title)
         .fontSize(20)
@@ -337,7 +337,7 @@ export struct PortalWebPage {
       }
       .height(40)
       .width(40)
-      .onClick(() => { this.webController.refresh(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.webController.refresh(); })
 
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.more_opinion'))
@@ -358,7 +358,7 @@ export struct PortalWebPage {
     Menu() {
       MenuItem({ content: '前进', startIcon: $r('app.media.forth') })
         .enabled(this.canForward)
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           try { this.webController.forward(); } catch (_e) { }
         })
       MenuItem({ content: '切换 UA', builder: this.changeUAMenu(),
@@ -366,17 +366,17 @@ export struct PortalWebPage {
         .enabled(!this.useWeChatUA)
       MenuItem({ content: '全屏展示', startIcon: $r('app.media.ic_public_enlarge') })
         .enabled(this.isTablet && !this.portalFullscreen)
-        .onClick(() => { this.portalFullscreen = true; })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.portalFullscreen = true; })
       MenuItem({ content: '退出全屏', startIcon: $r('app.media.ic_public_reduce') })
         .enabled(this.isTablet && this.portalFullscreen)
-        .onClick(() => { this.portalFullscreen = false; })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.portalFullscreen = false; })
       MenuItem({ content: '在浏览器打开', startIcon: $r('app.media.ic_public_worldclock') })
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           this.context.openLink(this.url);
         })
 
       MenuItem({ content: '清除 Cookies', startIcon: $r('app.media.ic_public_delete') })
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           try {
             web_webview.WebCookieManager.clearAllCookiesSync();
             this.message = '已清除 Cookies，重新打开需登录';
@@ -390,13 +390,13 @@ export struct PortalWebPage {
   @Builder changeUAMenu() {
     Menu() {
       MenuItem({ content: '跟随系统', startIcon: $r('app.media.ic_controlcenter_auto_rotate_filled'), endIcon: (this.uaMode === UA_AUTO ? $r('app.media.checkmark') : undefined) })
-        .onClick(() => { this.setUA(UA_AUTO); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.setUA(UA_AUTO); })
       MenuItem({ content: '手机版', startIcon: $r('app.media.ic_public_devices_phone'), endIcon: (this.uaMode === UA_MOBILE ? $r('app.media.checkmark') : undefined) })
-        .onClick(() => { this.setUA(UA_MOBILE); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.setUA(UA_MOBILE); })
       MenuItem({ content: '平板版', startIcon: $r('app.media.ic_device_pad'), endIcon: (this.uaMode === UA_TABLET ? $r('app.media.checkmark') : undefined) })
-        .onClick(() => { this.setUA(UA_TABLET); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.setUA(UA_TABLET); })
       MenuItem({ content: '电脑版', startIcon: $r('app.media.ic_device_matebook'), endIcon: (this.uaMode === UA_DESKTOP ? $r('app.media.checkmark') : undefined) })
-        .onClick(() => { this.setUA(UA_DESKTOP); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.setUA(UA_DESKTOP); })
     }
   }
 

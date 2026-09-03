@@ -1,9 +1,9 @@
-import { ToastUtil } from '../../utils/ToastUtil';
+﻿import { ToastUtil } from '../../utils/ToastUtil';
 import { AccentColors } from '../../utils/AccentColors';
 // AboutPage.ets — 关于软件
 import { ThemeColors } from '../../utils/ThemeColors';
-import { VersionService } from '../../services/VersionService';
-import { VersionInfo } from '../../services/VersionService';
+import { VersionService } from '../../services/common/VersionService';
+import { VersionInfo } from '../../services/common/VersionService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { common, Want } from '@kit.AbilityKit';
 import { openAppGalleryDetail } from '../../utils/AppGalleryUtil';
@@ -125,7 +125,7 @@ export struct AboutPage {
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       Text('›').fontSize(20).fontColor(ThemeColors.textSecondary)
     }.width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .onClick(() => onClick())
+    .hoverEffect(HoverEffect.Auto).onClick(() => onClick())
   }
 
   build() {
@@ -160,7 +160,7 @@ export struct AboutPage {
               .height(36).fontSize(13).fontColor(this.accentColor)
               .backgroundColor('#FFFFFF').borderRadius(18)
               .padding({ left: 16, right: 16 })
-              .onClick(() => { this.doCheckUpdate(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.doCheckUpdate(); })
           }
           .width('100%').padding({ left: 20, right: 20, top: 20, bottom: 20 })
           .backgroundColor(this.accentColor)
@@ -214,7 +214,7 @@ export struct AboutPage {
           Column() {
             Text('© 2026 HiXD. 保留所有权利.').fontSize(12).fontColor(ThemeColors.textHint)
             Text('桂ICP备2026015291号').fontSize(12).fontColor(this.accentColor)
-              .margin({ top: 6 }).onClick(() => { this.openBeian(); })
+              .margin({ top: 6 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.openBeian(); })
             Text('hixdapp.cn').fontSize(12).fontColor(ThemeColors.textHint).margin({ top: 2 })
             Text('本应用为独立开发者提供的第三方校园工具，与西安电子科技大学无任何隶属、合作或授权关系，并非学校官方出品或授权应用。')
               .fontSize(11).fontColor(ThemeColors.textHint).margin({ top: 8 })
@@ -252,14 +252,14 @@ export struct AboutPage {
               Button('稍后再说').layoutWeight(1).height(40)
                 .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary)
                 .borderRadius(10)
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   this.showUpdateDialog = false;
                   if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
                 })
               Button('前往应用市场').layoutWeight(1).height(40)
                 .backgroundColor(this.accentColor).fontColor('#FFFFFF')
                 .borderRadius(10)
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   this.showUpdateDialog = false;
                   if (this.skipVersion.length > 0) PreferenceUtil.putString('skip_version', this.skipVersion);
                   openAppGalleryDetail(this.context);
@@ -275,12 +275,12 @@ export struct AboutPage {
           }
           .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
           .shadow({ radius: 20, color: '#30000000' })
-          .onClick(() => {})
+          .hoverEffect(HoverEffect.Auto).onClick(() => {})
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
         .backgroundColor(ThemeColors.overlay)
-        .onClick(() => { this.showUpdateDialog = false; })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.showUpdateDialog = false; })
       }
       }
       .width('100%').height('100%')
@@ -296,7 +296,7 @@ export struct AboutPage {
     Row({ space: 6 }) {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([AccentColors.textContrast])
-      }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      }.height(40).width(40).hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text('关于软件').fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })

@@ -4,7 +4,7 @@
       "name": "exam_countdown_2x4",
       "displayName": "$string:exam_countdown_card_name",
       "description": "$string:exam_countdown_card_desc",
-      "src": "./ets/widgets/pages/ExamCountdownCard4x2.ets",
+      "src": "./ets/widgets/ExamCountdownCard4x2.ets",
       "uiSyntax": "arkts",
       "window": {
         "designWidth": 720,
@@ -26,7 +26,7 @@
       "name": "exam_countdown_2x2",
       "displayName": "$string:exam_countdown_card_name",
       "description": "$string:exam_countdown_card_desc",
-      "src": "./ets/widgets/pages/ExamCountdownCard2x2.ets",
+      "src": "./ets/widgets/ExamCountdownCard2x2.ets",
       "uiSyntax": "arkts",
       "window": {
         "designWidth": 720,
@@ -48,7 +48,7 @@
       "name": "class_preview_2x4",
       "displayName": "$string:class_preview_card_name",
       "description": "$string:class_preview_card_desc",
-      "src": "./ets/widgets/pages/ClassPreviewCard4x2.ets",
+      "src": "./ets/widgets/ClassPreviewCard4x2.ets",
       "uiSyntax": "arkts",
       "window": {
         "designWidth": 720,
@@ -70,7 +70,7 @@
       "name": "class_preview_2x2",
       "displayName": "$string:class_preview_card_name",
       "description": "$string:class_preview_card_desc",
-      "src": "./ets/widgets/pages/ClassPreviewCard2x2.ets",
+      "src": "./ets/widgets/ClassPreviewCard2x2.ets",
       "uiSyntax": "arkts",
       "window": {
         "designWidth": 720,

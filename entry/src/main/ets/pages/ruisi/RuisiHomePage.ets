@@ -1,14 +1,14 @@
-// RuisiHomePage.ets — 睿思论坛首页
+﻿// RuisiHomePage.ets — 睿思论坛首页
 // 对标 Flutter home_page.dart：7 Tab + 顶栏操作按钮
 // Tab 顺序：最新帖子、最新回复、水区、摄影、二手交易、就业、失物招领
 
 import { ThemeColors } from '../../utils/ThemeColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { RuisiService } from '../../services/RuisiService';
-import { Topic, RuisiConstants, TopicDetailParam, UserParam } from '../../services/RuisiModels';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { RuisiService } from '../../services/ruisi/RuisiService';
+import { Topic, RuisiConstants, TopicDetailParam, UserParam } from '../../models/ruisi/RuisiModels';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { SegmentTab } from '../../components/SegmentTab';
-import { RuisiTopicItem } from '../../components/RuisiTopicItem';
+import { RuisiTopicItem } from '../../pages/ruisi/components/RuisiTopicItem';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { motion } from '@kit.MultimodalAwarenessKit';
 import { curves } from '@kit.ArkUI';
@@ -20,6 +20,8 @@ const TAG = 'RuisiHomePage';
 export struct RuisiHomePage {
   @StorageLink('theme_is_dark') isDark: boolean = false;
   @StorageProp('accent_color') accentColor: string = '#2979FF';
+  // 发帖成功后由 RuisiNewPostPage 递增，@Watch 触发当前 Tab 列表刷新（修复发帖成功列表不刷新）
+  @StorageProp('ruisi_thread_list_version') @Watch('onThreadListVersionChanged') threadListVersion: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
 
   @State currentTab: number = 0;
@@ -59,6 +61,12 @@ export struct RuisiHomePage {
       motion.off('holdingHandChanged');
     } catch (e) {
       // ignore
+    }
+  }
+
+  private onThreadListVersionChanged(): void {
+    if (this.threadListVersion > 0) {
+      this.doRefresh();
     }
   }
 
@@ -188,7 +196,7 @@ export struct RuisiHomePage {
           .width('100%')
           .height(44)
           .justifyContent(FlexAlign.Center)
-          .onClick(() => { this.onLoadMore(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.onLoadMore(); })
         }
       }
 
@@ -246,7 +254,7 @@ export struct RuisiHomePage {
       }
       .width(42).height(42)
       .justifyContent(FlexAlign.Center)
-      .onClick(() => {
+      .hoverEffect(HoverEffect.Auto).onClick(() => {
         this.pageInfo.pushPath({ name: 'RuisiUser' });
       })
 
@@ -264,7 +272,7 @@ export struct RuisiHomePage {
       .backgroundColor(ThemeColors.bgInput)
       .borderRadius(20)
       .margin({ left: 12, right: 12 })
-      .onClick(() => {
+      .hoverEffect(HoverEffect.Auto).onClick(() => {
         this.pageInfo.pushPath({ name: 'RuisiSearch' });
       })
 
@@ -276,7 +284,7 @@ export struct RuisiHomePage {
         .backgroundColor(ThemeColors.bgInput)
         .borderRadius(20)
         .textAlign(TextAlign.Center)
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           this.pageInfo.pushPath({ name: 'RuisiMessages' });
         })
 
@@ -288,7 +296,7 @@ export struct RuisiHomePage {
         .backgroundColor(ThemeColors.bgInput)
         .borderRadius(20)
         .textAlign(TextAlign.Center)
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           this.pageInfo.pushPath({ name: 'RuisiForumList' });
         })
     }
@@ -337,7 +345,7 @@ export struct RuisiHomePage {
         .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
         .margin({ bottom: 110, right: 20 })
         .translate({ x: this.fabTranslateX })
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           this.pageInfo.pushPath({ name: 'RuisiNewPost' });
         })
       }

@@ -1,17 +1,16 @@
-import { AccentColors } from '../../utils/AccentColors';
+﻿import { AccentColors } from '../../utils/AccentColors';
 import { menuOptions } from '../../utils/MaterialKit';
 // ClassTablePage.ets — 支持点击查看所有冲突课程版（已修复重叠课程覆盖问题）
 import { ThemeColors } from '../../utils/ThemeColors';
-import { EhallService, SemesterUtil, ClassItemModel, ExamItemModel } from '../../services/EhallService';
-import { ExperimentService } from '../../services/ExperimentService';
-import { ClassService } from '../../services/ClassService';
-import { UnscheduledCourse, ClassChange } from '../../services/Models';
-import { ExamService } from '../../services/ExamService';
+import { EhallService, SemesterUtil, ClassItemModel, ExamItemModel } from '../../services/ids/EhallService';
+import { ExperimentService } from '../../services/experiment/ExperimentService';
+import { ClassService } from '../../services/ids/ClassService';
+import { UnscheduledCourse, ClassChange } from '../../models/common/Models';
+import { ExamService } from '../../services/ids/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { HttpUtil } from '../../utils/HttpUtil';
-import { CalendarSyncService } from '../../services/CalendarSyncService';
+import { SecureStorageUtil, SecureAlias } from '../../utils/SecureStorageUtil';
 import { WeekChip } from '../../components/WeekChip';
-import { SEC_START, SEC_END } from '../MainPage';
+import { SEC_START, SEC_END } from '../../models/common/ClassSchedule';
 
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -324,7 +323,10 @@ export struct ClassTablePage {
           await PreferenceUtil.putString('ids_account', sid);
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // 学号补全失败不阻断课表加载，但留日志（sid 为空会导致部分请求参数缺失）
+      console.warn('[ClassTablePage] fetchStudentId fill failed: ' + String(e));
+    }
 
     // 首次登录后 cookie/session 可能还未就绪，课表为空时自动重试
     // （服务器已确认空课表 emptySchedule 时不再白重试——新学期课程未发布是正常现象）
@@ -404,6 +406,7 @@ export struct ClassTablePage {
       const result: string = decoder.decodeToString(new Uint8Array(buf));
       if (result.length > 0) return result;
     } catch (e) {
+      console.warn('[ClassTablePage] readLocalClassTable failed: ' + String(e));
     }
     return null;
   }
@@ -418,6 +421,8 @@ export struct ClassTablePage {
       await fileIo.write(file.fd, encoded.buffer);
       await fileIo.close(file);
     } catch (e) {
+      // 课表本地缓存写失败：下次启动无缓存可显示（会走网络），不影响当前内存态，留日志便于排查
+      console.warn('[ClassTablePage] writeLocalClassTable failed: ' + String(e));
     }
   }
 
@@ -460,6 +465,7 @@ export struct ClassTablePage {
           this.hasCache = true;
           this.loading = false;
         } catch (e2) {
+          console.warn('[ClassTablePage] render damaged cache failed: ' + String(e2));
         }
       } else {
       }
@@ -567,7 +573,9 @@ export struct ClassTablePage {
     this.later(() => {
       if (this.preloadStatus === 'done') {
         if (!PreferenceUtil.getBool('role')) { this.mergeExperimentDataIntoGrid(); this.buildCellCache(); }
-        try { this.mergePhysicsExperiments(); } catch (_e) {}
+        try { this.mergePhysicsExperiments(); } catch (e) {
+          console.warn('[ClassTablePage] mergePhysicsExperiments failed: ' + String(e));
+        }
         this.loadExamDataInPlace();
         this._preloadDone = true;
       } else if (PreferenceUtil.getBool('is_logged_in')) {
@@ -607,7 +615,9 @@ export struct ClassTablePage {
         this.syncProgress = '正在同步实验数据...';
         this.mergeExperimentDataIntoGrid();
         this.buildCellCache();
-        try { await this.mergePhysicsExperiments(); } catch (_e) {}
+        try { await this.mergePhysicsExperiments(); } catch (e) {
+          console.warn('[ClassTablePage] mergePhysicsExperiments failed: ' + String(e));
+        }
         this.syncProgress = '正在同步考试数据...';
         await this.loadExamDataInPlace();
         this.syncProgress = '';
@@ -794,13 +804,17 @@ export struct ClassTablePage {
           count = items.length;
         }
       } catch (e) {
+        // 考试缓存解析失败：本次不显示考试行，下次刷新会重拉
+        console.warn('[ClassTablePage] loadExamDataInPlace parse failed: ' + String(e));
       }
     }
     // applyExamItems 会清除所有考试（含自定义），事后补回
     await this.loadCustomCourses(this.classGrid);
     this.buildCellCache();
     this.saveClassGridSnapshot();
-    CalendarSyncService.autoSync(getContext(this) as common.UIAbilityContext);
+    // [FIX] 不再在此直调 autoSync：本页 saveClassGridSnapshot 已为空实现（快照唯一权威写入者 =
+    // MainPage.loadClassPreview），此处直调会基于旧快照空跑/误判，属旧快照竞态源头。
+    // 课表数据变化已由 ct_updated 通知 MainPage 轮询 → loadClassPreview → 尾部顺序 autoSync。
     return count;
   }
 
@@ -914,9 +928,10 @@ export struct ClassTablePage {
             const exDate = new Date(item.examDate + 'T00:00:00');
             if (!isNaN(exDate.getTime())) {
               const semStart = SemesterUtil.getSemesterStartDate(this.semesterCode);
-              const diffMs = exDate.getTime() - semStart.getTime();
-              const diffDays = Math.floor(diffMs / 86400000);
-              const weekNum = Math.floor(diffDays / 7) + 1;
+              const swift: number = PreferenceUtil.getNumber('week_swift', 0);
+              const dayMs: number = 86400000;
+              const weekNum: number = Math.max(1,
+                Math.floor((exDate.getTime() - semStart.getTime() - swift * 7 * dayMs) / dayMs / 7) + 1);
               if (weekNum >= 1 && weekNum <= 26) {
                 weekList[weekNum - 1] = true;
                 cell.weekDesc = '第' + weekNum + '周';
@@ -973,6 +988,8 @@ export struct ClassTablePage {
         }
       }
     } catch (e) {
+      // 自定义课程解析失败：该部分课程不显示，其余不受影响
+      console.warn('[ClassTablePage] loadCustomCourses failed: ' + String(e));
     }
   }
 
@@ -1081,7 +1098,7 @@ export struct ClassTablePage {
                 .padding({ left: 8, right: 8, top: 2, bottom: 2 })
                 .border({ width: 1, color: this.accentColor, radius: 4 })
                 .margin({ left: 10 })
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   this.showCacheBanner = false;
                   this.loadTable(true);
                 })
@@ -1114,7 +1131,7 @@ export struct ClassTablePage {
           if (this.loading && !this.hasCache) {
             Column() {
               LoadingProgress().width(40).height(40).color((AppStorage.get('accent_color') as string ?? '#2979FF'))
-              Text(this.loadProgress.length > 0 ? this.loadProgress : '正在从学校服务器获取课程表...')
+              Text(this.loadProgress.length > 0 ? this.loadProgress : '正在获取课程表...')
                 .fontSize(15).fontColor(ThemeColors.textPrimary).margin({ top: 16 })
               Text('首次加载约需 3~5 秒，请耐心等待').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 8 })
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
@@ -1122,10 +1139,10 @@ export struct ClassTablePage {
             Column() {
               Text('⚠️').fontSize(40)
               Text(this.errorMsg).fontSize(14).fontColor(ThemeColors.error).margin({ top: 8 })
-              Button('重试').margin({ top: 12 }).onClick(() => { this.loadTable(); })
+              Button('重试').margin({ top: 12 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.loadTable(); })
               if (this.errorMsg.includes('登录')) {
                 Button('去登录').margin({ top: 8 })
-                  .onClick(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { router.pushUrl({ url: 'pages/login/LoginPage' }); })
               }
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else {
@@ -1157,7 +1174,7 @@ export struct ClassTablePage {
             .width('100%').height('100%')
             .backgroundColor('rgba(0,0,0,0.7)')
             .opacity(this.maskOpacity)
-            .onClick(() => { this.hideCellDetail(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.hideCellDetail(); })
             .zIndex(1)
         }
 
@@ -1232,7 +1249,7 @@ export struct ClassTablePage {
                               }
                             }.layoutWeight(1).height(40).backgroundColor(ThemeColors.isDark ? '#1A3A5C' : '#E3F2FD')
                               .borderRadius(8)
-                              .onClick(() => { this.editCustomCourse(cell); })
+                              .hoverEffect(HoverEffect.Auto).onClick(() => { this.editCustomCourse(cell); })
                             Button() {
                               Row({ space: 4 }) {
                                 Text('🗑️').fontSize(16)
@@ -1240,7 +1257,7 @@ export struct ClassTablePage {
                               }
                             }.layoutWeight(1).height(40).backgroundColor(ThemeColors.isDark ? '#3E1A1A' : '#FFEBEE')
                               .borderRadius(8)
-                              .onClick(() => { this.deleteCustomCourse(cell); })
+                              .hoverEffect(HoverEffect.Auto).onClick(() => { this.deleteCustomCourse(cell); })
                           }
                           .margin({ top: 8 })
                         }
@@ -1272,7 +1289,7 @@ export struct ClassTablePage {
             Column()
               .width('100%').height('100%')
               .backgroundColor('rgba(0,0,0,0.5)')
-              .onClick(() => { this.cancelAddCourse(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.cancelAddCourse(); })
             Column() {
               // 标题栏
               Row() {
@@ -1284,7 +1301,7 @@ export struct ClassTablePage {
                 }
                 .width(32).height(32).borderRadius(16).backgroundColor(ThemeColors.bgInput)
                 .justifyContent(FlexAlign.Center)
-                .onClick(() => { this.cancelAddCourse(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.cancelAddCourse(); })
               }.width('100%').margin({ bottom: 14 })
 
               // 类型选择器 — 高级分段控件（流畅动画、主题一致）
@@ -1312,10 +1329,10 @@ export struct ClassTablePage {
 
               Row({ space: 12 }) {
                 Button('取消').layoutWeight(1).backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
-                  .onClick(() => { this.cancelAddCourse(); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.cancelAddCourse(); })
                 Button(this.editingCustomIndex >= 0 ? '保存' : '添加').layoutWeight(1)
                   .backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).fontColor('#FFFFFF')
-                  .onClick(() => { this.addCustomCourse(); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.addCustomCourse(); })
               }.margin({ top: 12 }).width('100%')
 
               // 表单校验提示
@@ -1376,9 +1393,9 @@ export struct ClassTablePage {
             }.width('100%')
             Row({ space: 12 }) {
               Button('取消').layoutWeight(1).backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
-                .onClick(() => { this.showReminderDialog = false; })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.showReminderDialog = false; })
               Button('导入').layoutWeight(1).backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).fontColor('#FFFFFF')
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   if (this.reminderMode === 1) {
                     const parsed = parseInt(this.customReminderInput);
                     if (isNaN(parsed) || parsed <= 0) {
@@ -1404,7 +1421,7 @@ export struct ClassTablePage {
               Row() { Text('✕').fontSize(18).fontColor(ThemeColors.textSecondary) }
                 .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
                 .justifyContent(FlexAlign.Center)
-                .onClick(() => { this.closeUnscheduledDialog(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeUnscheduledDialog(); })
             }.width('100%').margin({ bottom: 14 })
             if (this.unscheduledLoading) {
               Column() {
@@ -1436,20 +1453,20 @@ export struct ClassTablePage {
             }
             Button('确定').width('100%').height(40).margin({ top: 14 })
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
-              .onClick(() => { this.closeUnscheduledDialog(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeUnscheduledDialog(); })
           }
           .width('85%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
           .shadow({ radius: 20, color: '#30000000' })
           .opacity(this.unscheduledOpacity)
           .translate({ y: this.unscheduledTranslate })
-          .onClick(() => {})
+          .hoverEffect(HoverEffect.Auto).onClick(() => {})
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
         .backgroundColor(ThemeColors.overlay)
         .opacity(this.unscheduledOpacity)
         .hitTestBehavior(this.showUnscheduledDialog ? HitTestMode.Default : HitTestMode.None)
-        .onClick(() => { this.closeUnscheduledDialog(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeUnscheduledDialog(); })
         }
         // 课程变更弹窗
         if (this.showClassChangesDialog || this.classChangesOpacity > 0) {
@@ -1461,7 +1478,7 @@ export struct ClassTablePage {
               Row() { Text('✕').fontSize(18).fontColor(ThemeColors.textSecondary) }
                 .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
                 .justifyContent(FlexAlign.Center)
-                .onClick(() => { this.closeClassChangesDialog(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeClassChangesDialog(); })
             }.width('100%').margin({ bottom: 14 })
             if (this.classChangesLoading) {
               Column() {
@@ -1513,20 +1530,20 @@ export struct ClassTablePage {
             }
             Button('确定').width('100%').height(40).margin({ top: 14 })
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
-              .onClick(() => { this.closeClassChangesDialog(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeClassChangesDialog(); })
           }
           .width('85%').padding(20).backgroundColor(ThemeColors.bgCard).borderRadius(16)
           .shadow({ radius: 20, color: '#30000000' })
           .opacity(this.classChangesOpacity)
           .translate({ y: this.classChangesTranslate })
-          .onClick(() => {})
+          .hoverEffect(HoverEffect.Auto).onClick(() => {})
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
         .backgroundColor(ThemeColors.overlay)
         .opacity(this.classChangesOpacity)
         .hitTestBehavior(this.showClassChangesDialog ? HitTestMode.Default : HitTestMode.None)
-        .onClick(() => { this.closeClassChangesDialog(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeClassChangesDialog(); })
         }
       }.width('100%').height('100%')
     }
@@ -1609,9 +1626,9 @@ export struct ClassTablePage {
       Row({ space: 14 }) {
         Text('全选').fontSize(12)
           .fontColor((AppStorage.get('accent_color') as string ?? '#2979FF'))
-          .onClick(() => { this.setAllWeeks(true); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.setAllWeeks(true); })
         Text('清空').fontSize(12).fontColor(ThemeColors.textSecondary)
-          .onClick(() => { this.setAllWeeks(false); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.setAllWeeks(false); })
       }
     }.width('100%').margin({ top: 2, bottom: 6 })
     Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start, alignContent: FlexAlign.Start }) {
@@ -1749,7 +1766,7 @@ export struct ClassTablePage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
 
       Text('课程表')
         .fontSize(22)
@@ -1786,7 +1803,7 @@ export struct ClassTablePage {
       .height(36)
       .width(36)
       .opacity(this.currentWeek <= 1 ? 0.3 : 1.0)
-      .onClick(() => { this.changeWeek(this.currentWeek - 1); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.changeWeek(this.currentWeek - 1); })
 
       Text(this.getWeekRangeLabel()).fontSize(15)
         .fontColor(ThemeColors.isDark ? '#64B5F6' :
@@ -1803,7 +1820,7 @@ export struct ClassTablePage {
       .height(36)
       .width(36)
       .opacity(this.currentWeek >= this.maxWeek ? 0.3 : 1.0)
-      .onClick(() => { this.changeWeek(this.currentWeek + 1); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.changeWeek(this.currentWeek + 1); })
 
       if (this.calendarImportMsg.length > 0) {
         Text(this.calendarImportMsg).fontSize(10).fontColor(ThemeColors.textSecondary).maxLines(1)
@@ -1816,18 +1833,18 @@ export struct ClassTablePage {
   @Builder buildClassTableMenu() {
     Menu() {
       MenuItem({ content: '手动添加日程', startIcon: $r('app.media.ic_public_add_norm') })
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           this.savedDetailDay = -1;
           this.savedDetailSection = -1;
           this.refreshWeekIndex();
           this.showAddCourseDialog = true;
         })
       MenuItem({ content: '课程变更', startIcon: $r('app.media.ic_public_rotate') })
-        .onClick(() => { this.loadClassChanges(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadClassChanges(); })
       MenuItem({ content: '未安排课程', startIcon: $r('app.media.ic_public_albums') })
-        .onClick(() => { this.loadUnscheduledCourses(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadUnscheduledCourses(); })
       MenuItem({ content: '刷新课表', startIcon: $r('app.media.refresh') })
-        .onClick(() => { this.loadTable(true); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadTable(true); })
     }
   }
 
@@ -1957,16 +1974,17 @@ export struct ClassTablePage {
   }
 
   // 新增方法：获取当前周该时间段所有冲突的课程
-  private getCurrentWeekConflictCells(day: number, section: number): ClassCell[] {
+  private getCurrentWeekConflictCells(day: number, section: number, week?: number): ClassCell[] {
     const result: ClassCell[] = [];
     if (!this.classGrid[day]) return result;
+    const w: number = week !== undefined ? week : this.currentWeek;
 
     // 考试卡片（section=0）
     if (section === 0) {
       const examSlot = this.classGrid[day][0];
       if (examSlot) {
         for (const cell of examSlot) {
-          if (cell.isExam && cell.weekList[this.currentWeek - 1]) {
+          if (cell.isExam && cell.weekList[w - 1]) {
             result.push(cell);
           }
         }
@@ -1981,7 +1999,7 @@ export struct ClassTablePage {
 
       for (const cell of cellList) {
         // 检查：1. 当前周有课 2. 该课程覆盖了点击的section
-        if (cell.weekList[this.currentWeek - 1] &&
+        if (cell.weekList[w - 1] &&
           cell.startSection <= section &&
           cell.endSection >= section) {
           result.push(cell);
@@ -2131,7 +2149,7 @@ export struct ClassTablePage {
                       Row() {
                         ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
                           Column().layoutWeight(1).height(this.ROW_HEIGHT)
-                            .onClick(() => { this.showCellDetail(day, section); })
+                            .hoverEffect(HoverEffect.Auto).onClick(() => { this.showCellDetail(day, section); })
                         }, (day: number) => `grid_${day}`)
                       }.width('100%')
                     }, (section: number) => `sec_${section}`)
@@ -2144,7 +2162,7 @@ export struct ClassTablePage {
                       Row() {
                         ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
                           Column().layoutWeight(1).height(this.ROW_HEIGHT)
-                            .onClick(() => { this.showCellDetail(day, section); })
+                            .hoverEffect(HoverEffect.Auto).onClick(() => { this.showCellDetail(day, section); })
                         }, (day: number) => `grid_${day}`)
                       }.width('100%')
                     }, (section: number) => `sec_${section}`)
@@ -2157,7 +2175,7 @@ export struct ClassTablePage {
                       Row() {
                         ForEach([1, 2, 3, 4, 5, 6, 7], (day: number) => {
                           Column().layoutWeight(1).height(this.ROW_HEIGHT)
-                            .onClick(() => { this.showCellDetail(day, section); })
+                            .hoverEffect(HoverEffect.Auto).onClick(() => { this.showCellDetail(day, section); })
                         }, (day: number) => `grid_${day}`)
                       }.width('100%')
                     }, (section: number) => `sec_${section}`)
@@ -2185,8 +2203,8 @@ export struct ClassTablePage {
                             .margin({ top: 2 })
                         }
                         if (cell.day === this._todayDay &&
-                            this.currentWeek === this.getRealCurrentWeek() &&
-                            cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1]) {
+                            week === this.getRealCurrentWeek() &&
+                            cell.weekList.length > (week - 1) && cell.weekList[week - 1]) {
                           if (cell.isExam) {
                             if (this.getExamStatus(cell) === 1) {
                               Text('进行中').fontSize(7).fontColor('#FFFFFF').fontWeight(FontWeight.Bold)
@@ -2205,14 +2223,14 @@ export struct ClassTablePage {
                             }
                           }
                         }
-                        if (!cell.isExam && this.getCurrentWeekConflictCells(day, cell.startSection).length > 1) {
+                        if (!cell.isExam && this.getCurrentWeekConflictCells(day, cell.startSection, week).length > 1) {
                           Text('⚠️').fontSize(8).fontColor('#FFFFFF').position({ top: 2, right: 2 })
                         }
                       }.width('100%').height('100%').padding({ left: 4, right: 4, top: 4, bottom: 4 })
                       .backgroundColor(this.getCellColor(cell)).borderRadius(8)
                       .opacity(cell.day === this._todayDay &&
-                        this.currentWeek === this.getRealCurrentWeek() &&
-                        cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
+                            week === this.getRealCurrentWeek() &&
+                        cell.weekList.length > (week - 1) && cell.weekList[week - 1] &&
                           (cell.isExam ? this.getExamStatus(cell) === -1 :
                           this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) === -1) ? 0.6 : 1)
                       .alignItems(HorizontalAlign.Start).justifyContent(FlexAlign.Start)
@@ -2226,14 +2244,14 @@ export struct ClassTablePage {
                       })
                       .border({
                         width: 2,
-                        color: (cell.day === this._todayDay && this.currentWeek === this.getRealCurrentWeek() &&
-                          cell.weekList.length > (this.currentWeek - 1) && cell.weekList[this.currentWeek - 1] &&
+                        color: (cell.day === this._todayDay && week === this.getRealCurrentWeek() &&
+                          cell.weekList.length > (week - 1) && cell.weekList[week - 1] &&
                           (cell.isExam ? this.getExamStatus(cell) === 1 :
                             (this._cellStatusesMap.get(`${cell.startSection}_${cell.endSection}`) ?? 0) === 1))
                           ? (AppStorage.get('accent_color') as string ?? '#2979FF')
                           : this.getCellBorderColor(cell)
                       })
-                      .onClick(() => {
+                      .hoverEffect(HoverEffect.Auto).onClick(() => {
                         if (cell.isExam) {
                           this.currentConflictCells = [cell];
                           this.showDetailDialog = true;
@@ -2441,6 +2459,7 @@ export struct ClassTablePage {
       }
 
       // 4. 启用日历提醒
+      let failCount: number = 0;
       try {
         const config: calendarManager.CalendarConfig = {
           enableReminder: true,
@@ -2448,6 +2467,8 @@ export struct ClassTablePage {
         };
         await calendar.setConfig(config);
       } catch (cfgErr) {
+        failCount++;
+        console.warn('[ClassTablePage] calendar setConfig failed: ' + String(cfgErr));
       }
 
       const startDate: Date = SemesterUtil.getSemesterStartDate(this.semesterCode);
@@ -2469,6 +2490,8 @@ export struct ClassTablePage {
           }
         }
       } catch (getErr) {
+        failCount++;
+        console.warn('[ClassTablePage] calendar getEvents failed: ' + String(getErr));
       }
 
       // 6. 遍历课程，增量导入：跳过已有的，只添加新的
@@ -2542,6 +2565,8 @@ export struct ClassTablePage {
                 await calendar.addEvent(event);
                 newCount++;
               } catch (addErr) {
+                failCount++;
+                console.warn('[ClassTablePage] calendar addEvent(course) failed: ' + String(addErr));
               }
             }
           }
@@ -2603,6 +2628,8 @@ export struct ClassTablePage {
             await calendar.addEvent(event);
             newCount++;
           } catch (addErr) {
+            failCount++;
+            console.warn('[ClassTablePage] calendar addEvent(exam) failed: ' + String(addErr));
           }
         }
       }
@@ -2617,6 +2644,8 @@ export struct ClassTablePage {
             await calendar.deleteEvent(existingMap[sig]);
             delCount++;
           } catch (delErr) {
+            failCount++;
+            console.warn('[ClassTablePage] calendar deleteEvent failed: ' + String(delErr));
           }
         }
       }
@@ -2625,6 +2654,7 @@ export struct ClassTablePage {
       if (newCount > 0) msg += '新增 ' + newCount + ' 条';
       if (delCount > 0) msg += (msg.length > 0 ? '，删除 ' : '删除 ') + delCount + ' 条';
       if (skipCount > 0) msg += (msg.length > 0 ? '，跳过 ' : '跳过 ') + skipCount + ' 条';
+      if (failCount > 0) msg += (msg.length > 0 ? '，' : '') + failCount + ' 条失败（权限受限或日历限制）';
       if (msg.length === 0) msg = '课程无变化';
       this.calendarImportMsg = msg;
       // 标记已绑定日历，保存当前 snapshot
@@ -3022,6 +3052,8 @@ export struct ClassTablePage {
       await fileIo.write(writeFile.fd, encoded.buffer);
       await fileIo.close(writeFile);
     } catch (e) {
+      // 自定义课表落盘失败：重启后自定义课程丢失，必须留日志
+      console.warn('[ClassTablePage] saveCustomList failed: ' + String(e));
     }
     AppStorage.setOrCreate('ct_updated', String(Date.now()) + '_' + String(Math.floor(Math.random() * 10000)));
   }
@@ -3101,7 +3133,7 @@ export struct ClassTablePage {
   private async mergePhysicsExperiments(): Promise<void> {
     const PHYSICS_CACHE = 'physics_exp_cache';
     const CACHE_TTL = 30 * 60 * 1000; // 30 分钟
-    const pwd = PreferenceUtil.getString('physics_pwd');
+    const pwd = await SecureStorageUtil.get(SecureAlias.PHYSICS_PWD);
     if (pwd.length === 0) return; // 无密码，跳过
     try {
       let items: Record<string, string>[] = [];
@@ -3115,19 +3147,18 @@ export struct ClassTablePage {
         } catch (_e) { PreferenceUtil.putString(PHYSICS_CACHE, ''); }
       }
       if (items.length === 0) {
-        let http = HttpUtil.getInstance();
         let account = PreferenceUtil.getString('ids_account');
-        let bd = '__EVENTTARGET=&__EVENTARGUMENT=&__VIEWSTATE=%2FwEPDwUKMTEzNzM0MjM0OWQYAQUeX19Db250cm9sc1JlcXVpcmVQb3N0QmFja0tleV9fFgEFD2xvZ2luMSRidG5Mb2dpbkOuzGVaztce4Ict7jsIJ0F5pUDb%2BsmSbCCrNVSBlPML&__VIEWSTATEGENERATOR=EE008CD9&__EVENTVALIDATION=%2FwEdAAcKecdPGDB%2BfW8Tyghx7AeSpOzeiNZ7aaEg5p6LqSa9cODI2bZwNtRxUKPkisVLf8l8Vv4WhRVIIhZlyYNJO%2BySrDKOhP%2B%2FYMNbVIh74hA2rCYnBBSTsX9SjxiYNNk%2B5kglM%2B6pGIq22Oi5mNu6u6eC2WEBfKAmATKwSpsOL%2FPNcRyi9l8Dnp6JamksyAzjhW4%3D&login1%24StuLoginID='+encodeURIComponent(account)+'&login1%24StuPassword='+encodeURIComponent(pwd)+'&login1%24UserRole=Student&login1%24btnLogin.x=28&login1%24btnLogin.y=14';
-        await http.postRaw('http://wlsy.xidian.edu.cn/PhyEws/default.aspx', bd, 'application/x-www-form-urlencoded');
-        let r = await http.get('http://wlsy.xidian.edu.cn/PhyEws/student/select.aspx');
-        if (r.isOk) {
-          let parsed = this.parsePhysicsToItems(r.body);
-          if (parsed.length > 0) {
-            let pc: ESObject = {'ts':Date.now(),'data':parsed} as ESObject;
-            PreferenceUtil.putString(PHYSICS_CACHE, JSON.stringify(pc));
-          }
-          items = parsed;
+        // 共享登录+取页（ExperimentService，勿在本页另写登录/解析：残缺解析曾覆写共享缓存，
+        // 污染 ExperimentPage/MainPage 预览/桌面卡片对 physics_exp_cache 的读取；
+        // 登录失败抛带 login1_Label1 原始文案的 Error，后台场景由外层 catch 静默兜底）
+        const html = await ExperimentService.physicsFetchScheduleHtml(account, pwd);
+        const startTs: number = SemesterUtil.getSemesterStartDate(this.semesterCode).getTime();
+        let parsed = ExperimentService.parsePhysicsHtml(html, startTs);
+        if (parsed.length > 0) {
+          let pc: ESObject = {'ts':Date.now(),'data':parsed} as ESObject;
+          PreferenceUtil.putString(PHYSICS_CACHE, JSON.stringify(pc));
         }
+        items = parsed;
       }
       if (items.length > 0) {
         // 深拷贝当前 grid，合并物理实验
@@ -3138,6 +3169,10 @@ export struct ClassTablePage {
           let s = parseInt(it['startSection'] as string);
           let e = parseInt(it['endSection'] as string);
           if (isNaN(d) || isNaN(s) || isNaN(e) || d < 1 || d > 7) continue;
+          // 实验只在对应周出现（与 mergeExperimentData 的 sysj 实验同规则；weekList 为空会整学期不渲染）
+          const phyWeek: number = parseInt(it['week'] as string) || 0;
+          const weekList: boolean[] = [];
+          for (let w = 0; w < 25; w++) weekList.push(phyWeek >= 1 && phyWeek <= 25 && w === phyWeek - 1);
           let cell = new ClassCell();
           cell.name = (it['experimentName'] || '物理实验').replace('⚛ ', ''); // 弹窗已自动加🧪前缀
           cell.classroom = it['lab'] || '';
@@ -3150,7 +3185,8 @@ export struct ClassTablePage {
           cell.isExperiment = true;
           cell.isPhysics = true;
           cell.experimentProject = it['experimentProject'] || '';
-          cell.weekDesc = '第' + (it['week'] || '?') + '周';
+          cell.weekList = weekList;
+          cell.weekDesc = phyWeek > 0 ? ('第' + phyWeek + '周') : '';
           cell.colorIndex = 0;
           grid[d][s].push(cell);
           merged++;
@@ -3161,27 +3197,5 @@ export struct ClassTablePage {
         }
       }
     } catch (_e) { /* 无物理实验或网络错误，静默 */ }
-  }
-
-  // 从物理实验 HTML 解析为简单记录（与 ExperimentPage.parsePhysicsHtml 逻辑一致）
-  private parsePhysicsToItems(html: string): Record<string, string>[] {
-    let items: Record<string, string>[] = [];
-    let trs = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi);
-    if (!trs) return items;
-    for (let tr of trs) {
-      let tds: string[] = []; let tm: RegExpExecArray|null; let tr2 = new RegExp(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-      while((tm=tr2.exec(tr))!==null) tds.push(tm[1].replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').trim());
-      if (tds.length < 10 || tds[1].length === 0) continue;
-      let dp = (tds[4]||'').split('/'); let isPM = (tds[3]||'').includes('15');
-      let it: Record<string, string> = {
-      };
-      if(dp.length >= 3) {
-        let dt = new Date(parseInt(dp[2]), parseInt(dp[0])-1, parseInt(dp[1]));
-        it['weekday'] = String(dt.getDay()===0 ? 7 : dt.getDay());
-        it['startSection'] = isPM ? '7' : '9'; it['endSection'] = isPM ? '9' : '11';
-      }
-      items.push(it);
-    }
-    return items;
   }
 }

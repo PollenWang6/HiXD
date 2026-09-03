@@ -1,4 +1,4 @@
-// ColorWheelPicker.ets — Canvas 无极取色盘（官方文档方案）
+﻿// ColorWheelPicker.ets — Canvas 无极取色盘（官方文档方案）
 import { ThemeColors } from '../utils/ThemeColors';
 import { AccentColors } from '../utils/AccentColors';
 
@@ -138,11 +138,11 @@ export struct ColorWheelPicker {
         Button('取消').height(40).fontSize(15)
           .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary).borderRadius(10)
           .layoutWeight(1)
-          .onClick(() => { if (this.onCancel) this.onCancel(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { if (this.onCancel) this.onCancel(); })
         Button('确认').height(40).fontSize(15)
           .backgroundColor(this.hex).fontColor('#FFFFFF').borderRadius(10)
           .layoutWeight(1).margin({ left: 10 })
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             AccentColors.selectCustom(this.hex);
             if (this.onCancel) this.onCancel();
           })

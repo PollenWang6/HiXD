@@ -1,4 +1,4 @@
-// DeclarationPage.ets — 首启「非官方 / 无关联」强制声明页
+﻿// DeclarationPage.ets — 首启「非官方 / 无关联」强制声明页
 // 上架合规要点：华为应用市场审核以「官方误认」驳回（应用功能与校名强关联、缺官方授权证明）。
 //   规避手段（参考 DailyNic_HMOS）：在隐私同意之前，先用独立首启页让用户「手打」确认句，
 //   显式承认「本应用非官方、与学校无任何关联」，并将该确认持久化，避免用户产生混淆、误认。
@@ -168,7 +168,7 @@ struct DeclarationPage {
           .backgroundColor(this.matched ? ThemeColors.accent : ThemeColors.bgInput)
           .fontColor(this.matched ? ThemeColors.textOnDark : ThemeColors.textHint)
           .enabled(this.matched)
-          .onClick(() => this.onConfirm())
+          .hoverEffect(HoverEffect.Auto).onClick(() => this.onConfirm())
       }
       .width('100%')
       .padding({ top: 16, bottom: 24 })

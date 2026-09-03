@@ -1,15 +1,15 @@
-// RuisiNewPostPage.ets — 发帖
+﻿// RuisiNewPostPage.ets — 发帖
 // 对标 Flutter new_post_page.dart：板块选择 + 主题分类 + 标题 + 内容 + 表情 + 图片附件
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
 import {
   PostPageMeta, RuisiAttachment, Forum, ForumGroup, ForumTypeOption
-} from '../../services/RuisiModels';
-import { RuisiAttachmentUtil, ruisiInsertAtCaret } from '../../services/RuisiAttachmentUtil';
-import { RuisiSmileyService } from '../../services/RuisiSmileyService';
-import { RuisiSmileyPanel } from '../../components/RuisiSmileyPanel';
+} from '../../models/ruisi/RuisiModels';
+import { RuisiAttachmentUtil, ruisiInsertAtCaret } from '../../services/ruisi/RuisiAttachmentUtil';
+import { RuisiSmileyService } from '../../services/ruisi/RuisiSmileyService';
+import { RuisiSmileyPanel } from '../../pages/ruisi/components/RuisiSmileyPanel';
 import { ToastUtil } from '../../utils/ToastUtil';
 
 @Component
@@ -69,7 +69,11 @@ export struct RuisiNewPostPage {
         for (const f of g.forums) flat.push(f);
       }
       this.flatForums = flat;
-    } catch (e) {}
+    } catch (e) {
+      // 板块列表加载失败时下拉为空且无提示，用户会以为没有板块可发
+      console.warn('[RuisiNewPostPage] loadForums failed: ' + String(e));
+      ToastUtil.show('板块列表加载失败，请返回重试');
+    }
   }
 
   async onForumSelected(idx: number): Promise<void> {
@@ -91,7 +95,10 @@ export struct RuisiNewPostPage {
         this.selectedTypeId = 0;
         this.typeName = '无';
       }
-    } catch (e) {}
+    } catch (e) {
+      // 类型元数据失败不阻断发帖（类型可选），但留日志便于排查
+      console.warn('[RuisiNewPostPage] loadMeta failed: ' + String(e));
+    }
   }
 
   // 板块下拉选项（无占位项，未选时下拉框留空）
@@ -174,6 +181,10 @@ export struct RuisiNewPostPage {
       );
       if (result.success) {
         ToastUtil.show('发帖成功');
+        // 通知列表页刷新：首页/板块列表页通过 @StorageProp+@Watch 监听该计数器，
+        // 用递增计数保证每次发帖都触发（布尔值重复写 true 不会触发通知）
+        AppStorage.setOrCreate('ruisi_thread_list_version',
+          (AppStorage.get<number>('ruisi_thread_list_version') ?? 0) + 1);
         this.pageInfo.pop();
       } else {
         ToastUtil.show(result.message);
@@ -192,7 +203,7 @@ export struct RuisiNewPostPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
 
       Text('发帖')
         .fontSize(22).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
@@ -219,7 +230,7 @@ export struct RuisiNewPostPage {
       .backgroundColor(this.isDark ? 'rgba(255,255,255,0.18)' : this.accentTextColor())
       .borderRadius(18)
       .enabled(!this.posting)
-      .onClick(() => { this.doPost(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.doPost(); })
     }
     .width('100%').height('100%')
     .padding({ left: 12, right: 16, top: this.statusBarHeight })
@@ -313,7 +324,7 @@ export struct RuisiNewPostPage {
                     Text('✕').fontSize(12).fontColor('#FFFFFF')
                       .backgroundColor('rgba(0,0,0,0.5)').borderRadius(10).width(20).height(20)
                       .textAlign(TextAlign.Center)
-                      .onClick(() => { this.removeAttachment(idx); })
+                      .hoverEffect(HoverEffect.Auto).onClick(() => { this.removeAttachment(idx); })
                   }.width(72).height(72).margin({ right: 8 })
                 }, (att: RuisiAttachment) => 'post_att_' + att.aid)
               }.width('100%').margin({ bottom: 16 }).justifyContent(FlexAlign.Start)
@@ -326,7 +337,7 @@ export struct RuisiNewPostPage {
               }
               .padding({ left: 14, right: 14, top: 8, bottom: 8 })
               .backgroundColor(ThemeColors.bgInput).borderRadius(20)
-              .onClick(() => { this.showEmoji = !this.showEmoji; })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.showEmoji = !this.showEmoji; })
 
               Row({ space: 6 }) {
                 if (this.uploading) {
@@ -338,7 +349,7 @@ export struct RuisiNewPostPage {
               .padding({ left: 14, right: 14, top: 8, bottom: 8 })
               .backgroundColor(ThemeColors.bgInput).borderRadius(20)
               .margin({ left: 10 })
-              .onClick(() => { this.pickImage(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.pickImage(); })
 
               Blank()
               Text(this.attachments.length + '/9').fontSize(12).fontColor(ThemeColors.textHint)

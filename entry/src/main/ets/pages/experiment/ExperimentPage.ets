@@ -2,8 +2,11 @@
 // ExperimentPage.ets - 实验信息页面（HTTP 数据获取）
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ThemeColors } from '../../utils/ThemeColors';
-import { SemesterUtil } from '../../services/EhallService';
+import { SemesterUtil } from '../../services/ids/EhallService';
+import { ExperimentService } from '../../services/experiment/ExperimentService';
+import { PhysicsScoreService, PhysicsScoreResult } from '../../services/experiment/PhysicsScoreService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
+import { SecureStorageUtil, SecureAlias } from '../../utils/SecureStorageUtil';
 
 const TAG = 'ExperimentPage';
 const WEEKDAY_NAMES: string[] = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -13,6 +16,32 @@ const CACHE_TTL = 4 * 60 * 60 * 1000;
 const TERM_ID = '2003';
 const SYSJ_BASE = 'https://sysj.xidian.edu.cn';
 const MAX_WEEKS = 25;
+// 成绩识别 8 分钟内存记忆（模块级：跨页面实例生效，避免反复进出实验页重复起 wgyreport 会话）
+let gLastScoreFetchTs: number = 0;
+
+// 节次钟点表（下标即节次 1..11，与 ClassTablePage 一致）——把「第x-y节」换算成绝对钟点，
+// 用于时间线三分类（进行中/未完成/已完成），对齐 Flutter 按 timeRange 判定的语义
+const SECT_TIMES: string[] = [
+  '', '8:30-9:15', '9:20-10:05', '10:25-11:10', '11:15-12:00',
+  '14:00-14:45', '14:50-15:35', '15:55-16:40', '16:45-17:30',
+  '19:00-19:45', '19:55-20:35', '20:40-21:25'
+];
+
+function sectStart(s: number): string {
+  if (s >= 1 && s < SECT_TIMES.length) {
+    const p: string[] = SECT_TIMES[s].split('-');
+    return p.length > 0 ? p[0] : '';
+  }
+  return '';
+}
+
+function sectEnd(s: number): string {
+  if (s >= 1 && s < SECT_TIMES.length) {
+    const p: string[] = SECT_TIMES[s].split('-');
+    return p.length > 1 ? p[1] : '';
+  }
+  return '';
+}
 
 enum PageState { IDLE, LOADING, SUCCESS, ERROR }
 
@@ -21,11 +50,16 @@ interface SysjScheduleItem {
   weekday: string; startSection: string; endSection: string; week: string;
   unknown8: string; teacher: string; unknown10: string; className: string;
   groupId: string; studentCount: string; experimentProject: string; __week: number;
+  isPhysics?: boolean;  // true=wlsy 物理实验（真实场次钟点），缺省=sysj 其他实验（节次换算）
 }
 
 interface ExpCard {
   date: string; weekdayName: string; weekNum: number; sectionName: string;
-  isCompleted: boolean; experimentName: string; lab: string; teacher: string;
+  startSection: number;       // 分组排序/去重键用
+  startTime: string;          // 开始钟点 HH:mm（物理=真实场次；其他=节次表换算）
+  endTime: string;            // 结束钟点 HH:mm
+  isPhysics: boolean;         // 物理实验卡（时间行显示绝对场次窗口）
+  experimentName: string; lab: string; teacher: string;
   experimentProject: string; className: string;
 }
 
@@ -42,8 +76,19 @@ export struct ExperimentPage {
   @State errorMsg: string = '';
   @State showCacheBanner: boolean = false;
   @State cards: ExpCard[] = [];
+  @State doingCards: ExpCard[] = [];      // 正在进行实验（当前时刻处于场次窗口内）
+  @State upcomingCards: ExpCard[] = [];   // 未完成实验（场次开始时间在未来）
+  @State doneCards: ExpCard[] = [];       // 已完成实验（场次已结束）
   @State fetchProgress: string = '';
   @State private isRefreshing: boolean = false;
+  // 物理实验成绩角标（wgyreport 识别）：规整实验名 → 识别结果；空 Map=未识别/识别失败
+  @State physicsScores: Record<string, PhysicsScoreResult> = {};
+  // 成绩详情半屏（对齐 Flutter 点击成绩 chip 弹图片+预测分）
+  @State showScoreSheet: boolean = false;
+  @State sheetExpName: string = '';
+  @State sheetScoreLabel: string = '';
+  @State sheetScoreFound: boolean = false;
+  @State sheetScoreUrl: string = '';
   @StorageLink('theme_is_dark') themeIsDark: boolean = false;
 
     @Builder buildWhiteTitle(t: string) {
@@ -55,7 +100,7 @@ export struct ExperimentPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -92,8 +137,9 @@ export struct ExperimentPage {
       this.doHttpSSOAndFetch();
       await this.fetchPhysicsExperiment();
     }
-    if (this.cards.length === 0) this.onError('暂无实验信息');
-    else this.pageState = PageState.SUCCESS;
+    // 物理实验内部已设置更具体的错误（无密码引导/登录失败原因）时不覆盖
+    if (this.cards.length === 0 && !this.isErrorState()) this.onError('暂无实验信息');
+    else if (!this.isErrorState()) this.pageState = PageState.SUCCESS;
   }
 
   // ===== HTTP OAuth + 数据获取 =====
@@ -127,8 +173,13 @@ export struct ExperimentPage {
         }
         this.buildCards(allItems);
         this.showCacheBanner = false;
-        if (allItems.length > 0) { this.pageState = PageState.SUCCESS; return; }
-        else { this.onError('暂无实验信息'); return; }
+        // 已登录会话下也顺带刷新物理实验（此前直接 return 会跳过物理实验加载）
+        await this.fetchPhysicsExperiment();
+        if (!this.isErrorState()) {
+          if (this.cards.length === 0) this.onError('暂无实验信息');
+          else this.pageState = PageState.SUCCESS;
+        }
+        return;
       }
 
       // === Step 1: 从 sysj OAuth 重定向链提取真实 state ===
@@ -272,7 +323,8 @@ export struct ExperimentPage {
       }
       this.buildCards(allItems);
       await this.fetchPhysicsExperiment();
-      if (this.cards.length === 0) {
+      // 物理实验已给出更具体的错误（无密码引导/登录失败原因）时不覆盖
+      if (this.cards.length === 0 && !this.isErrorState()) {
         this.onError('暂无实验信息');
       }
     } catch (e) {
@@ -302,8 +354,13 @@ export struct ExperimentPage {
     } catch (e) { /* non-critical */ }
   }
 
+  // 统一卡片构建：sysj(其他实验) 与 wlsy(物理实验) 分多次喂入——
+  // 先并入已有卡片再叠加本次数据，避免后一次调用覆盖前一次；最后按绝对钟点做时间线三分类。
   buildCards(items: SysjScheduleItem[]): void {
     let cmap: Map<string, ExpCard> = new Map();
+    for (let old of this.cards) {
+      cmap.set(old.date + '_' + String(old.startSection), old);
+    }
     let ss = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
     let today = formatDate(new Date());
     let dm = 86400000;
@@ -312,35 +369,85 @@ export struct ExperimentPage {
       let lab = it.lab || '';
       let wd = parseInt(it.weekday) || 1;
       let ss2 = parseInt(it.startSection) || 1;
-      let es = parseInt(it.endSection) || 1;
+      let es = parseInt(it.endSection) || ss2;
       let wn = parseInt(it.week) || 1;
       if (wn <= 0 || wn > 20) continue;
       let t = ss.getTime() + (wn - 1) * 7 * dm + (wd - 1) * dm;
       let date = formatDate(new Date(t));
       let sn = '\u7b2c' + ss2 + '-' + es + '\u8282';
+      // 物理实验（解析器统一带 ⚛ 前缀或显式标记）：按真实场次窗口；其他实验按节次表换算钟点
+      let isPhysics = it.isPhysics === true || en.indexOf('\u269b') === 0;
+      let startTime = '';
+      let endTime = '';
+      if (isPhysics) {
+        startTime = ss2 === 7 ? '15:55' : '18:30';
+        endTime = ss2 === 7 ? '18:10' : '20:45';
+      } else {
+        startTime = sectStart(ss2);
+        endTime = sectEnd(es);
+      }
       let key = date + '_' + ss2;
       let card = cmap.get(key);
       if (!card) {
         card = {
           date: date, weekdayName: getWeekdayName(wd), weekNum: wn,
-          sectionName: sn, isCompleted: date < today, experimentName: en,
-          lab: lab, teacher: it.teacher || '', experimentProject: it.experimentProject || '',
-          className: it.className || ''
+          sectionName: sn, startSection: ss2, startTime: startTime, endTime: endTime,
+          isPhysics: isPhysics, experimentName: en, lab: lab, teacher: it.teacher || '',
+          experimentProject: it.experimentProject || '', className: it.className || ''
         } as ExpCard;
         cmap.set(key, card);
       }
       if (it.experimentProject && card.experimentProject.indexOf(it.experimentProject) < 0)
         card.experimentProject += ' | ' + it.experimentProject;
     }
-    let sk: string[] = []; cmap.forEach((_v: ExpCard, k: string) => { sk.push(k); }); sk.sort();
-    let up: ExpCard[] = []; let cm: ExpCard[] = [];
-    for (let k of sk) { let c = cmap.get(k); if (c) { if(c.isCompleted)cm.push(c); else up.push(c); } }
-    this.cards = up.concat(cm);
+    let sk: string[] = [];
+    cmap.forEach((_v: ExpCard, k: string) => { sk.push(k); });
+    sk.sort();
+    let merged: ExpCard[] = [];
+    for (let k of sk) { let c = cmap.get(k); if (c) merged.push(c); }
+
+    // 时间线三分类（对齐 Flutter TimelineWidget：进行中→未完成→已完成），组内按日期+节次升序
+    let now = Date.now();
+    let doing: ExpCard[] = [];
+    let up: ExpCard[] = [];
+    let dn: ExpCard[] = [];
+    for (let c of merged) {
+      if (c.startTime.length === 0) {
+        // 节次越界无法换算钟点：仅按日期粗分（今天及以后视为未完成）
+        if (c.date < today) dn.push(c);
+        else up.push(c);
+        continue;
+      }
+      let d0 = c.date.split('-');
+      let sh = parseInt(c.startTime.split(':')[0]);
+      let sm = parseInt(c.startTime.split(':')[1]);
+      let eh = parseInt(c.endTime.split(':')[0]);
+      let em = parseInt(c.endTime.split(':')[1]);
+      let sTs = new Date(parseInt(d0[0]), parseInt(d0[1]) - 1, parseInt(d0[2]), sh, sm).getTime();
+      let eTs = new Date(parseInt(d0[0]), parseInt(d0[1]) - 1, parseInt(d0[2]), eh, em).getTime();
+      if (eTs <= now) dn.push(c);
+      else if (sTs <= now) doing.push(c);
+      else up.push(c);
+    }
+    this.doingCards = doing;
+    this.upcomingCards = up;
+    this.doneCards = dn;
+    this.cards = merged;
   }
 
   async fetchPhysicsExperiment(): Promise<void> {
-    let pwd = PreferenceUtil.getString('physics_pwd');
-    if (pwd.length === 0) { if(this.cards.length===0)this.onError('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f'); else this.pageState=PageState.SUCCESS; return; }
+    let pwd = await SecureStorageUtil.get(SecureAlias.PHYSICS_PWD);
+    // P1-b：未设置物理实验密码时给明确引导（此前显示"暂无实验信息"误导用户）
+    if (pwd.length === 0) {
+      if (this.cards.length === 0) {
+        this.errorMsg = '未设置物理实验密码：物理实验（wlsy）需独立密码，请到「我的」页 → 物理实验设置 中填写后刷新';
+        this.pageState = PageState.ERROR;
+      } else {
+        this.pageState = PageState.SUCCESS;
+      }
+      return;
+    }
+    let failMsg = '';
     try {
       let pi: SysjScheduleItem[] = [];
       let cached = PreferenceUtil.getString(PHYSICS_CACHE_KEY);
@@ -349,46 +456,110 @@ export struct ExperimentPage {
         if (Date.now()-(c['ts'] as number)<CACHE_TTL && ((c['data'] as Object[])).length>0) pi = c['data'] as SysjScheduleItem[];
       }
       if (pi.length === 0) {
-        let http = HttpUtil.getInstance();
-        let bd = '__EVENTTARGET=&__EVENTARGUMENT=&__VIEWSTATE=%2FwEPDwUKMTEzNzM0MjM0OWQYAQUeX19Db250cm9sc1JlcXVpcmVQb3N0QmFja0tleV9fFgEFD2xvZ2luMSRidG5Mb2dpbkOuzGVaztce4Ict7jsIJ0F5pUDb%2BsmSbCCrNVSBlPML&__VIEWSTATEGENERATOR=EE008CD9&__EVENTVALIDATION=%2FwEdAAcKecdPGDB%2BfW8Tyghx7AeSpOzeiNZ7aaEg5p6LqSa9cODI2bZwNtRxUKPkisVLf8l8Vv4WhRVIIhZlyYNJO%2BySrDKOhP%2B%2FYMNbVIh74hA2rCYnBBSTsX9SjxiYNNk%2B5kglM%2B6pGIq22Oi5mNu6u6eC2WEBfKAmATKwSpsOL%2FPNcRyi9l8Dnp6JamksyAzjhW4%3D&login1%24StuLoginID='+encodeURIComponent(PreferenceUtil.getString('ids_account'))+'&login1%24StuPassword='+encodeURIComponent(pwd)+'&login1%24UserRole=Student&login1%24btnLogin.x=28&login1%24btnLogin.y=14';
-        await http.postRaw('http://wlsy.xidian.edu.cn/PhyEws/default.aspx', bd, 'application/x-www-form-urlencoded');
-        let r = await http.get('http://wlsy.xidian.edu.cn/PhyEws/student/select.aspx');
-        if (r.isOk) {
-          pi = this.parsePhysicsHtml(r.body);
-          let pc: ESObject = {'ts':Date.now(),'data':pi} as ESObject;
-          PreferenceUtil.putString(PHYSICS_CACHE_KEY, JSON.stringify(pc));
-        }
+        // 共享登录+取页：登录失败会抛带 login1_Label1 原始文案的 Error（如"学号或密码错误"），
+        // 不再把失败响应当成功解析出空列表、误报"暂无实验信息"
+        const html = await ExperimentService.physicsFetchScheduleHtml(
+          PreferenceUtil.getString('ids_account'), pwd);
+        const startTs = SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode()).getTime();
+        pi = this.toSysjItems(ExperimentService.parsePhysicsHtml(html, startTs));
+        let pc: ESObject = {'ts':Date.now(),'data':pi} as ESObject;
+        PreferenceUtil.putString(PHYSICS_CACHE_KEY, JSON.stringify(pc));
       }
       if (pi.length > 0) this.buildCards(pi);
-    } catch (e) {}
-    if(this.cards.length===0)this.onError('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f'); else this.pageState=PageState.SUCCESS;
+      // 成绩角标：wgyreport 独立会话识别，不 await 阻塞排课；失败静默=无角标（对齐 Flutter getData）
+      this.refreshPhysicsScores(pwd);
+    } catch (e) {
+      // 失败原因（密码错误/网络异常）直接透出，不再一律显示"暂无实验信息"误导用户
+      failMsg = e instanceof Error ? e.message : String(e);
+      console.warn('[ExperimentPage] fetchPhysicsExperiment failed: ' + failMsg);
+    }
+    if (this.cards.length === 0) {
+      this.onError(failMsg.length > 0 ? ('实验信息获取失败：' + failMsg) : '暂无实验信息');
+    } else {
+      // 已有卡片（sysj 实验）但物理实验失败：顶部横幅提示，不全页报错
+      if (failMsg.length > 0) {
+        this.errorMsg = '实验信息获取失败：' + failMsg;
+        this.showCacheBanner = true;
+      }
+      this.pageState = PageState.SUCCESS;
+    }
   }
 
-  parsePhysicsHtml(html: string): SysjScheduleItem[] {
-    let items: SysjScheduleItem[] = [];
-    let trs = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi);
-    if (!trs) return items;
-    for (let tr of trs) {
-      let tds: string[] = []; let tm: RegExpExecArray|null; let tr2 = new RegExp(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-      while((tm=tr2.exec(tr))!==null) tds.push(tm[1].replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').trim());
-      if (tds.length<10||tds[1].length===0) continue;
-      let dp = (tds[4]||'').split('/'); let isPM = (tds[3]||'').includes('15');
-      let it: SysjScheduleItem = {
-        courseCode:'', experimentName:'\u269b '+tds[1], department:'',
-        lab:tds[5]||'', weekday:'0', startSection:isPM?'7':'9', endSection:isPM?'9':'11',
-        week:'0', unknown8:'', teacher:tds[9]||'', unknown10:'', className:'',
-        groupId:'', studentCount:'', experimentProject:tds[8]||'', __week:0
-      } as SysjScheduleItem;
-      if(dp.length>=3){
-        let dt = new Date(parseInt(dp[2]),parseInt(dp[0])-1,parseInt(dp[1]));
-        it.weekday=String(dt.getDay()===0?7:dt.getDay());
-        let ss2=SemesterUtil.getSemesterStartDate(SemesterUtil.getCurrentSemesterCode());
-        it.week=String(Math.floor((dt.getTime()-ss2.getTime())/86400000/7)+1);
-        it.startSection=isPM?'7':'9'; it.endSection=isPM?'9':'11';
+  // ===== 物理实验成绩角标（移植 Flutter image_recognition + physics_experiment_session）=====
+
+  // 成绩识别入口：逐图下载→左上角 50×20 像素 FNV-1a 哈希→查 12 项哈希表→按实验名回填。
+  // 内部 8 分钟记忆，避免同一页面反复进出时重复起 wgyreport 会话；识别失败静默清空角标。
+  private async refreshPhysicsScores(pwd: string): Promise<void> {
+    const account: string = PreferenceUtil.getString('ids_account');
+    if (account.length === 0 || pwd.length === 0) return;
+    if (Date.now() - gLastScoreFetchTs < 8 * 60 * 1000) return; // 命中内存记忆
+    gLastScoreFetchTs = Date.now();
+    try {
+      const raw: Record<string, PhysicsScoreResult> =
+        await PhysicsScoreService.getInstance().recognizeAllScores(account, pwd);
+      const res: Record<string, PhysicsScoreResult> = {};
+      const keys: string[] = Object.keys(raw);
+      for (let i = 0; i < keys.length; i++) {
+        res[PhysicsScoreService.normalizeName(keys[i])] = raw[keys[i]];
       }
-      items.push(it);
+      this.physicsScores = res;
+      console.info('[ExperimentPage] physics scores recognized: ' + String(Object.keys(res).length));
+    } catch (e) {
+      // 识别失败静默（对齐 Flutter getData 的 try/catch：跳过识别不阻塞排课）
+      console.warn('[ExperimentPage] refreshPhysicsScores failed: ' + String(e));
+      this.physicsScores = {};
     }
-    return items;
+  }
+
+  // 物理卡 → 该实验名对应识别结果；无角标（非物理/未识别/未命中名单）返回 undefined
+  private scoreOf(card: ExpCard): PhysicsScoreResult | undefined {
+    if (!card.isPhysics) return undefined;
+    const key: string = PhysicsScoreService.normalizeName(card.experimentName);
+    if (key.length === 0) return undefined;
+    const r = this.physicsScores[key];
+    return r ? r : undefined;
+  }
+
+  private scoreChipVisible(card: ExpCard): boolean {
+    return this.scoreOf(card) !== undefined;
+  }
+
+  private scoreChipText(card: ExpCard): string {
+    const sr = this.scoreOf(card);
+    if (!sr) return '';
+    if (!sr.found) return '查看成绩';
+    // 提交状态图（无数字分）直接显示状态；数字分带"成绩 "前缀
+    if (sr.label === '已上传' || sr.label === '未上传') return sr.label;
+    return '成绩 ' + sr.label;
+  }
+
+  private openScoreSheet(card: ExpCard): void {
+    const sr = this.scoreOf(card);
+    if (!sr) return;
+    this.sheetExpName = card.experimentName;
+    this.sheetScoreLabel = sr.label;
+    this.sheetScoreFound = sr.found;
+    this.sheetScoreUrl = sr.rawUrl;
+    this.showScoreSheet = true;
+  }
+
+  // Record<string,string>（共享解析器产物）→ SysjScheduleItem（本页卡片消费模型）
+  private toSysjItems(src: Record<string, string>[]): SysjScheduleItem[] {
+    const out: SysjScheduleItem[] = [];
+    for (let i = 0; i < src.length; i++) {
+      const s = src[i];
+      out.push({
+        courseCode: s['courseCode'] || '', experimentName: s['experimentName'] || '',
+        department: s['department'] || '', lab: s['lab'] || '',
+        weekday: s['weekday'] || '', startSection: s['startSection'] || '',
+        endSection: s['endSection'] || '', week: s['week'] || '',
+        unknown8: '', teacher: s['teacher'] || '', unknown10: '',
+        className: s['className'] || '', groupId: s['groupId'] || '',
+        studentCount: s['studentCount'] || '', experimentProject: s['experimentProject'] || '',
+        __week: 0, isPhysics: true
+      } as SysjScheduleItem);
+    }
+    return out;
   }
 
   onError(msg: string) {
@@ -401,6 +572,12 @@ export struct ExperimentPage {
       this.errorMsg = msg;
       this.pageState = PageState.ERROR;
     }
+  }
+
+  // 读取当前是否已处于错误态（用方法调用打断 ArkTS 对 this.pageState 的控制流收窄，
+  // 避免"先赋 LOADING、后比 ERROR 无重叠"的 10505001 误报）
+  private isErrorState(): boolean {
+    return this.pageState === PageState.ERROR;
   }
 
   build() {
@@ -417,7 +594,7 @@ export struct ExperimentPage {
             Text('\ud83d\udccb').fontSize(48)
             Text(this.errorMsg).fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
             Row() {
-              Button('\u91cd\u8bd5').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(36).margin({top:20}).onClick(()=>{this.doHttpSSOAndFetch();})
+              Button('\u91cd\u8bd5').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(36).margin({top:20}).hoverEffect(HoverEffect.Auto).onClick(()=>{this.doHttpSSOAndFetch();})
             }
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
         } else if (this.pageState===PageState.IDLE) {
@@ -425,7 +602,7 @@ export struct ExperimentPage {
             Text('\ud83e\uddea').fontSize(48)
             Text('\u5b9e\u9a8c\u7cfb\u7edf\u9700\u8981\u5355\u72ec\u767b\u5f55').fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
             Text('\u5c06\u81ea\u52a8\u901a\u8fc7\u7edf\u4e00\u8ba4\u8bc1\u767b\u5f55').fontSize(13).fontColor(ThemeColors.textSecondary).margin({top:6})
-            Button('\u8fdb\u5165\u5b9e\u9a8c\u7cfb\u7edf').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(40).margin({top:20}).onClick(()=>{this.doHttpSSOAndFetch();})
+            Button('\u8fdb\u5165\u5b9e\u9a8c\u7cfb\u7edf').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(40).margin({top:20}).hoverEffect(HoverEffect.Auto).onClick(()=>{this.doHttpSSOAndFetch();})
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
         } else if (this.pageState===PageState.SUCCESS) {
           // 固定刷新行（考勤查询同款）
@@ -435,7 +612,7 @@ export struct ExperimentPage {
               .fontSize(12).height(30)
               .backgroundColor(this.accentColor + '18').fontColor(this.accentColor)
               .borderRadius(15).padding({ left: 12, right: 12 })
-              .onClick(() => { PreferenceUtil.putString(CACHE_KEY, ''); this.doHttpSSOAndFetch(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { PreferenceUtil.putString(CACHE_KEY, ''); this.doHttpSSOAndFetch(); })
           }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
           if (this.showCacheBanner) {
             Row() {
@@ -443,13 +620,13 @@ export struct ExperimentPage {
                 .layoutWeight(1).maxLines(2)
               if (this.errorMsg.length > 0) {
                 Button('重试').fontSize(12).height(26).backgroundColor(this.accentColor).fontColor('#FFFFFF')
-                  .borderRadius(4).padding({ left: 8, right: 8 }).onClick(() => { this.doHttpSSOAndFetch(); })
+                  .borderRadius(4).padding({ left: 8, right: 8 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.doHttpSSOAndFetch(); })
               } else {
                 Text('  刷新').fontSize(12).fontColor(this.accentColor)
                   .padding({ left: 8, right: 8, top: 2, bottom: 2 })
                   .border({ width: 1, color: this.accentColor, radius: 4 })
                   .margin({ left: 10 })
-                  .onClick(() => { this.doHttpSSOAndFetch(); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.doHttpSSOAndFetch(); })
               }
             }.width('100%').padding({ left: 16, right: 8, top: 6, bottom: 6 })
             .backgroundColor(this.themeIsDark ? '#3E2723' : '#FFF3E0')
@@ -458,36 +635,111 @@ export struct ExperimentPage {
             Column() {
               Text('\ud83e\uddea').fontSize(48)
               Text('\u6682\u65e0\u5b9e\u9a8c\u4fe1\u606f').fontSize(15).fontColor(ThemeColors.textSecondary).margin({top:12})
-              Button('\u5237\u65b0').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(36).margin({top:20}).onClick(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.doHttpSSOAndFetch();})
+              Button('\u5237\u65b0').fontSize(14).fontColor('#FFFFFF').backgroundColor((AppStorage.get('accent_color') as string ?? '#2979FF')).borderRadius(20).height(36).margin({top:20}).hoverEffect(HoverEffect.Auto).onClick(()=>{PreferenceUtil.putString(CACHE_KEY,'');this.doHttpSSOAndFetch();})
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).padding(24)
           } else {
             Scroll() {
               Column() {
-                ForEach(this.cards, (card:ExpCard)=>{this.ExpCardBuilder(card)},(card:ExpCard)=>card.date+'_'+card.sectionName)
-              }.width('100%').padding({left:16,right:16,top:8,bottom:16})
+                // 时间线三分类（对齐 Flutter：进行中→未完成→已完成）；进行中为空时整段隐藏
+                if (this.doingCards.length > 0) {
+                  this.ExpSection('正在进行实验', this.accentColor, '', this.doingCards)
+                }
+                this.ExpSection('未完成实验', '#BF4D00', '所有实验全部完成', this.upcomingCards)
+                this.ExpSection('已完成实验', '#2E7D32', '目前没有已经完成的实验', this.doneCards)
+              }.width('100%').padding({left:16,right:16,top:8,bottom:16}).alignItems(HorizontalAlign.Start)
             }.width('100%').layoutWeight(1)
           }
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
-    }.title({ builder: this.buildWhiteTitle('\u5b9e\u9a8c\u4fe1\u606f'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
+    }    .title({ builder: this.buildWhiteTitle('\u5b9e\u9a8c\u4fe1\u606f'), height: 52 + this.statusBarHeight }, { backgroundColor: this.accentColor })
     .hideBackButton(true).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .bindSheet($$this.showScoreSheet, this.ScoreSheetBuilder, { height: 360, showClose: true, dragBar: true })
     
     .backgroundColor(ThemeColors.bgPage)
+  }
+
+  // 时间行文案：物理实验=真实场次绝对钟点（对齐 Flutter 卡片 HH:mm~HH:mm）；其他实验保留「第x-y节」
+  private cardTimeText(card: ExpCard): string {
+    if (card.isPhysics) {
+      return (card.startSection === 7 ? '下午 15:55-18:10' : '晚上 18:30-20:45');
+    }
+    return card.sectionName;
+  }
+
+  // 时间线小节：圆点标题 + 卡片列表；列表为空时展示占位文案（对齐 Flutter 空段提示）
+  @Builder
+  ExpSection(title: string, dotColor: string, emptyHint: string, list: ExpCard[]) {
+    Column() {
+      Row() {
+        Row(){}.width(8).height(8).borderRadius(4).backgroundColor(dotColor).margin({ right: 6 })
+        Text(title).fontSize(15).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        Text('').layoutWeight(1)
+        Text('共 ' + String(list.length) + ' 项').fontSize(11).fontColor(ThemeColors.textSecondary)
+      }.width('100%').margin({ top: 16, bottom: 2 })
+      if (list.length === 0) {
+        Row() {
+          Text(emptyHint).fontSize(13).fontColor(ThemeColors.textSecondary)
+        }.width('100%').justifyContent(FlexAlign.Center).padding(14).margin({ top: 8 })
+        .borderRadius(12).backgroundColor(ThemeColors.bgCard)
+        .border({ width: { bottom: 1, right: 1, top: 1, left: 1 }, color: '#E0E0E0', radius: 12 })
+      } else {
+        ForEach(list, (card: ExpCard) => { this.ExpCardBuilder(card) },
+          (card: ExpCard) => card.date + '_' + String(card.startSection))
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start)
   }
 
   @Builder
   ExpCardBuilder(card: ExpCard) {
     Column() {
       Row() {
-        if(card.isCompleted) Text('\u2705').fontSize(16).margin({right:6})
         Text(card.experimentName).fontSize(16).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary).layoutWeight(1).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis})
+        if (this.scoreChipVisible(card)) {
+          Text(this.scoreChipText(card))
+            .fontSize(12).fontColor(this.accentColor).fontWeight(FontWeight.Medium)
+            .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+            .backgroundColor(this.accentColor + '1A')
+            .borderRadius(12)
+            .margin({ left: 8 })
+            .hoverEffect(HoverEffect.Auto)
+            .onClick(() => { this.openScoreSheet(card); })
+        }
       }.width('100%').margin({bottom:6})
       Row() { Text('\ud83d\udcc5').fontSize(13).margin({right:4}); Text(card.date+' '+card.weekdayName+' \u7b2c'+card.weekNum+'\u5468').fontSize(13).fontColor(ThemeColors.textSecondary) }.width('100%').margin({bottom:4})
-      Row() { Text('\ud83d\udd50').fontSize(13).margin({right:4}); Text(card.sectionName).fontSize(13).fontColor(ThemeColors.textSecondary) }.width('100%').margin({bottom:4})
+      Row() { Text('\ud83d\udd50').fontSize(13).margin({right:4}); Text(this.cardTimeText(card)).fontSize(13).fontColor(ThemeColors.textSecondary) }.width('100%').margin({bottom:4})
       if(card.lab.length>0) { Row() { Text('\ud83d\udccd').fontSize(13).margin({right:4}); Text(card.lab).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis}) }.width('100%').margin({top:2}) }
       if(card.teacher.length>0) { Row() { Text('\ud83d\udc68\u200d\ud83c\udfeb').fontSize(13).margin({right:4}); Text(card.teacher).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis}) }.width('100%').margin({top:2}) }
       if(card.experimentProject.length>0) { Row() { Text('\ud83d\udcdd').fontSize(13).margin({right:4}); Text(card.experimentProject).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(2).textOverflow({overflow:TextOverflow.Ellipsis}).layoutWeight(1) }.width('100%').margin({top:2}) }
       if(card.className.length>0) { Row() { Text('\ud83d\udc65').fontSize(13).margin({right:4}); Text(card.className).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis}) }.width('100%').margin({top:2}) }
     }.width('100%').padding(14).borderRadius(12).backgroundColor(ThemeColors.bgCard).margin({top:8}).alignItems(HorizontalAlign.Start).border({width:{bottom:1,right:1,top:1,left:1},color:'#E0E0E0',radius:12})
+  }
+
+  // 成绩详情半屏：原图 + 预测分数（对齐 Flutter ExperimentInfoCard 弹窗）
+  @Builder
+  ScoreSheetBuilder() {
+    Column() {
+      Text(this.sheetExpName).fontSize(17).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary).maxLines(2).textOverflow({overflow:TextOverflow.Ellipsis})
+        .width('100%').margin({ top: 4, bottom: 10 })
+      if (this.sheetScoreFound) {
+        Row() {
+          Text('\u6210\u7ee9').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ right: 8 })
+          Text(this.sheetScoreLabel).fontSize(30).fontWeight(FontWeight.Bold).fontColor(this.accentColor)
+        }.width('100%').margin({ bottom: 10 })
+      } else {
+        Text('\u672a\u80fd\u81ea\u52a8\u8bc6\u522b\u5206\u6570\uff0c\u4ee5\u4e0b\u4e3a\u6210\u7ee9\u539f\u56fe').fontSize(14).fontColor(ThemeColors.textSecondary)
+          .width('100%').margin({ bottom: 10 })
+      }
+      // 成绩原图（教务系统返回，等比 contain 预览）
+      if (this.sheetScoreUrl.length > 0) {
+        Image(this.sheetScoreUrl)
+          .width('100%').height(150)
+          .objectFit(ImageFit.Contain)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(10)
+          .margin({ bottom: 10 })
+      }
+      Text('\u63d0\u793a\uff1a\u56fe\u7247\u4e3a\u6210\u7ee9\u7cfb\u7edf\u539f\u59cb\u56fe\uff0c\u5206\u6570\u7531\u50cf\u7d20\u54c8\u5e0c\u8bc6\u522b\uff0c\u4ec5\u4f9b\u53c2\u8003')
+        .fontSize(12).fontColor(ThemeColors.textSecondary).width('100%')
+    }.width('100%').padding(16).alignItems(HorizontalAlign.Start)
   }
 }

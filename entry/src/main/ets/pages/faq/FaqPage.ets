@@ -81,7 +81,7 @@ export struct FaqPage {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.close')).height(22)
           .fillColor(ThemeColors.textPrimary).draggable(false)
-      }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      }.height(40).width(40).hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text('常见问题').fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })

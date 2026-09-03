@@ -1,11 +1,11 @@
-// RuisiTopicListPage.ets — 帖子列表（无限滚动分页）
+﻿// RuisiTopicListPage.ets — 帖子列表（无限滚动分页）
 // 对标 Flutter topic_list_page.dart: PagingController + PagedListView + TopicListItem
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { Topic, TopicDetailParam, UserParam, NewPostParam } from '../../services/RuisiModels';
-import { RuisiTopicItem } from '../../components/RuisiTopicItem';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { Topic, TopicDetailParam, UserParam, NewPostParam } from '../../models/ruisi/RuisiModels';
+import { RuisiTopicItem } from '../../pages/ruisi/components/RuisiTopicItem';
 import { ToastUtil } from '../../utils/ToastUtil';
 
 const TAG = 'RuisiTopicListPage';
@@ -15,6 +15,8 @@ export struct RuisiTopicListPage {
   @StorageLink('theme_is_dark') isDark: boolean = false;
   @StorageProp('accent_color') accentColor: string = '#2979FF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  // 发帖成功后由 RuisiNewPostPage 递增，@Watch 触发列表刷新（修复发帖成功列表不刷新）
+  @StorageProp('ruisi_thread_list_version') @Watch('onThreadListVersionChanged') threadListVersion: number = 0;
   pageInfo: NavPathStack = new NavPathStack();
 
   private accentTextColor(): Color { return AccentColors.textContrast; }
@@ -30,6 +32,12 @@ export struct RuisiTopicListPage {
 
   aboutToAppear(): void {
     this.loadData(true);
+  }
+
+  private onThreadListVersionChanged(): void {
+    if (this.threadListVersion > 0) {
+      this.loadData(true);
+    }
   }
 
   async loadData(reset: boolean): Promise<void> {
@@ -56,7 +64,7 @@ export struct RuisiTopicListPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
 
       Text(this.forumName || '帖子列表')
         .fontSize(22).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
@@ -94,7 +102,7 @@ export struct RuisiTopicListPage {
                 ListItem() {
                   Row() { Text('加载更多').fontSize(13).fontColor(ThemeColors.textSecondary) }
                     .width('100%').height(44).justifyContent(FlexAlign.Center)
-                    .onClick(() => { this.page++; this.loadData(false); })
+                    .hoverEffect(HoverEffect.Auto).onClick(() => { this.page++; this.loadData(false); })
                 }
               }
               if (this.loadingMore) {
@@ -125,7 +133,7 @@ export struct RuisiTopicListPage {
         .border({ width: 1, color: 'rgba(255,255,255,0.30)' })
         .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
         .margin({ bottom: 80, right: 20 })
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           this.pageInfo.pushPath({
             name: 'RuisiNewPost',
             param: new NewPostParam(this.fid, this.forumName)

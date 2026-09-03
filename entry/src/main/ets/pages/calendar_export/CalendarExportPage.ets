@@ -1,10 +1,10 @@
-import { AccentColors } from '../../utils/AccentColors';
+﻿import { AccentColors } from '../../utils/AccentColors';
 // CalendarExportPage.ets
 import { ThemeColors } from '../../utils/ThemeColors';
-import { SEC_START, SEC_END } from '../MainPage';
+import { SEC_START, SEC_END } from '../../models/common/ClassSchedule';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { SemesterUtil } from '../../services/EhallService';
-import { ClassService } from '../../services/ClassService';
+import { SemesterUtil } from '../../services/ids/EhallService';
+import { ClassService } from '../../services/ids/ClassService';
 import { calendarManager } from '@kit.CalendarKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 
@@ -30,6 +30,11 @@ interface ExportStats {
   newCount: number;
   delCount: number;
   failCount: number;
+}
+// 事件内容元数据：增量同步比对（desc/reminderTime 与期望不一致时删旧重建，CalendarKit 无 update API）
+class EventMeta {
+  desc: string = '';
+  rem: string = '';
 }
 
 // ST replaced by SEC_START/SEC_END from MainPage; see getTimeFromCell helper
@@ -263,14 +268,50 @@ export struct CalendarExportPage {
     }
   }
 
-  cellKey(cell: SlimCell, startMs: number): string {
-    if (cell.isExam) {
-      return '📝 ' + cell.name + '|' + String(startMs);
-    }
+  // 事件标题：类型前缀 + 教室（有值才拼）。教室入标题 → 换教室 key 自然变化 → 孤儿清理删除旧事件，
+  // 实现“换教室自动更新”；空教室回退纯课名。与 CalendarSyncService.eventTitle 保持一致（两套 key 契约）
+  eventTitle(cell: SlimCell): string {
+    let t: string = cell.name;
     if (cell.isExperiment) {
-      return '🧪 ' + cell.name + '|' + String(startMs);
+      t = '🧪 ' + t;
+    } else if (cell.isExam) {
+      t = '📝 ' + t;
     }
-    return cell.name + '|' + String(startMs);
+    const room: string = cell.classroom ?? '';
+    if (room.length > 0) { t = t + '@' + room; }
+    return t;
+  }
+
+  cellKey(cell: SlimCell, startMs: number): string {
+    return this.eventTitle(cell) + '|' + String(startMs);
+  }
+
+  descC(cell: SlimCell): string {
+    const parts: string[] = [];
+    if (cell.classroom) { parts.push('教室: ' + cell.classroom); }
+    if (cell.teacher) { parts.push('教师: ' + cell.teacher); }
+    return parts.join(' | ');
+  }
+
+  descE(cell: SlimCell): string {
+    const parts: string[] = [];
+    if (cell.classroom) { parts.push('地点: ' + cell.classroom); }
+    if (cell.teacher) { parts.push('教师: ' + cell.teacher); }
+    if (cell.experimentProject) { parts.push('项目: ' + cell.experimentProject); }
+    return parts.join(' | ');
+  }
+
+  descX(cell: SlimCell): string {
+    const parts: string[] = [];
+    if (cell.classroom) { parts.push('地点: ' + cell.classroom); }
+    if (cell.examSeat) { parts.push('座位: ' + cell.examSeat); }
+    return parts.join(' | ');
+  }
+
+  remKey(rt: number[]): string {
+    if (rt.length === 0) { return ''; }
+    const sorted: number[] = rt.slice().sort((a: number, b: number): number => a - b);
+    return sorted.join(',');
   }
 
   calcDbMins(startTime: Date, dbH: number, dbM: number): number {
@@ -375,13 +416,20 @@ export struct CalendarExportPage {
       const mon: Date = new Date(sd);
       mon.setDate(sd.getDate() + (sd.getDay() === 0 ? -6 : 1 - sd.getDay()) + sw * 7);
       const existMap: Record<string, number[]> = {};
+      const meta: Record<string, EventMeta> = {};
       try {
         const evts: calendarManager.Event[] = await cal.getEvents();
         for (let i = 0; i < evts.length; i++) {
           const ev: calendarManager.Event = evts[i];
           if (ev.id !== undefined && ev.title && ev.startTime) {
             const k: string = ev.title + '|' + String(ev.startTime);
-            if (!existMap[k]) { existMap[k] = []; }
+            if (!existMap[k]) {
+              existMap[k] = [];
+              const em: EventMeta = new EventMeta();
+              em.desc = ev.description ?? '';
+              em.rem = this.remKey(ev.reminderTime ?? []);
+              meta[k] = em;
+            }
             existMap[k].push(ev.id);
           }
         }
@@ -399,7 +447,7 @@ export struct CalendarExportPage {
         if (rb || this.courseChg()) {
           await this.impC(mon, cal, existMap, needed, st, p);
         } else {
-          await this.synC(mon, cal, existMap, needed, st, p, written);
+          await this.synC(mon, cal, existMap, meta, needed, st, p, written);
         }
       }
       if (this.eEnabled) {
@@ -407,7 +455,7 @@ export struct CalendarExportPage {
         if (rb || this.expChg()) {
           await this.impE(mon, cal, existMap, needed, st, p, this.eDouble, this.eDbHour, this.eDbMin);
         } else {
-          await this.synE(mon, cal, existMap, needed, st, p, this.eDouble, this.eDbHour, this.eDbMin, written);
+          await this.synE(mon, cal, existMap, meta, needed, st, p, this.eDouble, this.eDbHour, this.eDbMin, written);
         }
       }
       if (this.xEnabled) {
@@ -415,7 +463,7 @@ export struct CalendarExportPage {
         if (rb || this.examChg()) {
           await this.impX(cal, existMap, needed, st, p, this.xDouble, this.xDbHour, this.xDbMin);
         } else {
-          await this.synX(cal, existMap, needed, st, p, this.xDouble, this.xDbHour, this.xDbMin, written);
+          await this.synX(cal, existMap, meta, needed, st, p, this.xDouble, this.xDbHour, this.xDbMin, written);
         }
       }
       this.forceRebuild = false;
@@ -481,9 +529,8 @@ export struct CalendarExportPage {
               parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
               parseInt(ep[0]), parseInt(ep[1]), 0);
-            const title: string = cell.name;
-            const desc: string = (cell.classroom ? '教室: ' + cell.classroom : '') +
-              (cell.teacher ? (cell.classroom ? ' | ' : '') + '教师: ' + cell.teacher : '');
+            const title: string = this.eventTitle(cell);
+            const desc: string = this.descC(cell);
             const key: string = this.cellKey(cell, stT.getTime());
             if (needed[key]) {
               continue;
@@ -541,9 +588,8 @@ export struct CalendarExportPage {
               parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
               parseInt(ep[0]), parseInt(ep[1]), 0);
-            const title: string = '🧪 ' + cell.name;
-            const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
-              (cell.experimentProject ? ' 项目: ' + cell.experimentProject : '');
+            const title: string = this.eventTitle(cell);
+            const desc: string = this.descE(cell);
             const key: string = this.cellKey(cell, stT.getTime());
             if (needed[key]) { continue; }
             needed[key] = true;
@@ -596,9 +642,8 @@ export struct CalendarExportPage {
           parseInt(sp[0]), parseInt(sp[1]), 0);
         const ee: Date = new Date(parseInt(dp[0]), parseInt(dp[1]) - 1, parseInt(dp[2]),
           parseInt(ep[0]), parseInt(ep[1]), 0);
-        const title: string = '📝 ' + cell.name;
-        const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
-          (cell.examSeat ? ' 座位: ' + cell.examSeat : '');
+        const title: string = this.eventTitle(cell);
+        const desc: string = this.descX(cell);
         const key: string = this.cellKey(cell, es.getTime());
         if (needed[key]) { continue; }
         needed[key] = true;
@@ -629,6 +674,7 @@ export struct CalendarExportPage {
 
   // ========== 增量同步 ==========
   async synC(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number[]>,
+    meta: Record<string, EventMeta>,
     needed: Record<string, boolean>, st: ExportStats, pre: number,
     written: Record<string, boolean>): Promise<void> {
     for (let d = 1; d <= DC; d++) {
@@ -650,16 +696,28 @@ export struct CalendarExportPage {
               parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
               parseInt(ep[0]), parseInt(ep[1]), 0);
+            const title: string = this.eventTitle(cell);
+            const desc: string = this.descC(cell);
             const key: string = this.cellKey(cell, stT.getTime());
             needed[key] = true;
-            if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+            const rt: number[] = [];
+            if (pre > 0) { rt.push(pre); }
+            const rem: string = this.remKey(rt);
+            const oldIds: number[] = existMap[key] ?? [];
+            if (oldIds.length > 0) {
+              const em: EventMeta | undefined = meta[key];
+              if (em !== undefined && em.desc === desc && em.rem === rem) {
+                continue; // 已存在且内容一致 → 跳过
+              }
+              // 内容/提醒变化 → 删旧重建
+              for (let oi = 0; oi < oldIds.length; oi++) {
+                try { await cal.deleteEvent(oldIds[oi]); st.delCount++; } catch (_e) { /* ignore */ }
+              }
+            }
             if (written[key]) {
               continue;
             }
             written[key] = true;
-            const title: string = cell.name;
-            const desc: string = (cell.classroom ? '教室: ' + cell.classroom : '') +
-              (cell.teacher ? (cell.classroom ? ' | ' : '') + '教师: ' + cell.teacher : '');
             const ev: calendarManager.Event = {
               type: calendarManager.EventType.NORMAL,
               title: title,
@@ -667,7 +725,7 @@ export struct CalendarExportPage {
               endTime: etT.getTime(),
               description: desc
             };
-            if (pre > 0) { ev.reminderTime = [pre]; }
+            if (rt.length > 0) { ev.reminderTime = rt; }
             try {
               await cal.addEvent(ev);
               st.newCount++;
@@ -681,6 +739,7 @@ export struct CalendarExportPage {
   }
 
   async synE(mon: Date, cal: calendarManager.Calendar, existMap: Record<string, number[]>,
+    meta: Record<string, EventMeta>,
     needed: Record<string, boolean>, st: ExportStats, pre: number, dbl: boolean,
     dbH: number, dbM: number, written: Record<string, boolean>): Promise<void> {
     for (let d = 1; d <= DC; d++) {
@@ -708,14 +767,27 @@ export struct CalendarExportPage {
               parseInt(sp[0]), parseInt(sp[1]), 0);
             const etT: Date = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(),
               parseInt(ep[0]), parseInt(ep[1]), 0);
+            const title: string = this.eventTitle(cell);
+            const desc: string = this.descE(cell);
             const key: string = this.cellKey(cell, stT.getTime());
             needed[key] = true;
-            if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+            const rt: number[] = [];
+            if (pre > 0) { rt.push(pre); }
+            if (dbl) { rt.push(this.calcDbMins(stT, dbH, dbM)); }
+            const rem: string = this.remKey(rt);
+            const oldIds: number[] = existMap[key] ?? [];
+            if (oldIds.length > 0) {
+              const em: EventMeta | undefined = meta[key];
+              if (em !== undefined && em.desc === desc && em.rem === rem) {
+                continue; // 已存在且内容一致 → 跳过
+              }
+              // 内容/提醒变化（教师/项目/双重提醒调整）→ 删旧重建
+              for (let oi = 0; oi < oldIds.length; oi++) {
+                try { await cal.deleteEvent(oldIds[oi]); st.delCount++; } catch (_e) { /* ignore */ }
+              }
+            }
             if (written[key]) { continue; }
             written[key] = true;
-            const title: string = '🧪 ' + cell.name;
-            const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
-              (cell.experimentProject ? ' 项目: ' + cell.experimentProject : '');
             const ev: calendarManager.Event = {
               type: calendarManager.EventType.NORMAL,
               title: title,
@@ -723,9 +795,6 @@ export struct CalendarExportPage {
               endTime: etT.getTime(),
               description: desc
             };
-            const rt: number[] = [];
-            if (pre > 0) { rt.push(pre); }
-            if (dbl) { rt.push(this.calcDbMins(stT, dbH, dbM)); }
             if (rt.length > 0) { ev.reminderTime = rt; }
             try {
               await cal.addEvent(ev);
@@ -740,6 +809,7 @@ export struct CalendarExportPage {
   }
 
   async synX(cal: calendarManager.Calendar, existMap: Record<string, number[]>,
+    meta: Record<string, EventMeta>,
     needed: Record<string, boolean>, st: ExportStats, pre: number, dbl: boolean,
     dbH: number, dbM: number, written: Record<string, boolean>): Promise<void> {
     for (let d = 1; d <= DC; d++) {
@@ -761,14 +831,27 @@ export struct CalendarExportPage {
           parseInt(sp[0]), parseInt(sp[1]), 0);
         const ee: Date = new Date(parseInt(dp[0]), parseInt(dp[1]) - 1, parseInt(dp[2]),
           parseInt(ep[0]), parseInt(ep[1]), 0);
+        const title: string = this.eventTitle(cell);
+        const desc: string = this.descX(cell);
         const key: string = this.cellKey(cell, es.getTime());
         needed[key] = true;
-        if (existMap[key] !== undefined && existMap[key].length > 0) { continue; }
+        const rt: number[] = [];
+        if (pre > 0) { rt.push(pre); }
+        if (dbl) { rt.push(this.calcDbMins(es, dbH, dbM)); }
+        const rem: string = this.remKey(rt);
+        const oldIds: number[] = existMap[key] ?? [];
+        if (oldIds.length > 0) {
+          const em: EventMeta | undefined = meta[key];
+          if (em !== undefined && em.desc === desc && em.rem === rem) {
+            continue; // 已存在且内容一致 → 跳过
+          }
+          // 座位/教室/提醒变化 → 删旧重建
+          for (let oi = 0; oi < oldIds.length; oi++) {
+            try { await cal.deleteEvent(oldIds[oi]); st.delCount++; } catch (_e) { /* ignore */ }
+          }
+        }
         if (written[key]) { continue; }
         written[key] = true;
-        const title: string = '📝 ' + cell.name;
-        const desc: string = (cell.classroom ? '地点: ' + cell.classroom : '') +
-          (cell.examSeat ? ' 座位: ' + cell.examSeat : '');
         const ev: calendarManager.Event = {
           type: calendarManager.EventType.NORMAL,
           title: title,
@@ -776,9 +859,6 @@ export struct CalendarExportPage {
           endTime: ee.getTime(),
           description: desc
         };
-        const rt: number[] = [];
-        if (pre > 0) { rt.push(pre); }
-        if (dbl) { rt.push(this.calcDbMins(es, dbH, dbM)); }
         if (rt.length > 0) { ev.reminderTime = rt; }
         try {
           await cal.addEvent(ev);
@@ -941,7 +1021,7 @@ export struct CalendarExportPage {
             .shadow(this.hasChanged ? { radius: 4, color: this.accentColor + '40', offsetY: 2 } : { radius: 0, color: Color.Transparent, offsetY: 0 })
             .margin({ left: 14, right: 14, top: 16 })
             .enabled(this.hasChanged && !this.importing)
-            .onClick(() => { this.doImport(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doImport(); })
 
             // 次要操作
             Row() {
@@ -954,7 +1034,7 @@ export struct CalendarExportPage {
             .borderRadius(12)
             .margin({ left: 14, right: 14, top: 10 })
             .enabled(!this.importing)
-            .onClick(() => { this.doRefresh(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doRefresh(); })
           }
 
           // ===== 结果提示 =====
@@ -1022,7 +1102,7 @@ export struct CalendarExportPage {
     Row({ space: 6 }) {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([AccentColors.textContrast])
-      }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      }.height(40).width(40).hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text('导入系统日历').fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast)
         .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.height(52 + this.statusBarHeight).width('100%').padding({ left: 12, right: 12, top: this.statusBarHeight })
@@ -1092,7 +1172,7 @@ export struct CalendarExportPage {
               .fontColor(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? '#FFFFFF' : ThemeColors.textPrimary)
               .fontWeight(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? FontWeight.Medium : FontWeight.Normal)
               .backgroundColor(this.getMin(t) === String(m) && !this.getNone(t) && !this.getCustom(t) ? this.accentColor : (ThemeColors.isDark ? '#333333' : '#F5F5F5'))
-              .onClick(() => { this.setNone(t, false); this.setCustom(t, false); this.setMin(t, String(m)); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.setNone(t, false); this.setCustom(t, false); this.setMin(t, String(m)); })
           }
         }, (m: number) => String(m))
 
@@ -1106,7 +1186,7 @@ export struct CalendarExportPage {
             .fontColor(this.getCustom(t) && !this.getNone(t) ? '#FFFFFF' : ThemeColors.textPrimary)
             .fontWeight(this.getCustom(t) && !this.getNone(t) ? FontWeight.Medium : FontWeight.Normal)
             .backgroundColor(this.getCustom(t) && !this.getNone(t) ? this.accentColor : (ThemeColors.isDark ? '#333333' : '#F5F5F5'))
-            .onClick(() => { this.setNone(t, false); this.setCustom(t, true); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.setNone(t, false); this.setCustom(t, true); })
         }
 
         // 不提醒
@@ -1119,7 +1199,7 @@ export struct CalendarExportPage {
             .fontColor(this.getNone(t) ? '#FFFFFF' : '#EF5350')
             .fontWeight(this.getNone(t) ? FontWeight.Medium : FontWeight.Normal)
             .backgroundColor(this.getNone(t) ? '#EF5350' : (ThemeColors.isDark ? '#333333' : '#F5F5F5'))
-            .onClick(() => { this.setNone(t, !this.getNone(t)); if (!this.getNone(t)) { this.setCustom(t, false); } })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.setNone(t, !this.getNone(t)); if (!this.getNone(t)) { this.setCustom(t, false); } })
         }
       }
       .columnsTemplate('1fr 1fr 1fr 1fr')
@@ -1169,7 +1249,7 @@ export struct CalendarExportPage {
             .backgroundColor(this.accentColor + '12')
             .border({ width: 1, color: this.accentColor + '30' })
             .margin({ left: 8 })
-            .onClick(() => { this.showTimePicker(t); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.showTimePicker(t); })
             Text('提醒').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ left: 6 })
           }.width('100%').padding({ left: 16, right: 16, bottom: 14 })
         } else {

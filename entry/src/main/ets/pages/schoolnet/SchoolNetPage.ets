@@ -3,7 +3,8 @@
 // 对齐 Flutter: NetworkCardWindow (两个Tab: 自服务平台 + 认证系统)
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { SchoolnetService, ZfwIpEntry, ZfwUsageData } from '../../services/SchoolnetService';
+import { SecureStorageUtil, SecureAlias } from '../../utils/SecureStorageUtil';
+import { SchoolnetService, ZfwIpEntry, ZfwUsageData } from '../../services/campus/SchoolnetService';
 import { SegmentTab } from '../../components/SegmentTab';
 
 @Component
@@ -21,7 +22,7 @@ export struct SchoolNetPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -57,6 +58,7 @@ export struct SchoolNetPage {
   // === 自服务平台 Tab (ZFW) ===
   @State zfwLoading: boolean = false;
   @State zfwState: string = 'idle'; // idle | needs_captcha | logging_in | logged_in | error
+  @State hasZfwPwd: boolean = false;
   @State zfwCaptchaInput: string = '';
   @State zfwCaptchaBase64: string = '';
   @State zfwCsrf: string = '';
@@ -78,11 +80,13 @@ export struct SchoolNetPage {
   aboutToAppear(): void {
     this.loadAuthData();
     this.loadZfwIfNeeded();
+    SecureStorageUtil.get(SecureAlias.SCHOOLNET_PASSWORD).then((pwd: string) => { this.hasZfwPwd = pwd.length > 0; });
   }
 
   /** 切到自服务平台时自动加载 */
-  loadZfwIfNeeded(): void {
-    if (this.zfwState === 'idle' && PreferenceUtil.getString('schoolnet_password').length > 0) {
+  async loadZfwIfNeeded(): Promise<void> {
+    const savedPwd = await SecureStorageUtil.get(SecureAlias.SCHOOLNET_PASSWORD);
+    if (this.zfwState === 'idle' && savedPwd.length > 0) {
       this.startZfwFlow();
     }
   }
@@ -153,7 +157,7 @@ export struct SchoolNetPage {
   // ===== ZFW 自服务平台 =====
 
   async startZfwFlow(): Promise<void> {
-    const savedPwd: string = PreferenceUtil.getString('schoolnet_password');
+    const savedPwd: string = await SecureStorageUtil.get(SecureAlias.SCHOOLNET_PASSWORD);
     if (savedPwd.length === 0) {
       this.zfwState = 'error';
       this.zfwErrorMsg = '请先设置校园网密码';
@@ -189,7 +193,7 @@ export struct SchoolNetPage {
     if (this.zfwCaptchaInput.length === 0) return;
     this.zfwLoading = true;
     this.zfwErrorMsg = '';
-    const savedPwd: string = PreferenceUtil.getString('schoolnet_password');
+    const savedPwd: string = await SecureStorageUtil.get(SecureAlias.SCHOOLNET_PASSWORD);
     const username: string = PreferenceUtil.getString('ids_account');
     try {
       const encryptedPwd = await this.schoolnet.encryptPasswordRSA(savedPwd, this.zfwRsaKey);
@@ -243,7 +247,7 @@ export struct SchoolNetPage {
   // ===== 密码弹窗 =====
 
   openPwdDialog(): void {
-    this.pwdInput = PreferenceUtil.getString('schoolnet_password');
+    SecureStorageUtil.get(SecureAlias.SCHOOLNET_PASSWORD).then((pwd: string) => { this.pwdInput = pwd; });
     this.showPwdDialog = true;
     animateTo({ duration: 300, curve: Curve.EaseOut }, () => { this.pwdOpacity = 1; this.pwdTranslate = 0; });
   }
@@ -425,7 +429,7 @@ export struct SchoolNetPage {
           Button('刷新').fontSize(14).width('100%').height(42)
             .backgroundColor(this.accentColor).borderRadius(10)
             .margin({ top: 20, bottom: 20 })
-            .onClick(() => { this.loadAuthData(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadAuthData(); })
         }.width('100%').padding({ left: 16, right: 16, top: 8 })
       }
     } else {
@@ -433,7 +437,7 @@ export struct SchoolNetPage {
         Text('🌐').fontSize(48)
         Text('未连接校园网').fontSize(16).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
         Text('请确认已连接到校园WiFi或有线网络').fontSize(13).fontColor(ThemeColors.textHint).margin({ top: 4 })
-        Button('重试').margin({ top: 16 }).onClick(() => { this.loadAuthData(); })
+        Button('重试').margin({ top: 16 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.loadAuthData(); })
       }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
     }
   }
@@ -454,9 +458,9 @@ export struct SchoolNetPage {
           .fontColor(ThemeColors.textPrimary).margin({ top: 12 })
         Text('查看详细流量和在线设备信息').fontSize(13).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
 
-        if (PreferenceUtil.getString('schoolnet_password').length === 0) {
+        if (!this.hasZfwPwd) {
           Text('未设置校园网密码，点击设置').fontSize(13).fontColor(this.accentColor).margin({ top: 12 })
-            .onClick(() => { this.openPwdDialog(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.openPwdDialog(); })
         } else {
           LoadingProgress().width(24).height(24).color(this.accentColor).margin({ top: 16 })
         }
@@ -470,7 +474,7 @@ export struct SchoolNetPage {
           if (this.zfwCaptchaBase64.length > 0) {
             Image(this.zfwCaptchaBase64).width(140).height(50).objectFit(ImageFit.Contain)
               .borderRadius(6).border({ width: 1, color: '#E0E0E0' })
-              .onClick(() => {
+              .hoverEffect(HoverEffect.Auto).onClick(() => {
                 this.schoolnet.getZfwCaptcha().then((b64: string) => {
                   this.zfwCaptchaBase64 = b64;
                 });
@@ -489,12 +493,12 @@ export struct SchoolNetPage {
           Row() {
             Button('登录').fontSize(14).layoutWeight(1).height(42)
               .backgroundColor(this.accentColor).borderRadius(10)
-              .onClick(() => { this.submitCaptcha(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.submitCaptcha(); })
               .enabled(this.zfwCaptchaInput.length > 0)
             Button('取消').fontSize(14).layoutWeight(1).height(42).margin({ left: 12 })
               .backgroundColor(ThemeColors.bgCard).fontColor(ThemeColors.textSecondary)
               .borderRadius(10).border({ width: 1, color: '#E0E0E0' })
-              .onClick(() => { this.zfwState = 'idle'; this.zfwCaptchaInput = ''; })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.zfwState = 'idle'; this.zfwCaptchaInput = ''; })
           }.width('100%')
         }.width('100%').padding(20).borderRadius(12)
           .backgroundColor(ThemeColors.bgCard)
@@ -517,7 +521,7 @@ export struct SchoolNetPage {
               Text('流量概览').fontSize(14).fontWeight(FontWeight.Bold)
                 .fontColor(ThemeColors.textPrimary).layoutWeight(1)
               Text('🔄 刷新').fontSize(12).fontColor(this.accentColor)
-                .onClick(() => { this.startZfwFlow(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.startZfwFlow(); })
             }.width('100%').margin({ bottom: 12 })
 
             Row() {
@@ -575,7 +579,7 @@ export struct SchoolNetPage {
             .backgroundColor(ThemeColors.bgCard).fontColor('#C62828')
             .borderRadius(10).border({ width: 1, color: '#FFCDD2' })
             .margin({ top: 20, bottom: 20 })
-            .onClick(() => {
+            .hoverEffect(HoverEffect.Auto).onClick(() => {
               this.zfwState = 'idle';
               this.zfwIpList = [];
               this.zfwUsedFlow = '';
@@ -590,16 +594,16 @@ export struct SchoolNetPage {
         Text(this.zfwErrorMsg || '加载失败').fontSize(14).fontColor('#C62828').margin({ top: 8 })
         Row() {
           Button('重试').fontSize(13).height(36)
-            .onClick(() => { this.startZfwFlow(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.startZfwFlow(); })
           if (this.zfwErrorMsg.includes('密码')) {
             Button('设置密码').fontSize(13).height(36).margin({ left: 12 })
               .backgroundColor(this.accentColor)
-              .onClick(() => { this.openPwdDialog(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.openPwdDialog(); })
           }
           Button('取消').fontSize(13).height(36).margin({ left: 12 })
             .backgroundColor(ThemeColors.bgCard).fontColor(ThemeColors.textSecondary)
             .border({ width: 1, color: '#E0E0E0' })
-            .onClick(() => { this.zfwState = 'idle'; })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.zfwState = 'idle'; })
         }.margin({ top: 16 })
       }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
     }
@@ -628,7 +632,7 @@ export struct SchoolNetPage {
               Row() { Text('\u2715').fontSize(18).fontColor(ThemeColors.textSecondary) }
                 .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
                 .justifyContent(FlexAlign.Center)
-                .onClick(() => { this.closePwdDialog(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.closePwdDialog(); })
             }.width('100%').margin({ bottom: 16 })
             Text('用于查询自服务平台的详细流量数据').fontSize(12).fontColor(ThemeColors.textSecondary)
               .width('100%').margin({ bottom: 12 })
@@ -640,12 +644,22 @@ export struct SchoolNetPage {
             Row() {
               Button('取消').layoutWeight(1).height(40)
                 .backgroundColor(ThemeColors.bgInput)
-                .onClick(() => { this.closePwdDialog(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.closePwdDialog(); })
               Button('保存').layoutWeight(1).height(40).margin({ left: 12 })
                 .backgroundColor(this.accentColor).fontColor('#FFFFFF')
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(async () => {
                   if (this.pwdInput.length > 0) {
-                    PreferenceUtil.putString('schoolnet_password', this.pwdInput).catch(() => {});
+                    try {
+                      await SecureStorageUtil.put(SecureAlias.SCHOOLNET_PASSWORD, this.pwdInput);
+                      const verify = await SecureStorageUtil.get(SecureAlias.SCHOOLNET_PASSWORD);
+                      if (verify.length === 0) { this.zfwErrorMsg = '密码保存失败，请重试'; return; }
+                    } catch (e) {
+                      this.zfwErrorMsg = '密码保存失败: ' + String(e);
+                      return;
+                    }
+                    this.hasZfwPwd = true;
+                    // 同步到 AppStorage，MainPage 我的页面实时刷新
+                    AppStorage.setOrCreate('schoolnet_pwd_status', '已设置');
                     this.closePwdDialog();
                     // 保存后自动开始查询
                     this.startZfwFlow();
@@ -657,14 +671,14 @@ export struct SchoolNetPage {
           .shadow({ radius: 20, color: '#30000000' })
           .opacity(this.pwdOpacity)
           .translate({ y: this.pwdTranslate })
-          .onClick(() => {})
+          .hoverEffect(HoverEffect.Auto).onClick(() => {})
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
         .backgroundColor(ThemeColors.overlay)
         .opacity(this.pwdOpacity)
         .hitTestBehavior(this.showPwdDialog ? HitTestMode.Default : HitTestMode.None)
-        .onClick(() => { this.closePwdDialog(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.closePwdDialog(); })
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
     }

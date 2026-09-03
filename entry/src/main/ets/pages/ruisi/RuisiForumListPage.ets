@@ -1,9 +1,9 @@
-// RuisiForumListPage.ets — 板块列表
+﻿// RuisiForumListPage.ets — 板块列表
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { ForumGroup, Forum, TopicListParam } from '../../services/RuisiModels';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { ForumGroup, Forum, TopicListParam } from '../../models/ruisi/RuisiModels';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -45,7 +45,7 @@ export struct RuisiForumListPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text('板块列表')
@@ -79,7 +79,7 @@ export struct RuisiForumListPage {
                         Text(forum.threads + '帖').fontSize(12).fontColor(ThemeColors.textHint)
                       }
                     }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
-                    .onClick(() => {
+                    .hoverEffect(HoverEffect.Auto).onClick(() => {
                       this.pageInfo.pushPath({ name: 'RuisiTopicList', param: new TopicListParam(forum.fid, forum.name) });
                     })
                   }, (forum: Forum) => `forum_${forum.fid}`)

@@ -1,8 +1,8 @@
-// RuisiAboutPage.ets — 关于
+﻿// RuisiAboutPage.ets — 关于
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiConstants } from '../../services/RuisiModels';
+import { RuisiConstants } from '../../models/ruisi/RuisiModels';
 
 @Component
 export struct RuisiAboutPage {
@@ -24,7 +24,7 @@ export struct RuisiAboutPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text('关于')

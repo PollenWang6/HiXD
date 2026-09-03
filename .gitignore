@@ -15,6 +15,10 @@ entry/.build/
 hvigorfile.ts.js
 hvigorfile.ts.js.map
 
+# 隐私弹窗 HAR 模块的构建生成物：DevEco 每次构建按 buildMode 重写 debug/release，
+# 入库只会反复变脏；且工程内无任何源码 import 它，不入库不影响编译。
+privacy_consent_dialog/BuildProfile.ets
+
 # ===================== 依赖和临时文件 =====================
 /node_modules/
 /oh_modules/

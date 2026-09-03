@@ -1,11 +1,11 @@
-// RuisiChatPage.ets — 私信对话详情
+﻿// RuisiChatPage.ets — 私信对话详情
 // 对齐 Android ChatActivity / iOS ChatViewController：左右气泡 + 发送框
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { ChatMessage, RuisiConstants } from '../../services/RuisiModels';
-import { RuisiService } from '../../services/RuisiService';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { ChatMessage, RuisiConstants } from '../../models/ruisi/RuisiModels';
+import { RuisiService } from '../../services/ruisi/RuisiService';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { BasicDataSource } from '../../utils/BasicDataSource';
 
@@ -99,7 +99,7 @@ export struct RuisiChatPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text(this.username)
@@ -182,7 +182,7 @@ export struct RuisiChatPage {
             .fontColor(this.accentTextColor())
             .enabled(!this.sending)
             .margin({ left: 8 })
-            .onClick(() => { this.onSend(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.onSend(); })
         }
         .width('100%')
         .padding({ left: 12, right: 12, top: 8, bottom: 8 })

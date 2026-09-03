@@ -1,7 +1,7 @@
-// RuisiCaptchaDialog.ets — 验证码弹窗组件
+﻿// RuisiCaptchaDialog.ets — 验证码弹窗组件
 
 import { ThemeColors } from '../../utils/ThemeColors';
-import { RuisiService } from '../../services/RuisiService';
+import { RuisiService } from '../../services/ruisi/RuisiService';
 import { image } from '@kit.ImageKit';
 
 @Component
@@ -46,7 +46,7 @@ export struct RuisiCaptchaDialog {
             LoadingProgress().width(36).height(36).color(this.accentColor).margin({ top: 20, bottom: 20 })
           } else if (this.captchaImage) {
             Image(this.captchaImage).width(120).height(48).borderRadius(6).margin({ bottom: 12 })
-              .onClick(() => { this.refreshCaptcha(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.refreshCaptcha(); })
           }
 
           TextInput({ text: this.captchaText, placeholder: '验证码' })
@@ -56,10 +56,10 @@ export struct RuisiCaptchaDialog {
 
           Row() {
             Button('取消').fontSize(14).height(36).margin({ right: 12 })
-              .onClick(() => { if (this.onClose) this.onClose(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { if (this.onClose) this.onClose(); })
             Button('确定').fontSize(14).height(36)
               .backgroundColor(this.accentColor).fontColor('#FFFFFF')
-              .onClick(() => { if (this.onVerify) this.onVerify(this.captchaText); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { if (this.onVerify) this.onVerify(this.captchaText); })
           }.margin({ top: 16 })
         }.padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16).alignItems(HorizontalAlign.Center)
       }.width('100%').height('100%').backgroundColor('#80000000').alignContent(Alignment.Center)

@@ -1,13 +1,13 @@
-// RuisiTopicDetailPage.ets — 帖子详情（楼层、图片、回复）
+﻿// RuisiTopicDetailPage.ets — 帖子详情（楼层、图片、回复）
 // 对标 Flutter topic_detail_page.dart: 标题区 + 楼层列表 + 分页 + 回复输入
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { TopicDetail, Post, RuisiFileAttachment, RuisiConstants, RuisiAttachment, UserParam, VoteData, VoteOption, VoteResultItem } from '../../services/RuisiModels';
-import { RuisiAttachmentUtil, ruisiInsertAtCaret } from '../../services/RuisiAttachmentUtil';
-import { RuisiSmileyService } from '../../services/RuisiSmileyService';
-import { RuisiSmileyPanel } from '../../components/RuisiSmileyPanel';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { TopicDetail, Post, RuisiFileAttachment, RuisiConstants, RuisiAttachment, UserParam, VoteData, VoteOption, VoteResultItem } from '../../models/ruisi/RuisiModels';
+import { RuisiAttachmentUtil, ruisiInsertAtCaret } from '../../services/ruisi/RuisiAttachmentUtil';
+import { RuisiSmileyService } from '../../services/ruisi/RuisiSmileyService';
+import { RuisiSmileyPanel } from '../../pages/ruisi/components/RuisiSmileyPanel';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { HttpUtil } from '../../utils/HttpUtil';
 import { motion } from '@kit.MultimodalAwarenessKit';
@@ -56,7 +56,7 @@ struct RuisiPostImageView {
       .height(this.imgH)
       .objectFit(ImageFit.Contain)
       .borderRadius(8)
-      .onClick(() => { this.onPreview(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.onPreview(); })
       .gesture(LongPressGesture().onAction(() => { this.onLongPress(); }))
       .onComplete((res: ImageLoadResult) => {
         const cw = res.componentWidth;
@@ -72,6 +72,31 @@ struct RuisiPostImageView {
         // 正文里留下一大块空白框（"莫名空白区域"头号嫌疑）。折叠高度为 0，去掉这块空白。
         this.imgH = 0;
       })
+  }
+}
+
+// 投票选项/结果图片：加载失败（防盗链 403 / 404 / 网络异常）时显示占位提示，
+// 而不是留一块 120px 的空白框（与 RuisiPostImageView 的失败折叠同理）。
+@Component
+struct RuisiVoteImageView {
+  imageUrl: string = '';
+  @State private failed: boolean = false;
+
+  build() {
+    if (this.failed) {
+      Column() {
+        Text('图片加载失败').fontSize(12).fontColor(ThemeColors.textSecondary)
+      }
+      .width('100%').height(60).justifyContent(FlexAlign.Center)
+      .backgroundColor(ThemeColors.bgInput).borderRadius(8)
+      .margin({ bottom: 6 })
+    } else {
+      Image(this.imageUrl)
+        .width('100%').height(120).objectFit(ImageFit.Cover)
+        .borderRadius(8)
+        .margin({ bottom: 6 })
+        .onError(() => { this.failed = true; })
+    }
   }
 }
 
@@ -128,10 +153,7 @@ struct RuisiVoteCard {
   resultRow(item: VoteResultItem) {
     Column() {
       if (item.imageUrl.length > 0) {
-        Image(item.imageUrl)
-          .width('100%').height(120).objectFit(ImageFit.Cover)
-          .borderRadius(8)
-          .margin({ bottom: 6 })
+        RuisiVoteImageView({ imageUrl: item.imageUrl })
       }
       Text(item.optionText)
         .fontSize(13).fontColor(ThemeColors.textPrimary)
@@ -159,10 +181,7 @@ struct RuisiVoteCard {
   optionRow(opt: VoteOption, clickable: boolean) {
     Column() {
       if (opt.imageUrl.length > 0) {
-        Image(opt.imageUrl)
-          .width('100%').height(120).objectFit(ImageFit.Cover)
-          .borderRadius(8)
-          .margin({ bottom: 6 })
+        RuisiVoteImageView({ imageUrl: opt.imageUrl })
       }
       Row() {
         if (clickable) {
@@ -178,7 +197,7 @@ struct RuisiVoteCard {
       .width('100%')
     }
     .width('100%').padding({ top: 8, bottom: 8 })
-    .onClick(() => { if (clickable) this.toggle(opt.id); })
+    .hoverEffect(HoverEffect.Auto).onClick(() => { if (clickable) this.toggle(opt.id); })
   }
 
   build() {
@@ -236,7 +255,7 @@ struct RuisiVoteCard {
           .fontColor(AccentColors.textContrast)
           .enabled(!this.submitting)
           .margin({ top: 10 })
-          .onClick(() => { this.doVote(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.doVote(); })
       } else if (this.vote.status.hasVoted) {
         // 已投票/已结束：结果 + 提示
         ForEach(this.vote.results, (item: VoteResultItem) => {
@@ -536,7 +555,7 @@ export struct RuisiTopicDetailPage {
         })
       Button('取消', { buttonStyle: ButtonStyleMode.TEXTUAL })
         .margin({ top: 12 })
-        .onClick(() => { this.showSaveSheet = false; })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.showSaveSheet = false; })
     }
     .width('100%')
     .padding({ top: 24, bottom: 24 })
@@ -618,7 +637,7 @@ export struct RuisiTopicDetailPage {
       Column()
         .width('100%').height('100%')
         .backgroundColor('rgba(0,0,0,0.45)')
-        .onClick(() => { this.closeReport(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeReport(); })
 
       // 底部面板
       Column() {
@@ -629,7 +648,7 @@ export struct RuisiTopicDetailPage {
             .layoutWeight(1)
           Image($r('app.media.close'))
             .width(22).height(22).fillColor(ThemeColors.textSecondary).draggable(false)
-            .onClick(() => { this.closeReport(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeReport(); })
         }
         .width('100%')
         .padding({ left: 16, right: 12, top: 16, bottom: 12 })
@@ -665,7 +684,7 @@ export struct RuisiTopicDetailPage {
                   .padding({ left: 12, right: 12, top: 12, bottom: 12 })
                   .backgroundColor(this.reportReasonIndex === i ? ThemeColors.bgInput : Color.Transparent)
                   .borderRadius(8)
-                  .onClick(() => { this.reportReasonIndex = i; })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.reportReasonIndex = i; })
                 }, (r: string) => 'rep_' + r)
               }
               .margin({ bottom: 12 })
@@ -697,13 +716,13 @@ export struct RuisiTopicDetailPage {
             .backgroundColor(ThemeColors.bgInput)
             .fontColor(ThemeColors.textPrimary)
             .margin({ right: 8 })
-            .onClick(() => { this.closeReport(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeReport(); })
           Button(this.reportSubmitting ? '提交中...' : '提交举报')
             .layoutWeight(1).height(44).borderRadius(22)
             .backgroundColor(this.accentColor)
             .fontColor(this.accentTextColor())
             .enabled(!this.reportSubmitting)
-            .onClick(() => { this.doSubmitReport(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doSubmitReport(); })
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 16 })
@@ -844,7 +863,7 @@ export struct RuisiTopicDetailPage {
             .width(36).height(36).borderRadius(18).margin({ right: 8 })
             .alt($r('sys.symbol.person'))
             .objectFit(ImageFit.Cover)
-            .onClick(() => {
+            .hoverEffect(HoverEffect.Auto).onClick(() => {
               if (post.authorId > 0) {
                 this.pageInfo.pushPath({ name: 'RuisiUser', param: new UserParam(post.authorId, post.author) });
               }
@@ -853,7 +872,7 @@ export struct RuisiTopicDetailPage {
           Image(`${RuisiConstants.BASE_URL}/uc2_link/avatar.php?uid=${post.authorId}&size=small`)
             .width(36).height(36).borderRadius(18).margin({ right: 8 })
             .objectFit(ImageFit.Cover)
-            .onClick(() => {
+            .hoverEffect(HoverEffect.Auto).onClick(() => {
               this.pageInfo.pushPath({ name: 'RuisiUser', param: new UserParam(post.authorId, post.author) });
             })
         } else {
@@ -909,7 +928,7 @@ export struct RuisiTopicDetailPage {
           .margin({ top: 6 })
           .borderRadius(10)
           .backgroundColor(ThemeColors.bgInput)
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             try { this.context.openLink(f.url); } catch (_) {}
           })
         }, (f: RuisiFileAttachment) => 'file_' + f.url + '_' + f.fileName)
@@ -927,7 +946,7 @@ export struct RuisiTopicDetailPage {
         .padding({ left: 8, right: 8, top: 4, bottom: 4 })
         .borderRadius(6)
         .backgroundColor(ThemeColors.bgInput)
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           // 对标 Flutter：回复某楼时往文本框预填「回复 #楼层 作者」，纯文本约定（submit 仅带 tid）
           this.replyText = '回复 #' + post.floor + ' ' + post.author + '\n';
           this.showReplyInput = true;
@@ -943,7 +962,7 @@ export struct RuisiTopicDetailPage {
         .borderRadius(6)
         .backgroundColor(ThemeColors.bgInput)
         .margin({ left: 8 })
-        .onClick(() => { this.openReport(post.pid); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.openReport(post.pid); })
       }
       .width('100%')
       .margin({ top: 0 })
@@ -998,7 +1017,7 @@ export struct RuisiTopicDetailPage {
                 Span(seg.value)
                   .fontSize(14).fontColor('#4078c0')
                   .decoration({ type: TextDecorationType.Underline })
-                  .onClick(() => {
+                  .hoverEffect(HoverEffect.Auto).onClick(() => {
                     try { this.context.openLink(seg.url); } catch (_) {}
                   })
               } else {
@@ -1142,7 +1161,7 @@ export struct RuisiTopicDetailPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
 
       Text('帖子详细')
         .fontSize(22).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
@@ -1153,7 +1172,7 @@ export struct RuisiTopicDetailPage {
         Text('☆')
           .fontSize(22).fontColor(this.accentTextColor())
           .margin({ left: 12 })
-          .onClick(async () => {
+          .hoverEffect(HoverEffect.Auto).onClick(async () => {
             const api = RuisiApiService.getInstance();
             const r = await api.favorite(this.tid);
             ToastUtil.show(r.message);
@@ -1165,7 +1184,7 @@ export struct RuisiTopicDetailPage {
           .fillColor(this.accentTextColor())
           .draggable(false)
           .margin({ left: 12 })
-          .onClick(() => { this.doShare(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.doShare(); })
       }
     }
     .width('100%').height('100%')
@@ -1266,7 +1285,7 @@ export struct RuisiTopicDetailPage {
                           Text('✕').fontSize(12).fontColor('#FFFFFF')
                             .backgroundColor('rgba(0,0,0,0.5)').borderRadius(10).width(20).height(20)
                             .textAlign(TextAlign.Center)
-                            .onClick(() => { this.removeReplyAttachment(idx); })
+                            .hoverEffect(HoverEffect.Auto).onClick(() => { this.removeReplyAttachment(idx); })
                         }.width(56).height(56).margin({ right: 8 })
                       }, (att: RuisiAttachment) => 'reply_att_' + att.aid)
                     }.width('100%').padding({ left: 16, right: 16, top: 8 }).justifyContent(FlexAlign.Start)
@@ -1283,7 +1302,7 @@ export struct RuisiTopicDetailPage {
                     // 表情（论坛内置表情面板）
                     Text('😊')
                       .fontSize(22).padding({ left: 16, right: 8 })
-                      .onClick(() => {
+                      .hoverEffect(HoverEffect.Auto).onClick(() => {
                         this.showReplyEmoji = !this.showReplyEmoji;
                       })
                     // 图片
@@ -1292,7 +1311,7 @@ export struct RuisiTopicDetailPage {
                     } else {
                       Text('🖼️')
                         .fontSize(22).margin({ left: 8 })
-                        .onClick(() => { this.pickReplyImage(); })
+                        .hoverEffect(HoverEffect.Auto).onClick(() => { this.pickReplyImage(); })
                     }
                     Blank()
                     // 取消
@@ -1301,7 +1320,7 @@ export struct RuisiTopicDetailPage {
                     }
                     .width(36).height(36).margin({ right: 8 })
                     .backgroundColor(ThemeColors.bgInput)
-                    .onClick(() => {
+                    .hoverEffect(HoverEffect.Auto).onClick(() => {
                       this.showReplyInput = false;
                       this.replyText = '';
                       this.replyAttachments = [];
@@ -1317,7 +1336,7 @@ export struct RuisiTopicDetailPage {
                     }
                     .width(36).height(36)
                     .backgroundColor(this.accentColor)
-                    .onClick(() => { this.doReply(); })
+                    .hoverEffect(HoverEffect.Auto).onClick(() => { this.doReply(); })
                     .enabled(!this.replying && !this.replyUploading)
                   }.width('100%').margin({ top: 8, bottom: 12 })
 
@@ -1351,7 +1370,7 @@ export struct RuisiTopicDetailPage {
               .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
               .margin({ bottom: 80, right: 20 })
               .translate({ x: this.fabTranslateX })
-              .onClick(() => { this.showReplyInput = true; })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.showReplyInput = true; })
             }
           }
           .width('100%')
@@ -1369,7 +1388,7 @@ export struct RuisiTopicDetailPage {
             Text('加载失败')
               .fontSize(14).fontColor(ThemeColors.textHint)
             Button('重试').fontSize(14).margin({ top: 12 })
-              .onClick(() => { this.loadDetail(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadDetail(); })
           }
           .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         }
@@ -1381,7 +1400,7 @@ export struct RuisiTopicDetailPage {
           Column() { }
             .width('100%').height('100%')
             .backgroundColor('#000000')
-            .onClick(() => { this.closePreview(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.closePreview(); })
 
           // 图片本体：双指捏合缩放 + 双击放大/还原 + 单点退出（放大后可拖拽平移）
           Image(this.previewImageUrl)
@@ -1390,7 +1409,7 @@ export struct RuisiTopicDetailPage {
             .draggable(false)
             .scale({ x: this.previewScale, y: this.previewScale })
             .translate({ x: this.previewOffsetX, y: this.previewOffsetY })
-            .onClick(() => { this.handlePreviewTap(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.handlePreviewTap(); })
             .gesture(
               GestureGroup(GestureMode.Parallel,
                 PinchGesture({ fingers: 2 })
@@ -1426,7 +1445,7 @@ export struct RuisiTopicDetailPage {
           .backgroundColor('rgba(0,0,0,0.4)')
           .position({ top: 24, right: 16 })
           .zIndex(101)
-          .onClick(() => { this.closePreview(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.closePreview(); })
 
           // 保存到相册：浮在右下角的圆形下载按钮（SaveButton 安全控件，点击即获临时写相册权限；
           // 普通应用只能用系统图标，不能塞自定义 SVG——setIcon 需 CUSTOMIZE_SAVE_BUTTON 权限，拿不到）
@@ -1465,7 +1484,7 @@ export struct RuisiTopicDetailPage {
             .position({ top: '50%', left: 16 })
             .translate({ y: -22 })
             .zIndex(101)
-            .onClick(() => { this.switchPreview(-1); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.switchPreview(-1); })
           }
 
           // 右切换（非末图）：垂直居中、右侧。箭头图标对齐课表周切换（ic_public_arrow_right）
@@ -1481,7 +1500,7 @@ export struct RuisiTopicDetailPage {
             .position({ top: '50%', right: 16 })
             .translate({ y: -22 })
             .zIndex(101)
-            .onClick(() => { this.switchPreview(1); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.switchPreview(1); })
           }
         }
         .width('100%').height('100%')

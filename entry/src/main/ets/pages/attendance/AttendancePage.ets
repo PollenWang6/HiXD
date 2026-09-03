@@ -1,10 +1,10 @@
-// AttendancePage.ets — 考勤查询页面
-import { AttendanceService } from '../../services/AttendanceService';
-import { ClassAttendance, ClassAttendanceDetail, AttendanceStatus } from '../../services/AttendanceModels';
+﻿// AttendancePage.ets — 考勤查询页面
+import { AttendanceService } from '../../services/ids/AttendanceService';
+import { ClassAttendance, ClassAttendanceDetail, AttendanceStatus } from '../../models/ids/AttendanceModels';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
-import { SemesterUtil } from '../../services/EhallService';
+import { SemesterUtil } from '../../services/ids/EhallService';
 
 @Component
 export struct AttendancePage {
@@ -104,7 +104,7 @@ export struct AttendancePage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -333,7 +333,7 @@ export struct AttendancePage {
     .width('100%')
     .borderRadius(12).backgroundColor(ThemeColors.bgCard)
     .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-    .onClick(() => { this.openDetail(course); })
+    .hoverEffect(HoverEffect.Auto).onClick(() => { this.openDetail(course); })
   }
 
   @Builder
@@ -401,7 +401,7 @@ export struct AttendancePage {
         .borderRadius(14)
         .padding({ left: 12, right: 12, top: 5, bottom: 5 })
     }
-    .onClick(() => { this.statusFilter = target; })
+    .hoverEffect(HoverEffect.Auto).onClick(() => { this.statusFilter = target; })
   }
 
   // 表头单元格（纯展示：不做点击排序、不显示三角箭头）
@@ -472,7 +472,7 @@ export struct AttendancePage {
               .width(766).height(52)
               .backgroundColor(index % 2 === 0 ? ThemeColors.bgCard : (ThemeColors.isDark ? '#101A2B' : '#FAFBFD'))
               .borderRadius(4)
-              .onClick(() => { this.openDetail(course); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.openDetail(course); })
             }, (course: ClassAttendance, index: number) =>
               'att_' + this.courses.indexOf(course) + '_' + course.courseName)
           }
@@ -499,7 +499,7 @@ export struct AttendancePage {
           }
           .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
           .justifyContent(FlexAlign.Center)
-          .onClick(() => { this.closeDetail(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeDetail(); })
         }.width('100%').padding({ bottom: 12 })
 
         Text(this.detailCourseName).fontSize(14).fontColor(ThemeColors.textSecondary)
@@ -562,7 +562,7 @@ export struct AttendancePage {
               .fontSize(12).height(30)
               .backgroundColor(this.accentColor + '18').fontColor(this.accentColor)
               .borderRadius(15).padding({ left: 12, right: 12 })
-              .onClick(() => { this.loadData(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadData(); })
           }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
 
           if (this.loading) {
@@ -577,7 +577,7 @@ export struct AttendancePage {
                 .fontSize(14).height(36)
                 .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(18)
                 .padding({ left: 24, right: 24 })
-                .onClick(() => { this.loadData(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadData(); })
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else if (this.courses.length === 0) {
             Column() {
@@ -654,7 +654,7 @@ export struct AttendancePage {
               .width('100%').height('100%')
               .backgroundColor('#4D000000')
               .opacity(this.detailMaskOpacity)
-              .onClick(() => { this.closeDetail(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeDetail(); })
             Column() {
               this.detailSheetBuilder()
             }
@@ -669,7 +669,7 @@ export struct AttendancePage {
               .width('100%').height('100%')
               .backgroundColor('#4D000000')
               .opacity(this.detailMaskOpacity)
-              .onClick(() => { this.closeDetail(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeDetail(); })
             Column() {
               this.detailSheetBuilder()
             }

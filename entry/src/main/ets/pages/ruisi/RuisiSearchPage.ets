@@ -1,11 +1,11 @@
-// RuisiSearchPage.ets — 搜索
+﻿// RuisiSearchPage.ets — 搜索
 // 对标 Flutter search_page.dart: PagingController + PagedListView
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { SearchResult, Topic, TopicDetailParam, UserParam } from '../../services/RuisiModels';
-import { RuisiTopicItem } from '../../components/RuisiTopicItem';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { SearchResult, Topic, TopicDetailParam, UserParam } from '../../models/ruisi/RuisiModels';
+import { RuisiTopicItem } from '../../pages/ruisi/components/RuisiTopicItem';
 import { ToastUtil } from '../../utils/ToastUtil';
 
 @Component
@@ -67,7 +67,7 @@ export struct RuisiSearchPage {
     Row() {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.close')).width(22).height(22).fillColor(this.accentTextColor()).draggable(false)
-      }.width(40).height(40).backgroundColor('rgba(255,255,255,0.18)').onClick(() => { this.pageInfo.pop() }).margin({ right: 12 })
+      }.width(40).height(40).backgroundColor('rgba(255,255,255,0.18)').hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop() }).margin({ right: 12 })
       Text('搜索').fontSize(22).fontWeight(FontWeight.Bold).fontColor(this.accentTextColor())
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
     }.width('100%').height('100%').padding({ left: 12, right: 16, top: this.statusBarHeight }).backgroundColor(this.accentColor)
@@ -85,7 +85,7 @@ export struct RuisiSearchPage {
             .onSubmit(() => { this.doSearch(true); })
           Button('搜索').fontSize(14).height(40).margin({ left: 8 })
             .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(20)
-            .onClick(() => { this.doSearch(true); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doSearch(true); })
         }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 }).backgroundColor(ThemeColors.bgCard)
 
         if (this.searching && this.results.length === 0) {
@@ -115,7 +115,7 @@ export struct RuisiSearchPage {
               ListItem() {
                 Row() { Text('加载更多').fontSize(13).fontColor(ThemeColors.textSecondary) }
                   .width('100%').height(44).justifyContent(FlexAlign.Center)
-                  .onClick(() => { this.page++; this.doSearch(false); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.page++; this.doSearch(false); })
               }
             }
             if (this.searching && this.results.length > 0) {

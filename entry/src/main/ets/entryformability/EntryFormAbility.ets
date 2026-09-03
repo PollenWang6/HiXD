@@ -144,7 +144,9 @@ function calcCurrentWeek(): number {
   // 动态按当前学期开学日计算（原写死 2026/3/2，跨到 2026 秋季/下学年后桌面卡片周次会整体错乱）
   const start: number = getSemesterStartDate().getTime();
   const now: number = Date.now();
-  const diff: number = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+  const swift: number = PreferenceUtil.getNumber('week_swift', 0);
+  const dayMs: number = 1000 * 60 * 60 * 24;
+  const diff: number = Math.floor((now - start - swift * 7 * dayMs) / dayMs);
   return Math.max(1, Math.floor(diff / 7) + 1);
 }
 
@@ -420,12 +422,17 @@ function mergePhysicsPreview(form: FormDataClass, currentWeek: number, localDay:
     const co: Record<string, Object> = JSON.parse(cached) as Record<string, Object>;
     const data: Object[] = co['data'] as Object[];
     if (!data || data.length === 0) return;
+
+    // 与 mergeExperimentPreview（sysj 普通实验）同待遇：今天 + 明天双分支
+    const todayDay: number = localDay;
+    const tomorrowDay: number = todayDay === 7 ? 1 : todayDay + 1;
+
     for (let i: number = 0; i < data.length; i++) {
       const item: Record<string, Object> = data[i] as Record<string, Object>;
       const wk: number = parseInt(String(item['week'] || '0')) || 0;
       if (wk !== currentWeek) continue;
       const day: number = parseInt(String(item['weekday'] || '0')) || 0;
-      if (day < 1 || day > 7 || day !== localDay) continue;
+      if (day < 1 || day > 7) continue;
       const name: string = String(item['experimentName'] || '物理实验');
       const room: string = String(item['lab'] || '');
       const startSec: number = parseInt(String(item['startSection'] || '0')) || 0;
@@ -434,11 +441,19 @@ function mergePhysicsPreview(form: FormDataClass, currentWeek: number, localDay:
       if (startSec > 0 && startSec < SECTION_TIMES.length && endSec > 0 && endSec < SECTION_TIMES.length) {
         timeStr = SECTION_TIMES[startSec].split('-')[0] + '~' + SECTION_TIMES[endSec].split('-')[1];
       }
-      form.todayNames.push('⚛ ' + name);
-      form.todayTimes.push(timeStr);
-      form.todayRooms.push(room);
-      form.todayTeachers.push('');
-      form.todayStarts.push(startSec);
+      if (day === todayDay) {
+        form.todayNames.push('⚛ ' + name);
+        form.todayTimes.push(timeStr);
+        form.todayRooms.push(room);
+        form.todayTeachers.push('');
+        form.todayStarts.push(startSec);
+      } else if (day === tomorrowDay) {
+        form.tomorrowNames.push('⚛ ' + name);
+        form.tomorrowTimes.push(timeStr);
+        form.tomorrowRooms.push(room);
+        form.tomorrowTeachers.push('');
+        form.tomorrowStarts.push(startSec);
+      }
     }
   } catch (e) {
     hilog.warn(DOMAIN, TAG, 'mergePhysicsPreview error: ' + JSON.stringify(e));

@@ -1,4 +1,4 @@
-// 图书馆会话后台静默预热组件（纯 HTTP）。
+﻿// 图书馆会话后台静默预热组件（纯 HTTP）。
 //
 // 问题背景：首页「图书馆」卡片（在借/逾期）依赖 LibspSessionService 缓存的 JWT 会话取数，
 // 而该会话只有进入图书馆页、其纯 HTTP 流程（fetchJwtViaHttp）跑完 CAS→超星→libsp 链拿到
@@ -8,7 +8,7 @@
 // 无 WebView），随后直接刷新首页卡片（并 bump home_data_dirty 兜底）。
 // 组件常驻挂载、build 为空（纯逻辑组件，不渲染任何 UI）。
 
-import { LibspSessionService, LibspBorrowSummary } from '../../services/LibspSessionService';
+import { LibspSessionService, LibspBorrowSummary } from '../../services/library/LibspSessionService';
 
 @Component
 export struct LibspSessionWarmup {

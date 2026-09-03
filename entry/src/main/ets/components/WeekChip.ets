@@ -1,4 +1,4 @@
-import { ThemeColors } from '../utils/ThemeColors';
+﻿import { ThemeColors } from '../utils/ThemeColors';
 
 // 周次选择 chip —— 独立组件，点击只重渲染自身，解决原内联 ForEach 全量重绘卡顿
 @Component
@@ -25,6 +25,6 @@ export struct WeekChip {
       style: BorderStyle.Solid
     })
     .backgroundColor(this.selected ? this.accent : ThemeColors.bgInput)
-    .onClick(() => { if (this.onToggle) { this.onToggle(); } })
+    .hoverEffect(HoverEffect.Auto).onClick(() => { if (this.onToggle) { this.onToggle(); } })
   }
 }

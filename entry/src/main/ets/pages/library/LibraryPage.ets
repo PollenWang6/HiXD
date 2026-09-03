@@ -1,10 +1,10 @@
-import { ToastUtil } from '../../utils/ToastUtil';
+﻿import { ToastUtil } from '../../utils/ToastUtil';
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // LibraryPage.ets — 图书馆页面
 import { ThemeColors } from '../../utils/ThemeColors';
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { LibspSessionService, LibspSession } from '../../services/LibspSessionService';
+import { LibspSessionService, LibspSession } from '../../services/library/LibspSessionService';
 import { SegmentTab } from '../../components/SegmentTab';
 import { common } from '@kit.AbilityKit';
 import { image } from '@kit.ImageKit';
@@ -170,7 +170,7 @@ export struct LibraryPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -780,7 +780,7 @@ export struct LibraryPage {
           .fontSize(13).height(32)
           .backgroundColor(this.themeIsDark ? '#333333' : '#EEEEEE')
           .fontColor(ThemeColors.textPrimary)
-          .onClick(() => { this.openHistoryDetail(h); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.openHistoryDetail(h); })
       }.width('100%')
     }.width('100%').padding(14)
     .backgroundColor(ThemeColors.bgCard).borderRadius(12)
@@ -1501,7 +1501,7 @@ export struct LibraryPage {
             .fontSize(12)
             .fontColor(this.accentColor)
             .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .onClick(() => { this.clearSearchHistory(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.clearSearchHistory(); })
         }
       }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 6 })
 
@@ -1517,7 +1517,7 @@ export struct LibraryPage {
             .borderRadius(14)
             .constraintSize({ maxWidth: 220 })
             .margin({ right: 8, bottom: 8 })
-            .onClick(() => { this.applyHistory(item); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.applyHistory(item); })
         }, (item: SearchHistoryItem) => 'sh_' + item.f + '_' + item.w)
       }.width('100%').padding({ left: 16, right: 16, top: 4, bottom: 10 })
     }
@@ -1571,7 +1571,7 @@ export struct LibraryPage {
               .onFocus(() => { this.searchFocused = true; this.showHistory(); })
               .onBlur(() => { this.searchFocused = false; this.hideHistory(); })
             Button('搜索').height(40).borderRadius(20).backgroundColor('#8E24AA').fontColor('#FFFFFF')
-              .onClick(() => { this.doSearch(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.doSearch(); })
           }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
 
         if (this.isSearching && this.books.length === 0) {
@@ -1580,7 +1580,7 @@ export struct LibraryPage {
             LoadingProgress().width(40).height(40).color(this.accentColor)
             Text('搜索中...').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             this.hideHistory();
           })
         } else if (this.books.length > 0) {
@@ -1619,7 +1619,7 @@ export struct LibraryPage {
                 }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
                 .borderRadius(12).backgroundColor(ThemeColors.bgCard)
                 .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   // 点书先强制收起搜索框键盘与历史浮层（书籍项不可获焦，不会触发 onBlur）
                   this.searchInputController.stopEditing();
                   this.searchFocused = false;
@@ -1663,7 +1663,7 @@ export struct LibraryPage {
               this.hideHistory();
             }
           })
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             this.hideHistory();
           })
         } else {
@@ -1672,7 +1672,7 @@ export struct LibraryPage {
             Text(this.searchPage > 0 ? '未找到相关图书' : '搜索图书试试吧')
               .fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             this.hideHistory();
           })
         }
@@ -1686,7 +1686,7 @@ export struct LibraryPage {
               .onChange((v: string) => { this.borrowSearchWord = v; })
               .onSubmit(() => { this.doBorrowSearch(); })
             Button('搜索').height(40).borderRadius(20).backgroundColor('#8E24AA').fontColor('#FFFFFF')
-              .onClick(() => { this.doBorrowSearch(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.doBorrowSearch(); })
           }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
 
           // 子 tab：当前借阅 / 借阅历史
@@ -1696,12 +1696,12 @@ export struct LibraryPage {
                 .fontWeight(this.borrowSubTab === 0 ? FontWeight.Bold : FontWeight.Normal)
                 .fontColor(this.borrowSubTab === 0 ? '#8E24AA' : '#999999')
                 .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-                .onClick(() => { this.borrowSubTab = 0; this.doBorrowSearch(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.borrowSubTab = 0; this.doBorrowSearch(); })
               Text('借阅历史').fontSize(14)
                 .fontWeight(this.borrowSubTab === 1 ? FontWeight.Bold : FontWeight.Normal)
                 .fontColor(this.borrowSubTab === 1 ? '#8E24AA' : '#999999')
                 .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-                .onClick(() => { this.borrowSubTab = 1; this.isBatchMode = false; this.doBorrowSearch(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.borrowSubTab = 1; this.isBatchMode = false; this.doBorrowSearch(); })
             }
           }.width('100%').backgroundColor(ThemeColors.bgCard).justifyContent(FlexAlign.Start)
         Stack() {
@@ -1720,13 +1720,13 @@ export struct LibraryPage {
               .fontColor('#2E7D32')
               .backgroundColor(this.themeIsDark ? '#16331C' : '#E8F5E9')
               .height(42).borderRadius(21).layoutWeight(1)
-              .onClick(() => { this.handleScanClick(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.handleScanClick(); })
             Button('一键转借', { type: ButtonType.Normal })
               .fontSize(14).fontWeight(FontWeight.Medium)
               .fontColor('#C2185B')
               .backgroundColor(this.themeIsDark ? '#331A28' : '#FCE4EC')
               .height(42).borderRadius(21).layoutWeight(1)
-              .onClick(() => { this.transferShowDialog = true; })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.transferShowDialog = true; })
           }
           // 「管理」入口：仅当前借阅可批量续借，置于操作栏下方，突出归属当前借阅
           Row() {
@@ -1736,7 +1736,7 @@ export struct LibraryPage {
               .backgroundColor(this.isBatchMode ? '#8E24AA'
                 : (this.themeIsDark ? '#2A2A2A' : '#F3E5F5'))
               .borderRadius(16)
-              .onClick(() => { this.toggleBatchMode(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.toggleBatchMode(); })
           }.width('100%').margin({ top: 8, left: 14, right: 14 })
           // 当前借阅内容
           // 扫码结果反馈
@@ -1839,7 +1839,7 @@ export struct LibraryPage {
                       }.width('100%').margin({ top: 8 })
                     }.layoutWeight(1).alignItems(HorizontalAlign.Start).margin({ left: 12 })
                   }.width('100%')
-                  .onClick(() => { if (this.isBatchMode) this.toggleSelect(borrow); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { if (this.isBatchMode) this.toggleSelect(borrow); })
                   // 底部：续借剩余 + 续借按钮 + 详细按钮
                   Row({ space: 8 }) {
                     Text('续借剩余 ' + borrow.surplusRenewTimes + ' 次')
@@ -1850,7 +1850,7 @@ export struct LibraryPage {
                           .fontSize(13).height(32)
                           .backgroundColor('#8E24AA').fontColor(Color.White)
                           .enabled(this.renewingLoanId !== borrow.loanId)
-                          .onClick(() => { this.renewBook(borrow); })
+                          .hoverEffect(HoverEffect.Auto).onClick(() => { this.renewBook(borrow); })
                       } else {
                         Button('已无可续', { type: ButtonType.Capsule })
                           .fontSize(13).height(32)
@@ -1861,7 +1861,7 @@ export struct LibraryPage {
                         .fontSize(13).height(32)
                         .backgroundColor(this.themeIsDark ? '#333333' : '#EEEEEE')
                         .fontColor(ThemeColors.textPrimary)
-                        .onClick(() => { this.openBorrowDetail(borrow); })
+                        .hoverEffect(HoverEffect.Auto).onClick(() => { this.openBorrowDetail(borrow); })
                     }
                   }.width('100%').margin({ top: 10 })
                 }.width('100%').padding(14)
@@ -1879,7 +1879,7 @@ export struct LibraryPage {
               this.hideHistory();
             }
           })
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             this.hideHistory();
           })
           }.layoutWeight(1)
@@ -1889,16 +1889,16 @@ export struct LibraryPage {
               Text('全选')
                 .fontSize(14).fontColor('#8E24AA')
                 .padding({ left: 4, right: 4 })
-                .onClick(() => { this.selectAllBorrowable(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectAllBorrowable(); })
               Button('批量续借(' + this.selectedLoanIds.length + ')', { type: ButtonType.Capsule })
                 .fontSize(14).height(38)
                 .backgroundColor('#8E24AA').fontColor(Color.White)
                 .enabled(!this.batchRenewing && this.selectedLoanIds.length > 0)
-                .onClick(() => { this.batchRenew(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.batchRenew(); })
               Text('取消')
                 .fontSize(14).fontColor(ThemeColors.textSecondary)
                 .padding({ left: 4, right: 4 })
-                .onClick(() => { this.toggleBatchMode(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.toggleBatchMode(); })
             }.width('100%')
             .padding({ left: 14, right: 14, top: 10, bottom: 10 })
             .backgroundColor(ThemeColors.bgCard)
@@ -1913,10 +1913,10 @@ export struct LibraryPage {
                 .padding({ left: 8, right: 8, top: 2, bottom: 2 })
                 .border({ width: 1, color: this.accentColor, radius: 4 })
                 .margin({ top: 8 })
-                .onClick(() => { this.errorMsg = ''; this.loadBorrowList(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.errorMsg = ''; this.loadBorrowList(); })
             }
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             this.hideHistory();
           })
         }
@@ -1951,7 +1951,7 @@ export struct LibraryPage {
                   .padding({ left: 8, right: 8, top: 2, bottom: 2 })
                   .border({ width: 1, color: this.accentColor, radius: 4 })
                   .margin({ top: 8 })
-                  .onClick(() => { this.errorMsg = ''; this.loadBorrowList(); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.errorMsg = ''; this.loadBorrowList(); })
               }
             }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           }
@@ -1972,7 +1972,7 @@ export struct LibraryPage {
             .width('100%').height('100%')
             .backgroundColor('#4D000000')
             .opacity(this.bookMaskOpacity)
-            .onClick(() => { this.closeBookDetail(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeBookDetail(); })
           // 详情卡片
           Column() {
             Column() {
@@ -1991,7 +1991,7 @@ export struct LibraryPage {
             .width('100%').height('100%')
             .backgroundColor('#4D000000')
             .opacity(this.bookMaskOpacity)
-            .onClick(() => { this.closeDetail(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeDetail(); })
           Column() {
             Column() {
               this.borrowDetailBuilder()
@@ -2015,7 +2015,7 @@ export struct LibraryPage {
                   .width(28).height(28)
                   .fillColor('#C2185B')
                   .padding(4)
-                  .onClick(() => { this.handleTransferScan(); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.handleTransferScan(); })
               }
               TextInput({ text: this.transferInput, placeholder: '输入条码号或点击右上角扫码' })
                 .width('100%').height(44).borderRadius(8)
@@ -2025,20 +2025,20 @@ export struct LibraryPage {
                 Button('取消').type(ButtonType.Capsule).fontSize(14)
                   .fontColor(ThemeColors.textSecondary)
                   .backgroundColor(ThemeColors.bgInput).layoutWeight(1)
-                  .onClick(() => { this.transferShowDialog = false; this.transferInput = ''; })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.transferShowDialog = false; this.transferInput = ''; })
                 Button('确认').type(ButtonType.Capsule).fontSize(14)
                   .backgroundColor('#C2185B').fontColor(Color.White).layoutWeight(1)
-                  .onClick(() => { this.handleTransferInput(); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.handleTransferInput(); })
               }
             }
             .width('80%').padding(24).borderRadius(16)
             .backgroundColor(ThemeColors.bgCard)
-            .onClick(() => {}) // 吞掉卡片内部点击，避免冒泡到遮罩触发关闭
+            .hoverEffect(HoverEffect.Auto).onClick(() => {}) // 吞掉卡片内部点击，避免冒泡到遮罩触发关闭
           }
           .width('100%').height('100%')
           .backgroundColor('#4D000000').justifyContent(FlexAlign.Center)
           .zIndex(100)
-          .onClick(() => { // 点击遮罩（弹窗外部）关闭弹窗
+          .hoverEffect(HoverEffect.Auto).onClick(() => { // 点击遮罩（弹窗外部）关闭弹窗
             this.transferShowDialog = false;
             this.transferInput = '';
           })
@@ -2108,7 +2108,7 @@ export struct LibraryPage {
         }
         .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
         .justifyContent(FlexAlign.Center).flexShrink(0)
-        .onClick(() => { this.closeBookDetail(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeBookDetail(); })
       }.width('100%').margin({ bottom: 8 })
 
       Divider().margin({ top: 4, bottom: 8 }).color('#F0F0F0')
@@ -2163,7 +2163,7 @@ export struct LibraryPage {
                   Divider().color('#F0F0F0')
                 }
                 .width('100%')
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   if (eb.url && eb.url.length > 0) {
                     this.openEBookUrl(eb.url);
                   } else if (eb.elecResourceUrl && eb.elecResourceUrl.length > 0) {
@@ -2261,7 +2261,7 @@ export struct LibraryPage {
         }
         .width(28).height(28).borderRadius(14).backgroundColor(ThemeColors.bgInput)
         .justifyContent(FlexAlign.Center)
-        .onClick(() => { this.closeDetail(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.closeDetail(); })
       }.width('100%').padding({ bottom: 8 })
 
       // 作者

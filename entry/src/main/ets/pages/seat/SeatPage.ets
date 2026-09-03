@@ -1,12 +1,12 @@
-// SeatPage.ets — 座位预约
+﻿// SeatPage.ets — 座位预约
 // 用 HiXD 现有的 CAS→超星 SSO 桥产出的 passport2 会话，经
 // v1.chaoxing.com/mobile/redirectApp?mAppId=20002259（超星一级 App 跳转器，
 // 签发超星自有 OAuth code，非微信）进入 seatengine 真实选座界面。
 // 实现：WebView 容器 + 把 HttpUtil cookieStore 里的超星 passport2 cookie 注入 WebView CookieJar。
 import web_webview from '@ohos.web.webview';
 import { ThemeColors } from '../../utils/ThemeColors';
-import { CasLoginService } from '../../services/CasLoginService';
-import { AttendanceService } from '../../services/AttendanceService';
+import { CasLoginService } from '../../services/auth/CasLoginService';
+import { AttendanceService } from '../../services/ids/AttendanceService';
 import { HttpUtil } from '../../utils/HttpUtil';
 
 // 座位预约入口（超星一级 App 跳转器，签发超星自有 OAuth code，非微信）
@@ -117,7 +117,7 @@ export struct SeatPage {
           .height(22).fillColor(ThemeColors.textPrimary).draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
 
       Text('座位预约')
         .fontSize(20).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
@@ -128,7 +128,7 @@ export struct SeatPage {
           .height(20).fillColor(ThemeColors.textPrimary).draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => {
+      .hoverEffect(HoverEffect.Auto).onClick(() => {
         this.webUrl = '';
         this.errText = '';
         this.startLoginFlow();

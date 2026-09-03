@@ -1,4 +1,4 @@
-// ImageCropPage.ets - 图片裁剪页面（全屏）
+﻿// ImageCropPage.ets - 图片裁剪页面（全屏）
 // 裁剪框固定屏幕中心，图片可双指缩放、单指拖动
 // Stack.clip(true) 防止图片溢出到顶栏/底栏
 import { image } from '@kit.ImageKit';
@@ -169,13 +169,13 @@ struct ImageCropPage {
       // 顶部栏
       Row() {
         Text('取消').fontSize(16).fontColor('#FFFFFF')
-          .onClick(() => { this.cancel(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.cancel(); })
         Blank()
         Text('裁剪图片').fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
         Blank()
         Text('完成').fontSize(16).fontWeight(FontWeight.Medium)
           .fontColor(this.isReady ? '#FF6B00' : '#666666')
-          .onClick(() => { if (this.isReady) { this.confirmCrop(); } })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { if (this.isReady) { this.confirmCrop(); } })
       }
       .width('100%').height(56 + this.statusBarHeight)
       .padding({ left: 20, right: 20, top: this.statusBarHeight })

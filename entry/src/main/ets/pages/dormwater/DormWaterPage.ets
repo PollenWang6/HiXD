@@ -1,6 +1,6 @@
-import { ToastUtil } from '../../utils/ToastUtil';
+﻿import { ToastUtil } from '../../utils/ToastUtil';
 ﻿// DormWaterPage.ets — 宿舍水机控制页面
-import { DormWaterService, DormWaterDevice, CaptchaData } from '../../services/DormWaterService';
+import { DormWaterService, DormWaterDevice, CaptchaData } from '../../services/campus/DormWaterService';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { scanCore, scanBarcode } from '@kit.ScanKit';
@@ -57,7 +57,7 @@ export struct DormWaterPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -300,7 +300,7 @@ export struct DormWaterPage {
             Row() {
               Blank()
               Button('退出').fontSize(13).fontColor('#FF7043').backgroundColor('#00000000')
-                .onClick(() => { this.doLogout(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.doLogout(); })
             }.width('100%').padding({ right: 16, top: 4 })
           }
 
@@ -335,7 +335,7 @@ export struct DormWaterPage {
             Text('停止').fontSize(13).fontColor(ThemeColors.textPrimary)
               .padding({ left: 12, right: 12, top: 6, bottom: 6 })
               .backgroundColor('#FFFFFF44').borderRadius(6)
-              .onClick(() => {
+              .hoverEffect(HoverEffect.Auto).onClick(() => {
                 const dev: DormWaterDevice | undefined = this.devices.find(
                   (d: DormWaterDevice): boolean => d.id === this.runningDeviceId);
                 if (dev) this.doEndWater(dev);
@@ -357,7 +357,7 @@ export struct DormWaterPage {
         }
         .backgroundColor(this.accentColor + '15').fontColor(this.accentColor)
         .borderRadius(10).height(40).layoutWeight(1)
-        .onClick(() => { this.doScanAdd(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.doScanAdd(); })
 
         Button() {
           Row() {
@@ -367,7 +367,7 @@ export struct DormWaterPage {
         }
         .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textSecondary)
         .borderRadius(10).height(40).layoutWeight(1)
-        .onClick(() => { this.showManualAdd = true; })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.showManualAdd = true; })
       }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 4 })
 
       if (this.loading) {
@@ -376,7 +376,7 @@ export struct DormWaterPage {
         Column() {
           Text(this.errorMsg).fontSize(14).fontColor('#FF7043').margin({ top: 40 })
           Text('重试').fontSize(14).fontColor(this.accentColor).margin({ top: 12 })
-            .onClick(() => { this.loadDevices(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadDevices(); })
         }
       } else if (this.devices.length > 0) {
         List({ space: 12 }) {
@@ -413,12 +413,12 @@ export struct DormWaterPage {
         Text('开始接水').fontSize(13).fontColor(ThemeColors.textOnColor(this.accentColor))
           .padding({ left: 16, right: 16, top: 8, bottom: 8 })
           .backgroundColor(this.accentColor).borderRadius(8)
-          .onClick(() => { this.doStartWater(dev); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.doStartWater(dev); })
       }
 
       // 长按删除
       Text('✕').fontSize(14).fontColor(ThemeColors.textSecondary).margin({ left: 12 })
-        .onClick(() => { this.doRemoveDevice(dev); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.doRemoveDevice(dev); })
     }
     .width('100%').padding(16)
     .backgroundColor(ThemeColors.bgCard).borderRadius(12)
@@ -441,20 +441,20 @@ export struct DormWaterPage {
         Row({ space: 10 }) {
           Button('取消').layoutWeight(1).height(40)
             .backgroundColor(ThemeColors.bgInput).fontColor(ThemeColors.textPrimary).borderRadius(10)
-            .onClick(() => { this.showManualAdd = false; this.manualDeviceId = ''; })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.showManualAdd = false; this.manualDeviceId = ''; })
           Button('添加').layoutWeight(1).height(40)
             .backgroundColor(this.accentColor).fontColor(ThemeColors.textOnColor(this.accentColor)).borderRadius(10)
-            .onClick(() => { this.doManualAdd(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doManualAdd(); })
         }.width('100%').margin({ top: 16 })
       }
       .width('80%').padding(24).backgroundColor(ThemeColors.bgCard).borderRadius(16)
       .shadow({ radius: 20, color: '#30000000' })
-      .onClick(() => {})
+      .hoverEffect(HoverEffect.Auto).onClick(() => {})
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor(ThemeColors.overlay)
-    .onClick(() => { this.showManualAdd = false; this.manualDeviceId = ''; })
+    .hoverEffect(HoverEffect.Auto).onClick(() => { this.showManualAdd = false; this.manualDeviceId = ''; })
   }
 
   // ===== 登录表单 UI =====
@@ -483,14 +483,14 @@ export struct DormWaterPage {
           if (this.captchaBase64.length > 0) {
             Image('data:image/png;base64,' + this.captchaBase64)
               .width(90).height(36).objectFit(ImageFit.Contain).borderRadius(4).margin({ left: 8 })
-              .onClick(() => { this.loadCaptcha(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadCaptcha(); })
           } else if (this.captchaLoading) {
             LoadingProgress().width(20).height(20).margin({ left: 8 })
           } else {
             Text('加载失败').fontSize(12).fontColor('#FF7043')
               .width(90).height(36).textAlign(TextAlign.Center)
               .border({ width: 1, color: '#FF7043', radius: 4 }).margin({ left: 8 })
-              .onClick(() => { this.loadCaptcha(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadCaptcha(); })
           }
         }
         .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
@@ -508,7 +508,7 @@ export struct DormWaterPage {
             .backgroundColor(this.smsCountdown > 0 ? ThemeColors.bgInput : this.accentColor)
             .fontColor(this.smsCountdown > 0 ? ThemeColors.textSecondary : ThemeColors.textOnColor(this.accentColor))
             .borderRadius(6).enabled(this.smsCountdown === 0)
-            .onClick(() => { this.doSendSms(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doSendSms(); })
         }
         .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
         Divider().color(ThemeColors.border).margin({ left: 48 })
@@ -525,7 +525,7 @@ export struct DormWaterPage {
           .backgroundColor(this.accentColor).borderRadius(10)
           .margin({ left: 16, right: 16, top: 24 })
           .enabled(!this.loginLoading)
-          .onClick(() => { this.doLogin(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.doLogin(); })
       }
       .width('100%')
     }

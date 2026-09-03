@@ -1,10 +1,10 @@
-// RuisiFavoritesPage.ets — 我的收藏
+﻿// RuisiFavoritesPage.ets — 我的收藏
 // 每行显示：标题 + 收藏时间 + 删除按钮（确认弹窗），对齐安卓长按删除
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { Topic, TopicDetailParam } from '../../services/RuisiModels';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { Topic, TopicDetailParam } from '../../models/ruisi/RuisiModels';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { promptAction } from '@kit.ArkUI';
 
@@ -66,7 +66,7 @@ export struct RuisiFavoritesPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text('我的收藏')
@@ -108,12 +108,12 @@ export struct RuisiFavoritesPage {
                   .width(36).height(36)
                   .backgroundColor(ThemeColors.bgInput)
                   .borderRadius(8)
-                  .onClick(() => { this.confirmDelete(t, idx); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.confirmDelete(t, idx); })
                 }
                 .width('100%')
                 .padding({ left: 16, right: 16, top: 12, bottom: 12 })
                 .backgroundColor(ThemeColors.bgCard)
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   this.pageInfo.pushPath({ name: 'RuisiTopicDetail', param: new TopicDetailParam(t.tid) });
                 })
               }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })

@@ -22,7 +22,7 @@ export struct MobilePortalPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
@@ -73,7 +73,7 @@ export struct MobilePortalPage {
             Text('⚠️').fontSize(40)
             Text(this.loadError).fontSize(14).fontColor('#C62828').margin({ top: 8 })
             Button('重试').margin({ top: 12 })
-              .onClick(() => {
+              .hoverEffect(HoverEffect.Auto).onClick(() => {
                 this.loadError = '';
                 this.webController.refresh();
               })

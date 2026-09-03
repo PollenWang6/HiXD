@@ -8,6 +8,7 @@ import { rcp } from '@kit.RemoteCommunicationKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { PreferenceUtil } from './PreferenceUtil';
+import { LoginState } from './LoginState';
 
 const TAG = 'HttpUtil';
 const UA_DEFAULT: string =
@@ -46,6 +47,91 @@ export class HttpUtil {
   static getInstance(): HttpUtil {
     if (!HttpUtil.instance) HttpUtil.instance = new HttpUtil();
     return HttpUtil.instance;
+  }
+
+  /**
+   * 把 rcp 网络层 BusinessError 翻译成用户友好文案。
+   * 对齐 Flutter login_window.dart 对 DioException 的三档处理：
+   *   连不上服务器 / 请求超时 / 具体消息。
+   * 原始 code + 消息仍打印到日志便于排查，但抛给上层的是友好串。
+   */
+  private static friendlyNetError(e: Object): string {
+    const be = e as BusinessError;
+    const code: string = (be && be.code !== undefined && be.code !== null) ? String(be.code) : '?';
+    const raw: string = (be && be.message) ? be.message : String(e);
+    const m: string = raw.toLowerCase();
+    if (m.includes('resolve') || m.includes('unknown host') || m.includes('dns') || m.includes('getaddrinfo') || m.includes('no address')) {
+      return '网络不可用，无法解析服务器地址，请检查网络连接';
+    }
+    if (m.includes('timed out') || m.includes('timeout') || m.includes('etimeout') || m.includes('超时')) {
+      return '连接超时，请检查网络后重试';
+    }
+    if (m.includes('refused')) {
+      return '服务器拒绝连接，可能是服务暂不可用';
+    }
+    if (m.includes('ssl') || m.includes('tls') || m.includes('certificate') || m.includes('handshake') || m.includes('证书')) {
+      return '安全连接失败（证书/加密错误），请稍后重试';
+    }
+    if (m.includes('reset') || m.includes('abort') || m.includes('closed') || m.includes('broken')) {
+      return '网络连接被中断，请检查网络后重试';
+    }
+    // 兜底：带原始消息，便于排查
+    return raw.length > 0 ? ('网络请求失败：' + raw) : ('网络请求失败（错误码 ' + code + '）');
+  }
+
+  // ===== Offline 拦截（对齐 Flutter IDSSession.dio）=====
+  // 业务请求默认检查登录态：未登录时直接抛异常，不发请求。
+  // 登录/SSO 请求用 withNoOfflineCheck() 包裹，绕过拦截。
+  private static noOfflineCheckDepth: number = 0;
+
+  /**
+   * 临时关闭 offline 拦截，执行登录/SSO 请求。
+   * 对齐 Flutter IDSSession.dioNoOfflineCheck。
+   * 用法：await HttpUtil.withNoOfflineCheck(async () => { ...登录请求... });
+   */
+  static async withNoOfflineCheck<T>(fn: () => Promise<T>): Promise<T> {
+    HttpUtil.noOfflineCheckDepth++;
+    try {
+      return await fn();
+    } finally {
+      HttpUtil.noOfflineCheckDepth--;
+    }
+  }
+
+  /**
+   * 全局 IDS 二次验证处理器（对齐 Flutter activeIDSReAuthHandler）。
+   * 由 MainPage 在启动时注册；ehall 业务请求重定向链命中 reAuthLoginView 时由本类的
+   * request() 内联触发，返回 true 表示已通过二次验证（会话重建）、原请求可重试。
+   */
+  static reAuthHandler: ((username: string) => Promise<boolean>) | null = null;
+
+  /**
+   * 检查当前是否允许发业务请求。
+   * 对齐 Flutter IDSSession.dio：offline 守卫【只作用于 IDS/ehall 业务域】；
+   * 睿思/校园网/图书馆/体育/电费等独立模块各自域名的请求不受限（未登录也能用）。
+   * 登录/SSO 请求（ids.xidian.edu.cn）走 withNoOfflineCheck 包裹绕过本守卫。
+   */
+  private checkOffline(url?: string): void {
+    if (HttpUtil.noOfflineCheckDepth > 0) return; // 登录/SSO 请求绕过
+    if (LoginState.isLoggedIn()) return; // 已登录，放行
+    // 仅拦截 IDS/ehall 业务域；其余域名直接放行（对齐 Flutter 独立 Dio 客户端）
+    if (url) {
+      const domain: string = this.getDomain(url);
+      if (domain !== 'ehall.xidian.edu.cn') {
+        return;
+      }
+    }
+    throw new Error('OFFLINE_MODE: 当前未登录校园账号，业务请求已拦截。请先登录后再使用该功能。');
+  }
+
+  /**
+   * 判断重定向目标是否为 CAS 二次验证页（对齐 Flutter isIDSReAuthLocation）。
+   * 命中 reAuthLoginView.do / reAuthCheck 即视为需要 step-up 验证。
+   */
+  private isReAuthLocation(loc: string): boolean {
+    if (!loc) return false;
+    const l: string = loc.toLowerCase();
+    return l.includes('reauthloginview') || l.includes('reauthcheck');
   }
 
   // ===== rcp Session（懒初始化单例）=====
@@ -226,9 +312,11 @@ export class HttpUtil {
         resp = await session.fetch(request);
       } catch (e) {
         const be = e as BusinessError;
-        const msg: string = (be && be.message) ? be.message : String(e);
-        console.error('[RcpHttp] getArrayBuffer failed code=' + (be ? be.code : '?') + ' msg=' + msg + ' url=' + safeUrl);
-        throw new Error('HTTP ' + (be ? be.code : '?') + ': ' + msg);
+        const code: string = (be && be.code !== undefined && be.code !== null) ? String(be.code) : '?';
+        const raw: string = (be && be.message) ? be.message : String(e);
+        const friendly: string = HttpUtil.friendlyNetError(e);
+        console.error('[RcpHttp] getArrayBuffer failed code=' + code + ' msg=' + raw + ' url=' + safeUrl);
+        throw new Error(friendly);
       }
       // 响应 cookie 按域保存（与 rcpFetch 一致）
       const cs: rcp.ResponseCookie[] | undefined = resp.cookies;
@@ -382,9 +470,11 @@ export class HttpUtil {
       resp = await session.fetch(request);
     } catch (e) {
       const be = e as BusinessError;
-      const msg: string = (be && be.message) ? be.message : String(e);
-      console.error('[RcpHttp] request failed code=' + (be ? be.code : '?') + ' msg=' + msg + ' url=' + safeUrl);
-      throw new Error('HTTP ' + (be ? be.code : '?') + ': ' + msg);
+      const code: string = (be && be.code !== undefined && be.code !== null) ? String(be.code) : '?';
+      const raw: string = (be && be.message) ? be.message : String(e);
+      const friendly: string = HttpUtil.friendlyNetError(e);
+      console.error('[RcpHttp] request failed code=' + code + ' msg=' + raw + ' url=' + safeUrl);
+      throw new Error(friendly);
     }
 
     const out = new HttpResponse();
@@ -402,8 +492,8 @@ export class HttpUtil {
     }
     out.headers = respHeaders;
 
-    // body：ArrayBuffer → string
-    out.body = this.decodeBody(resp.body);
+    // body：ArrayBuffer → string（按 content-type / 首字节判定编码，兼容 GBK 站点）
+    out.body = this.decodeBody(resp.body, respHeaders['content-type'] || respHeaders['Content-Type'] || '');
 
     out.isRedirect = out.statusCode >= 300 && out.statusCode < 400;
     out.location = typeof rawH.location === 'string' ? rawH.location : (rawH.location ? String(rawH.location) : undefined);
@@ -448,14 +538,35 @@ export class HttpUtil {
     return out;
   }
 
-  // ArrayBuffer → UTF-8 string
-  private decodeBody(buf: ArrayBuffer | undefined): string {
+  // ArrayBuffer → string。
+  // 编码判定（对齐 Flutter 参考实现的 responseDecoder）：
+  // ① 首字节为 '{'(0x7B) 或 '['(0x5B) → JSON，强制 UTF-8；
+  // ② 否则 Content-Type 含 'gb'（gbk/gb2312/gb18030）→ GB18030 解码（wlsy 物理实验等 GBK 站点）；
+  // ③ 其余 → UTF-8（UTF-8 解码遇非法字节自动替换，不影响正常站点）。
+  private decodeBody(buf: ArrayBuffer | undefined, contentType?: string): string {
     if (!buf || buf.byteLength === 0) {
       return '';
     }
+    const bytes = new Uint8Array(buf);
+    const first: number = bytes[0];
+    const isJson: boolean = first === 0x7B || first === 0x5B;
+    const ct: string = contentType ? contentType.toLowerCase() : '';
+    const isGb: boolean = !isJson && ct.indexOf('gb') >= 0;
     try {
+      if (isJson) {
+        const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
+        return decoder.decodeToString(bytes);
+      }
+      if (isGb) {
+        try {
+          const gbDecoder: util.TextDecoder = util.TextDecoder.create('gb18030');
+          return gbDecoder.decodeToString(bytes);
+        } catch (e) {
+          console.warn('[RcpHttp] gb18030 decode failed, fallback to utf-8');
+        }
+      }
       const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
-      return decoder.decodeToString(new Uint8Array(buf));
+      return decoder.decodeToString(bytes);
     } catch (e) {
       return '';
     }
@@ -503,6 +614,29 @@ export class HttpUtil {
   }
 
   /**
+   * 发送 form-urlencoded POST 但不自动跟随重定向。
+   * 对齐 Flutter ehallDio（followRedirects: false）：ehall 业务请求登录失效时
+   * 直接返回 302 响应，由上层检测 isRedirect + location.includes('login') 判定会话失效并触发重登，
+   * 避免 ehall / CAS 自动跟随死循环（20 跳 too many redirects）。
+   */
+  async postFormNoRedirect(url: string, data: Record<string, string>, headers?: Record<string, string>): Promise<HttpResponse> {
+    this.checkOffline(url); // Offline 拦截：仅 ehall/IDS 业务域未登录时不发出
+    await this.loadCookies();
+    const parts: string[] = [];
+    for (const key of Object.keys(data)) {
+      parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(data[key]));
+    }
+    const bodyStr: string = parts.join('&');
+    const allHeaders: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    if (headers) {
+      for (const key of Object.keys(headers)) {
+        allHeaders[key] = headers[key];
+      }
+    }
+    return this.rcpFetch(url, 'POST', bodyStr.length > 0 ? bodyStr : undefined, allHeaders, false);
+  }
+
+  /**
    * 发送请求（自动跟随重定向，公共底层方法）。
    * 逐跳手动跟随：每一跳经 rcpFetch（autoRedirect:false），按当前 URL 域名拼 cookie；
    * 响应 cookie 由 resp.cookies（带 domain）按域保存；301/302 做浏览器式 POST→GET 降级；
@@ -515,6 +649,7 @@ export class HttpUtil {
     extraHeaders: Record<string, string> | undefined,
     skipCookies?: boolean
   ): Promise<HttpResponse> {
+    this.checkOffline(url); // Offline 拦截（仅 ehall/IDS 业务域）
     const MAX_REDIRECTS: number = 20;
     let currentUrl: string = url;
     let currentMethod: 'GET' | 'POST' = method === 'GET' ? 'GET' : 'POST';
@@ -522,6 +657,8 @@ export class HttpUtil {
     let lastResp: HttpResponse | undefined = undefined;
     const visited: Set<string> = new Set<string>();
     visited.add(currentUrl);
+    // 本请求内是否已处理过二次验证（防止重试后再次命中 reAuth 时重复弹窗）
+    let reAuthHandledInThisRequest: boolean = false;
 
     for (let hop: number = 0; hop <= MAX_REDIRECTS; hop++) {
       const resp: HttpResponse = await this.rcpFetch(currentUrl, currentMethod, currentBody, extraHeaders, !!skipCookies);
@@ -536,6 +673,33 @@ export class HttpUtil {
       // 3xx 且有 Location：按当前域名重新注入 cookie 后继续跟随
       if (sc >= 300 && sc < 400 && resp.location !== undefined) {
         const next: string = this.resolveRedirect(resp.location, currentUrl);
+
+        // 内联识别二次验证重定向（对齐 Flutter followIDSRedirects / isIDSReAuthLocation）：
+        // ehall 业务请求被 CAS 重定向到 reAuthLoginView 时，触发全局 reAuth 处理器弹短信验证码，
+        // 通过后再用原始方法重试原请求。覆盖"信任设备被服务器清除→下次 ehall 请求才被截到验证页"的场景，
+        // 避免此前只能靠登录后单独 detectPendingReAuth 探测、中途请求静默 302 到验证页导致 JSON 解析失败。
+        const handler = HttpUtil.reAuthHandler;
+        if (!reAuthHandledInThisRequest && handler && this.isReAuthLocation(next)) {
+          reAuthHandledInThisRequest = true;
+          try {
+            const username: string = PreferenceUtil.getString('ids_account');
+            const ok: boolean = await handler(username);
+            if (ok) {
+              // 二次验证通过、会话已重建：用原始 method/body 从头重试整个请求
+              // （checkOffline 已在入口执行过一次，重试不再触发，不会被离线守卫拦下）
+              currentUrl = url;
+              currentMethod = method === 'GET' ? 'GET' : 'POST';
+              currentBody = body;
+              visited.clear();
+              visited.add(currentUrl);
+              continue;
+            }
+          } catch (_e) {
+            // 二次验证失败/取消：落到下方返回当前响应，由上层（业务 service）按错误兜底
+          }
+          return resp;
+        }
+
         if (visited.has(next)) {
           // 重定向循环（A→B→A…）：立即返回当前响应，不继续跟随
           console.error('[RcpHttp] redirect loop detected: ' + currentUrl + ' -> ' + next);

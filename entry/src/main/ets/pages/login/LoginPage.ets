@@ -1,12 +1,13 @@
-// LoginPage.ets — HTTP 原生登录 + 滑块验证码
+﻿// LoginPage.ets — HTTP 原生登录 + 滑块验证码
 // 替代 WebView 自动填表方案，消除 Cookie 隔离问题
-import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, LoginProgress, CasFormFields } from '../../services/CasLoginService';
-import { EhallService } from '../../services/EhallService';
-import { UserInfoService } from '../../services/UserInfoService';
+import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, LoginProgress, CasFormFields } from '../../services/auth/CasLoginService';
+import { EhallService } from '../../services/ids/EhallService';
+import { UserInfoService } from '../../services/common/UserInfoService';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
+import { SecureStorageUtil, SecureAlias } from '../../utils/SecureStorageUtil';
 import { image } from '@kit.ImageKit';
 
 const TAG = 'LoginPage';
@@ -63,7 +64,7 @@ struct LoginPage {
 
   aboutToAppear(): void {
     this.username = PreferenceUtil.getString('ids_account');
-    this.password = PreferenceUtil.getString('login_password');
+    SecureStorageUtil.get(SecureAlias.LOGIN_PASSWORD).then((pwd: string) => { this.password = pwd; });
     // 从已过期入口进入：跳过密码表单，直接走验证码
     try {
       const params = router.getParams() as Record<string, Object>;
@@ -105,12 +106,12 @@ struct LoginPage {
         // 已有有效会话（TGC 恢复等）：确认可登录后才落地账号，避免失败/假账号残留
         this.loginOverlayVisible = false;
         await PreferenceUtil.putString('ids_account', this.username);
-        await PreferenceUtil.putString('login_password', this.password);
+        SecureStorageUtil.put(SecureAlias.LOGIN_PASSWORD, this.password).catch(() => {});
         await PreferenceUtil.putBool('is_logged_in', true);
         // 异步抓取 xgxt 用户基本信息
         await this.runXgxtFetch(5000);
         this.statusText = '自动登录成功！';
-        setTimeout(() => { router.replaceUrl({ url: 'pages/MainPage' }); }, 400);
+        setTimeout(() => { router.replaceUrl({ url: 'pages/main/MainPage' }); }, 400);
         return;
       }
 
@@ -127,14 +128,16 @@ struct LoginPage {
           }
         }
       } catch (e) {
+        // 登录失败：关闭遮罩，避免一直卡在"正在完成登录跳转"
+        this.loginOverlayVisible = false;
+        this.isSubmitting = false;
         // 设备验证被用户取消：不要落到手动滑块，回到登录表单让用户重新登录
         const msg: string = String(e);
         if (msg.indexOf('设备验证未完成') >= 0 || msg.indexOf('设备验证') >= 0) {
-          this.loginOverlayVisible = false;
-          this.isSubmitting = false;
           this.statusText = '设备验证未完成，请重新登录';
           return;
         }
+        this.statusText = msg;
       }
 
       // 自动滑块失败 → 落到手动拖动滑块 UI
@@ -192,6 +195,8 @@ struct LoginPage {
       }
     } catch (e) {
       const msg: string = String(e);
+      // 登录失败：关闭遮罩，避免一直卡在"正在完成登录跳转"
+      this.loginOverlayVisible = false;
       this.statusText = msg;
       this.toForm();
       this.isSubmitting = false;
@@ -219,29 +224,31 @@ struct LoginPage {
       }
     );
     if (success) {
+      // 关键：保存登录态后立即跳转，非关键操作移到跳转后异步执行，避免网络请求卡住导致一直停在登录页
       await PreferenceUtil.putString('ids_account', this.username);
-      await PreferenceUtil.putString('login_password', this.password);
+      SecureStorageUtil.put(SecureAlias.LOGIN_PASSWORD, this.password).catch(() => {});
       EhallService.getInstance().clearSessionCache();
       await PreferenceUtil.putBool('is_logged_in', true);
-      await this.cas.syncCookiesToWebView();
-      await this.cas.checkWhetherPostgraduate();
-      // 首次登录自动拉取个人信息（带超时保护，不阻塞登录）
-      await this.runXgxtFetch(5000);
-      // 研究生：拉取 yjspt 学期码并缓存
-      if (PreferenceUtil.getBool('role')) {
-        try {
-          const sem: string = await EhallService.getInstance().getSemesterInfoYjspt();
-          PreferenceUtil.putString('yjspt_semester', sem);
-        } catch (_e) { /* 非关键 */ }
-      }
       this.loginOverlayVisible = true;
       this.loginOverlayMsg = '登录成功';
       this.loginOverlayPercent = 100;
       this.statusText = '登录成功！';
+      // 非关键收尾工作：跳转后异步执行，不阻塞登录
+      setTimeout(() => {
+        this.cas.syncCookiesToWebView().catch(() => {});
+        this.cas.checkWhetherPostgraduate().then(() => {
+          if (PreferenceUtil.getBool('role')) {
+            EhallService.getInstance().getSemesterInfoYjspt().then((sem: string) => {
+              PreferenceUtil.putString('yjspt_semester', sem);
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+        this.runXgxtFetch(5000).catch(() => {});
+      }, 100);
       // 短暂展示「登录成功」后跳转
       setTimeout(() => {
         this.loginOverlayVisible = false;
-        router.replaceUrl({ url: 'pages/MainPage' });
+        router.replaceUrl({ url: 'pages/main/MainPage' });
       }, 500);
     } else {
       this.loginOverlayVisible = false;
@@ -552,7 +559,7 @@ struct LoginPage {
               Blank()
               Text('✕')
                 .fontSize(20).fontColor(ThemeColors.textSecondary)
-                .onClick(() => { this.toForm(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.toForm(); })
             }.width('100%').margin({ bottom: 16 })
 
             if (this.isSubmitting) {
@@ -617,7 +624,7 @@ struct LoginPage {
               Blank()
               Text('✕')
                 .fontSize(20).fontColor(ThemeColors.textSecondary)
-                .onClick(() => { this.cancelReAuth(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.cancelReAuth(); })
             }.width('100%').margin({ bottom: 4 })
 
             Text(this.reAuthStage === 'send'
@@ -634,13 +641,13 @@ struct LoginPage {
                 .fontColor(this.reAuthFactor === 4 ? '#FFFFFF' : ThemeColors.textSecondary)
                 .backgroundColor(this.reAuthFactor === 4 ? '#2979FF' : ThemeColors.bgInput)
                 .borderRadius(8).enabled(!this.reAuthSending && this.reAuthCountdown === 0)
-                .onClick(() => { this.reAuthFactor = 4; })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.reAuthFactor = 4; })
               Button('手机短信（推荐）')
                 .layoutWeight(1).height(40).fontSize(13)
                 .fontColor(this.reAuthFactor === 3 ? '#FFFFFF' : ThemeColors.textSecondary)
                 .backgroundColor(this.reAuthFactor === 3 ? '#2979FF' : ThemeColors.bgInput)
                 .borderRadius(8).enabled(!this.reAuthSending && this.reAuthCountdown === 0)
-                .onClick(() => { this.reAuthFactor = 3; })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.reAuthFactor = 3; })
             }.width('100%').margin({ bottom: 18 }).justifyContent(FlexAlign.SpaceBetween)
 
             Row() {
@@ -650,7 +657,7 @@ struct LoginPage {
               Text('信任此设备（下次登录免验证）')
                 .fontSize(13).fontColor(ThemeColors.textSecondary)
                 .margin({ left: 8 })
-                .onClick(() => { this.reAuthTrustDevice = !this.reAuthTrustDevice; })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.reAuthTrustDevice = !this.reAuthTrustDevice; })
             }.width('100%').margin({ bottom: 14 }).alignItems(VerticalAlign.Center)
 
             Row() {
@@ -666,7 +673,7 @@ struct LoginPage {
                 .backgroundColor(this.reAuthCountdown > 0 ? ThemeColors.bgInput : '#2979FF')
                 .borderRadius(8)
                 .enabled(this.reAuthCountdown === 0 && !this.reAuthSending)
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   if (this.reAuthStage === 'send') { this.sendReAuthCodeManually(); }
                   else { this.resendReAuthCode(); }
                 })
@@ -676,7 +683,7 @@ struct LoginPage {
               .width('100%').height(46).fontSize(16).fontColor('#FFFFFF')
               .backgroundColor(this.reAuthSubmitting ? '#90CAF9' : '#2979FF').borderRadius(8)
               .enabled(!this.reAuthSubmitting)
-              .onClick(() => { this.confirmReAuth(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.confirmReAuth(); })
 
             if (this.reAuthError.length > 0) {
               Text(this.reAuthError).fontSize(13).fontColor('#C62828').margin({ top: 12 }).width('100%')
@@ -701,7 +708,7 @@ struct LoginPage {
         .alignSelf(ItemAlign.Center)
         .shadow({ radius: 12, color: '#0000001A', offsetY: 4 })
       Column() {
-        Text('西电统一身份认证').fontSize(24).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
+        Text('统一身份认证').fontSize(24).fontWeight(FontWeight.Bold).fontColor(ThemeColors.textPrimary)
           .margin({ bottom: 8 })
         Text('输入学号和密码进行登录').fontSize(14).fontColor(ThemeColors.textSecondary)
           .margin({ bottom: 32 })
@@ -738,7 +745,7 @@ struct LoginPage {
         .margin({ top: 32 })
         .enabled(!this.isSubmitting)
         .id('login_submit_button')
-        .onClick(() => this.doLogin())
+        .hoverEffect(HoverEffect.Auto).onClick(() => this.doLogin())
 
       if (this.statusText.length > 0) {
         Text(this.statusText)
@@ -755,13 +762,13 @@ struct LoginPage {
       Row() {
         Text('《用户协议》')
           .fontSize(12).fontColor('#2979FF')
-          .onClick(() => this.openExternal('https://hixdapp.cn/user-agreement.html'))
+          .hoverEffect(HoverEffect.Auto).onClick(() => this.openExternal('https://hixdapp.cn/user-agreement.html'))
         Text('|')
           .fontSize(12).fontColor(ThemeColors.textSecondary)
           .margin({ left: 12, right: 12 })
         Text('《隐私政策》')
           .fontSize(12).fontColor('#2979FF')
-          .onClick(() => this.openExternal('https://hixdapp.cn/privacy.html'))
+          .hoverEffect(HoverEffect.Auto).onClick(() => this.openExternal('https://hixdapp.cn/privacy.html'))
       }
       .margin({ top: 14 })
     }

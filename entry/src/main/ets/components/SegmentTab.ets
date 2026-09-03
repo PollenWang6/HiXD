@@ -1,4 +1,4 @@
-// SegmentTab.ets — 通用分段 Tab + Swiper 组件
+﻿// SegmentTab.ets — 通用分段 Tab + Swiper 组件
 // 胶囊背景 springMotion 滑动 + 文字颜色插值 + 手势跟随 + Swiper 联动
 //
 // 设计要点（修复平板首帧错位）：
@@ -88,7 +88,7 @@ export struct SegmentTab {
             .layoutWeight(1)
             .height(44)
             .justifyContent(FlexAlign.Center)
-            .onClick(() => {
+            .hoverEffect(HoverEffect.Auto).onClick(() => {
               if (this.currentIndex === idx) {
                 if (this.onReTap) { this.onReTap(idx); }
                 return;

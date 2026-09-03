@@ -2,7 +2,8 @@
 // 从 Flutter 版 sport_window.dart / sport_score_window.dart / sport_class_window.dart 移植
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { SportService, SportScore, SportScoreOfYear, SportClassItem, SportItem, SportScoreComponent } from '../../services/SportService';
+import { SecureStorageUtil, SecureAlias } from '../../utils/SecureStorageUtil';
+import { SportService, SportScore, SportScoreOfYear, SportClassItem, SportItem, SportScoreComponent } from '../../services/sport/SportService';
 import { SegmentTab } from '../../components/SegmentTab';
 
 const WEEKDAY_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -54,7 +55,7 @@ export struct SportPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -67,22 +68,25 @@ export struct SportPage {
   }
 
   aboutToAppear(): void {
-    if (!SportService.hasPassword()) {
-      this.pwdInput = '';
-      this.showPwdDialog = true;
-      animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
-        this.pwdOpacity = 1;
-        this.pwdTranslate = 0;
-      });
-    } else {
-      this.loadScore();
-    }
+    SportService.hasPassword().then((has: boolean) => {
+      if (!has) {
+        this.pwdInput = '';
+        this.showPwdDialog = true;
+        animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
+          this.pwdOpacity = 1;
+          this.pwdTranslate = 0;
+        });
+      } else {
+        this.loadScore();
+      }
+    });
   }
 
   // ===== 数据加载 =====
 
   async loadScore(): Promise<void> {
-    if (!SportService.hasPassword()) {
+    const hasPwd = await SportService.hasPassword();
+    if (!hasPwd) {
       this.scoreErrorMsg = '请先设置体育系统密码';
       return;
     }
@@ -98,7 +102,8 @@ export struct SportPage {
   }
 
   async loadClass(): Promise<void> {
-    if (!SportService.hasPassword()) {
+    const hasPwd = await SportService.hasPassword();
+    if (!hasPwd) {
       this.classErrorMsg = '请先设置体育系统密码';
       return;
     }
@@ -366,7 +371,7 @@ export struct SportPage {
             .fontSize(12).fontColor(this.accentColor)
         }
         .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
-        .onClick(() => {
+        .hoverEffect(HoverEffect.Auto).onClick(() => {
           this.expandedTermId = this.expandedTermId === item.termScoreId ? '' : item.termScoreId;
         })
 
@@ -422,7 +427,7 @@ export struct SportPage {
         .backgroundColor(this.accentColor)
         .borderRadius(20)
         .padding({ left: 24, right: 24, top: 8, bottom: 8 })
-        .onClick(() => { onRetry(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { onRetry(); })
     }.width('100%').height('100%').justifyContent(FlexAlign.Center)
   }
 
@@ -437,7 +442,7 @@ export struct SportPage {
           .width('100%').height('100%')
           .backgroundColor('#80000000')
           .opacity(this.pwdOpacity)
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
               this.pwdOpacity = 0;
               this.pwdTranslate = 30;
@@ -466,7 +471,7 @@ export struct SportPage {
             Row() {
               Text(this.pwdVisible ? '隐藏密码' : '显示密码')
                 .fontSize(13).fontColor(this.accentColor)
-                .onClick(() => { this.pwdVisible = !this.pwdVisible; })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.pwdVisible = !this.pwdVisible; })
             }.width('100%').margin({ top: 8 })
 
             Row() {
@@ -477,7 +482,7 @@ export struct SportPage {
                 .borderRadius(20)
                 .padding({ left: 20, right: 20, top: 8, bottom: 8 })
                 .margin({ right: 12 })
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
                     this.pwdOpacity = 0;
                     this.pwdTranslate = 30;
@@ -489,9 +494,18 @@ export struct SportPage {
                 .backgroundColor(this.accentColor)
                 .borderRadius(20)
                 .padding({ left: 20, right: 20, top: 8, bottom: 8 })
-                .onClick(async () => {
+                .hoverEffect(HoverEffect.Auto).onClick(async () => {
                   if (this.pwdInput.length === 0) return;
-                  await PreferenceUtil.putString('sport_password', this.pwdInput);
+                  try {
+                    await SecureStorageUtil.put(SecureAlias.SPORT_PASSWORD, this.pwdInput);
+                    const verify = await SecureStorageUtil.get(SecureAlias.SPORT_PASSWORD);
+                    if (verify.length === 0) { this.scoreErrorMsg = '密码保存失败，请重试'; return; }
+                  } catch (e) {
+                    this.scoreErrorMsg = '密码保存失败: ' + String(e);
+                    return;
+                  }
+                  // 同步到 AppStorage，MainPage 我的页面实时刷新
+                  AppStorage.setOrCreate('sport_pwd_status', '已设置');
                   animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
                     this.pwdOpacity = 0;
                     this.pwdTranslate = 30;
@@ -509,7 +523,7 @@ export struct SportPage {
           .backgroundColor(ThemeColors.bgCard)
           .translate({ y: this.pwdTranslate })
           .opacity(this.pwdOpacity)
-          .onClick(() => {})
+          .hoverEffect(HoverEffect.Auto).onClick(() => {})
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center)

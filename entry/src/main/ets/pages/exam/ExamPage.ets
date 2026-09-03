@@ -1,8 +1,8 @@
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // ExamPage.ets — 考试安排页面
 import { ThemeColors } from '../../utils/ThemeColors';
-import { SemesterUtil, ExamItemModel } from '../../services/EhallService';
-import { ExamService } from '../../services/ExamService';
+import { SemesterUtil, ExamItemModel } from '../../services/ids/EhallService';
+import { ExamService } from '../../services/ids/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 
 
@@ -39,7 +39,7 @@ export struct ExamPage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -192,7 +192,7 @@ export struct ExamPage {
               .padding({ left: 8, right: 8, top: 2, bottom: 2 })
               .border({ width: 1, color: this.accentColor, radius: 4 })
               .margin({ left: 10 })
-              .onClick(() => { this.loadExams(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadExams(); })
           }.width('100%').height(32).justifyContent(FlexAlign.Center)
           .backgroundColor(this.themeIsDark ? '#3E2723' : '#FFF3E0')
         }
@@ -204,7 +204,7 @@ export struct ExamPage {
           Column() {
             Text('⚠').fontSize(40).fontColor(ThemeColors.textHint)
             Text(this.errorMsg).fontSize(14).fontColor(ThemeColors.error).margin({ top: 8 })
-            Button('重试').margin({ top: 12 }).onClick(() => { this.loadExams(); })
+            Button('重试').margin({ top: 12 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.loadExams(); })
           }
           .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.arranged.length === 0 && this.notArranged.length === 0) {
@@ -224,7 +224,7 @@ export struct ExamPage {
                 .fontSize(12).height(30)
                 .backgroundColor(this.accentColor + '18').fontColor(this.accentColor)
                 .borderRadius(15).padding({ left: 12, right: 12 })
-                .onClick(() => { this.isRefreshing = true; this.doRefresh(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.isRefreshing = true; this.doRefresh(); })
             }
           }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
           List({ space: 12 }) {

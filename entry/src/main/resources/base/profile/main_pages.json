@@ -1,7 +1,7 @@
 {
   "src": [
     "pages/Index",
-    "pages/MainPage",
+    "pages/main/MainPage",
     "pages/login/LoginPage",
     "pages/ImageCropPage",
     "pages/DeclarationPage"

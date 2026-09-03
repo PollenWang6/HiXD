@@ -1,8 +1,8 @@
 ﻿import { AccentColors } from '../../utils/AccentColors';
 import { menuOptions } from '../../utils/MaterialKit';
 // ScorePage.ets — 成绩查询（含成绩构成详情，增强层次感版）
-import { SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/EhallService';
-import { ScoreService } from '../../services/ScoreService';
+import { SemesterUtil, ScoreItemModel, ComposeDetail } from '../../services/ids/EhallService';
+import { ScoreService } from '../../services/ids/ScoreService';
 import { ThemeColors } from '../../utils/ThemeColors';
 import { motion } from '@kit.MultimodalAwarenessKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -64,7 +64,7 @@ export struct ScorePage {
           .draggable(false)
       }
       .height(40).width(40)
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -500,11 +500,11 @@ export struct ScorePage {
     Menu() {
       MenuItem({ content: '全部学期' })
         .selected(this.selectedSemester === '__all__')
-        .onClick(() => { this.selectedSemester = '__all__'; this.applyFilter(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectedSemester = '__all__'; this.applyFilter(); })
       ForEach(this.semesterCodes, (code: string) => {
         MenuItem({ content: SemesterUtil.formatSemester(code) })
           .selected(code === this.selectedSemester)
-          .onClick(() => { this.selectedSemester = code; this.applyFilter(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectedSemester = code; this.applyFilter(); })
       })
     }
   }
@@ -514,11 +514,11 @@ export struct ScorePage {
     Menu() {
       MenuItem({ content: '全部类型' })
         .selected(this.selectedType === '__all__')
-        .onClick(() => { this.selectedType = '__all__'; this.applyFilter(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectedType = '__all__'; this.applyFilter(); })
       ForEach(this.typeOptions, (t: string) => {
         MenuItem({ content: t })
           .selected(t === this.selectedType)
-          .onClick(() => { this.selectedType = t; this.applyFilter(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectedType = t; this.applyFilter(); })
       })
     }
   }
@@ -573,7 +573,7 @@ export struct ScorePage {
                 .fontSize(13).fontColor('#FFFFFF')
                 .height(34).borderRadius(8)
                 .backgroundColor(this.accentColor)
-                .onClick(() => { this.applyFilter(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.applyFilter(); })
             }
             .width('100%').padding({ left: 12, right: 12, top: 4, bottom: 4 })
 
@@ -619,7 +619,7 @@ export struct ScorePage {
                 .fontSize(12).fontColor(this.accentColor)
                 .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                 .border({ width: 1, color: this.accentColor, radius: 4 })
-                .onClick(() => { this.loadScores(); })
+                .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadScores(); })
             }
             .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
             .backgroundColor(ThemeColors.isDark ? '#3A2A12' : '#FFF3E0')
@@ -638,7 +638,7 @@ export struct ScorePage {
             Column() {
               Text('⚠').fontSize(40).fontColor(ThemeColors.textHint)
               Text(this.errorMsg).fontSize(14).fontColor(ThemeColors.error).margin({ top: 8 })
-              Button('重试').margin({ top: 12 }).onClick(() => { this.loadScores(); })
+              Button('重试').margin({ top: 12 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.loadScores(); })
             }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else if (this.currentScores.length === 0) {
@@ -711,7 +711,7 @@ export struct ScorePage {
                   .backgroundColor(this.isSelectMode && this.selectedIndexes.has(idx!) ?
                     (this.themeIsDark ? '#1A2A40' : '#F0F5FF') : ThemeColors.bgCard)
                   .borderRadius(12)
-                  .onClick(() => {
+                  .hoverEffect(HoverEffect.Auto).onClick(() => {
                     if (this.isSelectMode) {
                       if (this.selectedIndexes.has(idx!)) {
                         this.selectedIndexes.delete(idx!);
@@ -752,7 +752,7 @@ export struct ScorePage {
             .backgroundColor(this.themeIsDark ? 'rgba(40,40,45,0.35)' : 'rgba(255,255,255,0.15)')
             .border({ width: 1, color: 'rgba(255,255,255,0.30)' })
             .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 4 })
-            .onClick(() => { this.toggleSelectMode(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.toggleSelectMode(); })
             .margin({ bottom: 80, right: 16 })
             .translate({ x: this.fabTranslateX })
           }
@@ -791,7 +791,7 @@ export struct ScorePage {
                 .backgroundColor(Color.Transparent)
                 .height(36).border({ width: 1, color: this.accentColor, radius: 18 })
                 .padding({ left: 14, right: 14 })
-                .onClick(() => {
+                .hoverEffect(HoverEffect.Auto).onClick(() => {
                   this.selectedIndexes.clear();
                   for (let i = 0; i < this.currentScores.length; i++) {
                     if (this.ignoreCourse(this.currentScores[i].xskcm, this.currentScores[i].xgxklbdmDisplay)) continue;
@@ -805,7 +805,7 @@ export struct ScorePage {
                   .backgroundColor(Color.Transparent)
                   .height(36).border({ width: 1, color: '#CCCCCC', radius: 18 })
                   .padding({ left: 14, right: 14 })
-                  .onClick(() => {
+                  .hoverEffect(HoverEffect.Auto).onClick(() => {
                     this.selectedIndexes.clear();
                     this.calcSelected();
                   })
@@ -851,7 +851,7 @@ export struct ScorePage {
             .width('100%').height('100%')
             .backgroundColor('rgba(0,0,0,0.7)') // 加深背景透明度，增强层次感
             .opacity(this.maskOpacity)
-            .onClick(() => { this.hideScoreDetail(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.hideScoreDetail(); })
             .zIndex(3) // 遮罩在主页面之上
         }
 

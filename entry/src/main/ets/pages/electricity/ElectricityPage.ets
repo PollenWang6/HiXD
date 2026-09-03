@@ -1,9 +1,9 @@
-import { ToastUtil } from '../../utils/ToastUtil';
+﻿import { ToastUtil } from '../../utils/ToastUtil';
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // ElectricityPage.ets — 电费查询（纯 HTTP + AES，无 WebView）
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { ElectricityService, ElecFullResult, ElecDailyItem } from '../../services/ElectricityService';
+import { ElectricityService, ElecFullResult, ElecDailyItem } from '../../services/campus/ElectricityService';
 import { SegmentTab } from '../../components/SegmentTab';
 import { dayShift } from '../../utils/DateUtil';
 
@@ -303,7 +303,7 @@ export struct ElectricityPage {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
       }
-      .height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      .height(40).width(40).hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
     }
     .width('100%').height(52 + this.statusBarHeight).padding({ left: 12, right: 16, top: this.statusBarHeight })
@@ -316,7 +316,7 @@ export struct ElectricityPage {
         Text('⚡ 电费余额').fontSize(14).fontColor(Color.White).opacity(0.9)
         Blank()
         Image($r('app.media.ic_public_refresh')).width(22).height(22).fillColor(Color.White).opacity(0.9)
-          .onClick(() => { this.doRefresh(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.doRefresh(); })
       }.width('100%')
       Row({ space: 4 }) {
         Text(this.balance).fontSize(52).fontWeight(FontWeight.Bold).fontColor(Color.White)
@@ -340,7 +340,7 @@ export struct ElectricityPage {
       .padding({ left: 10, right: 10, top: 4, bottom: 4 }).borderRadius(10)
       .border({ width: 0.5, color: this.activePreset === days ? this.accentColor : ThemeColors.border })
       .backgroundColor(this.activePreset === days ? (this.accentColor + '18') : Color.Transparent)
-      .onClick(() => { this.selectPreset(days); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectPreset(days); })
   }
 
   @Builder
@@ -365,7 +365,7 @@ export struct ElectricityPage {
           Text(this.activePreset === -1 ? this.customStartStr : dayShift(this.activePreset))
             .fontSize(13).fontColor(ThemeColors.textPrimary)
         }.padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(6).backgroundColor(ThemeColors.bgPage)
-        .onClick(() => { this.activePreset = -1; this.showStartDatePicker(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.activePreset = -1; this.showStartDatePicker(); })
 
         Text('~').fontSize(13).fontColor(ThemeColors.textHint)
         Text('止').fontSize(13).fontColor(ThemeColors.textHint)
@@ -373,11 +373,11 @@ export struct ElectricityPage {
           Text(this.activePreset === -1 ? this.customEndStr : dayShift(0))
             .fontSize(13).fontColor(ThemeColors.textPrimary)
         }.padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(6).backgroundColor(ThemeColors.bgPage)
-        .onClick(() => { this.activePreset = -1; this.showEndDatePicker(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.activePreset = -1; this.showEndDatePicker(); })
 
         if (this.activePreset === -1) {
           Button('查询').fontSize(13).height(32).backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(6)
-            .padding({ left: 14, right: 14 }).onClick(() => { this.doCustomQuery(); })
+            .padding({ left: 14, right: 14 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.doCustomQuery(); })
         }
       }.width('100%').padding({ left: 18, right: 18, bottom: 10 })
 
@@ -484,7 +484,7 @@ export struct ElectricityPage {
             Text('😞').fontSize(48)
             Text(this.loadError).fontSize(14).fontColor(ThemeColors.textSecondary).margin({ top: 12 })
             Button('重试').fontSize(14).height(36).backgroundColor('#BF4D00').fontColor('#FFFFFF').borderRadius(20)
-              .margin({ top: 20 }).padding({ left: 24, right: 24 }).onClick(() => { this.doRefresh(); })
+              .margin({ top: 20 }).padding({ left: 24, right: 24 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.doRefresh(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
         }
 

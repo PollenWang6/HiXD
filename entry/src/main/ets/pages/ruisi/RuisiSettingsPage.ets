@@ -1,8 +1,8 @@
-// RuisiSettingsPage.ets — 设置
+﻿// RuisiSettingsPage.ets — 设置
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiService } from '../../services/RuisiService';
+import { RuisiService } from '../../services/ruisi/RuisiService';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -36,7 +36,7 @@ export struct RuisiSettingsPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text('设置')
@@ -55,7 +55,7 @@ export struct RuisiSettingsPage {
           Text('清除缓存').fontSize(15).fontColor(ThemeColors.textPrimary).layoutWeight(1)
           Text('>').fontSize(16).fontColor(ThemeColors.textHint)
         }.width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 }).backgroundColor(ThemeColors.bgCard)
-        .onClick(() => { this.clearCache(); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.clearCache(); })
 
         Row().height(0.5).width('100%').backgroundColor(ThemeColors.border)
 
@@ -64,7 +64,7 @@ export struct RuisiSettingsPage {
           Text('关于').fontSize(15).fontColor(ThemeColors.textPrimary).layoutWeight(1)
           Text('>').fontSize(16).fontColor(ThemeColors.textHint)
         }.width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 }).backgroundColor(ThemeColors.bgCard)
-        .onClick(() => { this.pageInfo.pushPath({ name: 'RuisiAbout' }); })
+        .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pushPath({ name: 'RuisiAbout' }); })
 
         Row().height(0.5).width('100%').backgroundColor(ThemeColors.border)
 
@@ -72,7 +72,7 @@ export struct RuisiSettingsPage {
         Row() {
           Text('退出登录').fontSize(15).fontColor('#C62828').layoutWeight(1)
         }.width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 }).backgroundColor(ThemeColors.bgCard)
-        .onClick(async () => {
+        .hoverEffect(HoverEffect.Auto).onClick(async () => {
           // 先翻 UI 态：即使 clearCookies 异常也立刻回到登录页，杜绝卡在已登录界面
           this.isLoggedIn = false;
           try {

@@ -1,4 +1,4 @@
-// Index.ets — 启动门禁页：先征求隐私/协议同意，同意后再进入主页
+// Index.ets — 应用入口页：自定义启动页（大图标 + 右上角「非官方」标签）+ 隐私同意门禁
 // 合规要点：同意必须在登录/收集个人信息、联网之前（PIPL + 应用市场审核要求）
 // UI：使用华为官方「通用隐私同意弹窗组件」(privacy_consent_dialog HAR) 的模态底部样式（SHEET / bottom sheet）
 //      —— 从屏幕底部升起的半屏卡片：应用图标 + 应用名 + 描述 + 盾牌 + 可滚动协议 + 底部「退出应用 / 同意并继续」
@@ -15,12 +15,18 @@ import { PreferenceUtil } from '../utils/PreferenceUtil';
 // 隐私政策版本号：文案有重大变更时 +1，自动重新弹窗征得同意
 const PRIVACY_POLICY_VERSION: number = 1;
 
+// 启动页展示时长（已同意隐私的用户也会看到，毫秒）
+const SPLASH_DURATION_MS: number = 1000;
+
 
 @Entry
 @Component
 struct Index {
   private accentColor: string = '#2979FF';
   private controller: PrivacyConsentController = new PrivacyConsentController(this.getUIContext());
+  // 启动页文字内容淡入。图标与背景不参与动画，
+  // 这样从系统启动窗切到本页时背景和图标纹丝不动，只有文字渐显，视觉上接近单一启动页
+  @State contentOpacity: number = 0;
 
   aboutToAppear(): void {
     // 主题/强调色提前初始化（主页与登录页都依赖）
@@ -48,10 +54,10 @@ struct Index {
     return PreferenceUtil.getNumber('privacy_agreed_version', 0) >= PRIVACY_POLICY_VERSION;
   }
 
-  // 首次启动 / 政策更新 → 弹窗；已同意 → 短暂闪屏后进入主页
+  // 首次启动 / 政策更新 → 弹窗；已同意 → 展示启动页后进入主页
   private checkPrivacyAgreement(): void {
     if (this.privacyAgreed()) {
-      setTimeout(() => { this.routeToMain(); }, 50);
+      setTimeout(() => { this.routeToMain(); }, SPLASH_DURATION_MS);
       return;
     }
     this.showConsent();
@@ -65,7 +71,7 @@ struct Index {
       { text: '和', type: TextType.PLAIN },
       { text: '《隐私政策》', type: TextType.ACTION, onAction: () => this.openExternal('https://hixdapp.cn/privacy.html') },
       {
-        text: '。\n\n本应用需要您使用学号和密码登录西电统一身份认证系统，' +
+        text: '。\n\n本应用需要您使用学号和密码登录统一身份认证系统，' +
           '以获取课表、成绩等教务数据。您的账号密码仅用于校内认证，不会上传至任何第三方服务器。',
         type: TextType.PLAIN
       },
@@ -105,17 +111,49 @@ struct Index {
   }
 
   private routeToMain(): void {
-    router.replaceUrl({ url: 'pages/MainPage' });
+    router.replaceUrl({ url: 'pages/main/MainPage' });
   }
 
   build() {
-    // 启动页背景（始终渲染，作为弹窗的底）
+    // 自定义启动页：背景色取系统启动窗同一个资源（start_window_background），
+    // 保证「系统启动窗 -> 本页」切换时背景不跳变（此前深色模式下 #000000 与 bgCard #1C1C1E 不一致会闪）。
+    // 图标尺寸对齐增强启动页 AppIcon 展示区（128/192/256vp）取中值 192，减少尺寸跳动。
     Column() {
-      LoadingProgress().width(48).height(48).color(this.accentColor)
-      Text('HiXD').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.accentColor).margin({ top: 16 })
+      // 图标 + 右上角标签
+      Stack({ alignContent: Alignment.TopEnd }) {
+        Image($r('app.media.icon'))
+          .width(192)
+          .height(192)
+          .borderRadius(44)
+          .objectFit(ImageFit.Cover)
+
+        Text('非官方')
+          .fontSize(11)
+          .fontColor(Color.White)
+          .fontWeight(FontWeight.Medium)
+          .backgroundColor(ThemeColors.textSecondary)
+          .borderRadius(4)
+          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .margin({ top: -8, right: -8 })
+          .opacity(this.contentOpacity)
+          .animation({ duration: 300, curve: Curve.EaseOut })
+      }
+
+      Text('HiXD')
+        .fontSize(28)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(ThemeColors.textPrimary)
+        .margin({ top: 20 })
+        .opacity(this.contentOpacity)
+        .animation({ duration: 300, curve: Curve.EaseOut })
     }
-    .width('100%').height('100%')
+    .width('100%')
+    .height('100%')
     .justifyContent(FlexAlign.Center)
-    .backgroundColor(ThemeColors.bgCard)
+    .backgroundColor($r('app.color.start_window_background'))
+    .onAppear(() => {
+      // 文字淡入：图标与背景在系统启动窗阶段已呈现，不做动画以免产生跳变
+      this.contentOpacity = 1;
+    })
   }
 }

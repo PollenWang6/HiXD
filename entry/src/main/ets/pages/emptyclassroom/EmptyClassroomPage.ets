@@ -1,10 +1,12 @@
 ﻿import { AccentColors } from '../../utils/AccentColors';
 // EmptyClassroomPage.ets — 空闲教室搜索
 import { ThemeColors } from '../../utils/ThemeColors';
-import { EmptyClassroomItem, BuildingInfo } from '../../services/Models';
-import { EmptyClassroomService } from '../../services/EmptyClassroomService';
+import { EmptyClassroomItem, BuildingInfo } from '../../models/common/Models';
+import { EmptyClassroomService } from '../../services/campus/EmptyClassroomService';
+import { EhallSessionExpiredError } from '../../services/ids/EhallConstants';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { fmtDate } from '../../utils/DateUtil';
+import { LoginState } from '../../utils/LoginState';
 
 @Component
 export struct EmptyClassroomPage {
@@ -20,11 +22,22 @@ export struct EmptyClassroomPage {
   @State selectedBuilding: string = '';
   @State selectedDate: Date = new Date();
   @State errorMsg: string = '';
+  @State showCacheBanner: boolean = false; // 当前显示的是缓存数据（网络失败回退）
 
   private ehallsvc: EmptyClassroomService = EmptyClassroomService.getInstance();
 
   private addDays(d: Date, n: number): Date {
     return new Date(d.getTime() + n * 24 * 60 * 60 * 1000);
+  }
+
+  // 错误文案：会话失效给「可行动」提示（告诉用户去重新登录），其余走「动作失败：原因」。
+  // 此前 EhallConstants 抛的是 'EHALL_SESSION_EXPIRED' 内部码，会原样显示成
+  // 「加载楼栋失败: EHALL_SESSION_EXPIRED」，用户看不懂也不知道该怎么办。
+  private errText(action: string, e: Object): string {
+    if (e instanceof EhallSessionExpiredError) {
+      return '登录状态已失效，请返回首页重新登录后再试';
+    }
+    return action + '：' + (e as Error).message;
   }
 
   private applyFilter(): void {
@@ -47,13 +60,17 @@ export struct EmptyClassroomPage {
     Row() {
       Button({ type: ButtonType.Circle, buttonStyle: ButtonStyleMode.NORMAL }) {
         Image($r('app.media.close')).height(22).fillColor(ThemeColors.textPrimary).draggable(false)
-      }.height(40).width(40).onClick(() => { this.pageInfo.pop(); })
+      }.height(40).width(40).hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       Text(t).fontSize(22).fontWeight(FontWeight.Bold).fontColor(AccentColors.textContrast).layoutWeight(1)
     }.width('100%').height(52 + this.statusBarHeight).padding({ left: 12, right: 16, top: this.statusBarHeight })
   }
 
   aboutToAppear(): void {
     this.selectedDate = new Date();
+    if (!LoginState.isLoggedIn() && !LoginState.isOffline()) {
+      // 未登录且非离线：提示后仍允许加载（离线时可能有缓存）
+      // 不阻断，因为空教室是轻量查询，登录失败时 loadBuildings 会报错
+    }
     this.loadBuildings();
   }
 
@@ -83,7 +100,7 @@ export struct EmptyClassroomPage {
         this.errorMsg = '未获取到楼栋列表';
       }
     } catch (e) {
-      this.errorMsg = '加载楼栋失败: ' + (e as Error).message;
+      this.errorMsg = this.errText('加载楼栋失败', e);
     } finally {
       this.loadingBuildings = false;
     }
@@ -96,6 +113,7 @@ export struct EmptyClassroomPage {
       const rawBody = await this.ehallsvc.searchEmptyClassroomsByDate(this.selectedBuilding, this.selectedDate);
       this.rooms = EmptyClassroomService.extractEmptyClassrooms(rawBody);
       PreferenceUtil.putString('empty_classroom_last_result', rawBody); // 缓存最后成功结果，失败可回退
+      this.showCacheBanner = false;
       this.applyFilter();
     } catch (e) {
       // 失败回退：保留上次成功的数据，避免空白（对齐 Flutter "保留上次缓存" 的稳定性支柱）
@@ -111,8 +129,9 @@ export struct EmptyClassroomPage {
       // 缓存命中：不设 errorMsg（否则 build 的错误分支会覆盖列表，缓存永远不渲染）
       if (fallbackShown || this.rooms.length > 0) {
         this.errorMsg = '';
+        this.showCacheBanner = true; // 显示缓存数据提示
       } else {
-        this.errorMsg = '加载失败：' + (e as Error).message;
+        this.errorMsg = this.errText('加载失败', e);
       }
     } finally {
       this.loading = false;
@@ -135,9 +154,42 @@ export struct EmptyClassroomPage {
     this.search();
   }
 
+  // ===== 节次格 4/4/3 分组（对齐 Flutter empty_classroom_search_window）=====
+  // isUsed 恒为 11 项（JC1~JC11，true=空闲），按 1~4 / 5~8 / 9~11 三组排列，
+  // 每组间留空隙，格内直接写节次号 → 一眼看出是哪节课、是空闲还是占用。
+  // 底色沿用页面图例语义：绿=空闲、红=占用。
+  // ⚠️ @Builder 内 ForEach 回调只允许 UI 组件语法，下标/取色判断一律内联进表达式。
+  @Builder
+  sectionGroup(isUsed: boolean[], base: number, rels: number[]) {
+    Row({ space: 3 }) {
+      ForEach(rels, (rel: number) => {
+        Text(String(base + rel + 1))
+          .fontSize(11).width(22).height(22).textAlign(TextAlign.Center)
+          .fontColor(base + rel < isUsed.length && isUsed[base + rel] ? '#2E7D32' : '#C62828')
+          .backgroundColor(base + rel < isUsed.length && isUsed[base + rel] ? '#E8F5E9' : '#FFEBEE')
+          .borderRadius(6)
+      }, (rel: number) => 'cell_' + String(base + rel))
+    }
+  }
+
   build() {
     NavDestination() {
       Column() {
+        // 缓存数据提示条（网络失败回退到上次成功结果时显示）
+        if (this.showCacheBanner) {
+          Row() {
+            Text('📦 当前显示缓存数据').fontSize(12).fontColor(ThemeColors.warning)
+            Text('  刷新').fontSize(12).fontColor('#F4511E')
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .border({ width: 1, color: '#F4511E', radius: 4 })
+              .margin({ left: 10 })
+              .hoverEffect(HoverEffect.Auto).onClick(() => {
+                this.showCacheBanner = false;
+                this.loadBuildings(true);
+              })
+          }.width('100%').height(32).justifyContent(FlexAlign.Center)
+          .backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
+        }
         // 楼栋选择
         if (this.loadingBuildings) {
           Row() {
@@ -151,7 +203,7 @@ export struct EmptyClassroomPage {
                 Button(b.name).fontSize(15).height(40).borderRadius(20)
                   .fontColor(b.code === this.selectedBuilding ? '#FFFFFF' : ThemeColors.textPrimary)
                   .backgroundColor(b.code === this.selectedBuilding ? '#F4511E' : ThemeColors.bgInput)
-                  .onClick(() => { this.selectBuilding(b.code); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectBuilding(b.code); })
               }, (b: BuildingInfo) => 'bld_' + b.code)
             }.padding({ left: 16, right: 16 })
           }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).height(48)
@@ -161,15 +213,15 @@ export struct EmptyClassroomPage {
         Row({ space: 8 }) {
           Button('前一天').fontSize(14).height(38).borderRadius(19)
             .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
-            .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, -1); this.search(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectedDate = this.addDays(this.selectedDate, -1); this.search(); })
           Text(fmtDate(this.selectedDate)).fontSize(18).fontWeight(FontWeight.Medium).fontColor(ThemeColors.textPrimary)
             .width(130).textAlign(TextAlign.Center)
           Button('后一天').fontSize(14).height(38).borderRadius(19)
             .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
-            .onClick(() => { this.selectedDate = this.addDays(this.selectedDate, 1); this.search(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectedDate = this.addDays(this.selectedDate, 1); this.search(); })
           Button('今天').fontSize(14).height(38).borderRadius(19)
             .fontColor('#F4511E').backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
-            .onClick(() => { this.selectedDate = new Date(); this.search(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.selectedDate = new Date(); this.search(); })
         }.width('100%').padding({ left: 16, right: 16, top: 8 })
 
         // 搜索框
@@ -180,28 +232,31 @@ export struct EmptyClassroomPage {
             .onSubmit(() => { this.applyFilter(); })
           if (this.searchText.length > 0) {
             Text('✕').fontSize(14).fontColor(ThemeColors.textSecondary)
-              .onClick(() => { this.searchText = ''; this.applyFilter(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.searchText = ''; this.applyFilter(); })
           }
           Button('搜索')
             .fontSize(14).fontColor('#FFFFFF').height(36).borderRadius(8)
             .backgroundColor(this.accentColor)
-            .onClick(() => { this.applyFilter(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.applyFilter(); })
         }.width('100%').padding({ left: 16, right: 16, top: 6, bottom: 4 })
         .backgroundColor(ThemeColors.bgCard).borderRadius(8).margin({ left: 16, right: 16, top: 6 })
 
         Divider().color('#F0F0F0').margin({ top: 6 })
 
-        // 图例
-        Row({ space: 4 }) {
+        // 图例（格子=节次号，底色=状态；对齐 Flutter 4/4/3 分段一眼识别课次）
+        Row({ space: 6 }) {
           Text('图例: ').fontSize(10).fontColor(ThemeColors.textSecondary)
           Row({ space: 2 }) {
-            Rect().width(12).height(12).fill('#E8F5E9').radius(2)
+            Text('1').fontSize(10).width(16).height(16).textAlign(TextAlign.Center).borderRadius(4)
+              .fontColor('#2E7D32').backgroundColor('#E8F5E9')
             Text('空闲').fontSize(10).fontColor('#2E7D32').margin({ left: 2 })
           }
           Row({ space: 2 }) {
-            Rect().width(12).height(12).fill('#FFEBEE').radius(2)
+            Text('1').fontSize(10).width(16).height(16).textAlign(TextAlign.Center).borderRadius(4)
+              .fontColor('#C62828').backgroundColor('#FFEBEE')
             Text('占用').fontSize(10).fontColor('#C62828').margin({ left: 2 })
           }
+          Text('数字=节次').fontSize(10).fontColor(ThemeColors.textSecondary)
           Blank()
           if (!this.loading && this.filteredRooms.length > 0) {
             Text('共 ' + this.filteredRooms.length + ' 间').fontSize(10).fontColor(ThemeColors.textSecondary)
@@ -218,7 +273,7 @@ export struct EmptyClassroomPage {
           Column() {
             Text('\u26a0\ufe0f').fontSize(40)
             Text(this.errorMsg).fontSize(14).fontColor('#C62828').margin({ top: 8 })
-            Button('重试').margin({ top: 12 }).onClick(() => { this.retry(); })
+            Button('重试').margin({ top: 12 }).hoverEffect(HoverEffect.Auto).onClick(() => { this.retry(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.filteredRooms.length === 0 && this.searchText.length > 0) {
           Column() {
@@ -246,14 +301,14 @@ export struct EmptyClassroomPage {
                       }
                     }.width('100%').alignItems(VerticalAlign.Top)
 
-                    // 第二行：节次状态标签，独立成行，不再被名字挤出
-                    Row({ space: 2 }) {
-                      ForEach(room.isUsed, (free: boolean, idx: number) => {
-                        Text(free ? '空' : '占').fontSize(11)
-                          .fontColor(free ? '#2E7D32' : '#C62828')
-                          .backgroundColor(free ? '#E8F5E9' : '#FFEBEE')
-                          .borderRadius(4).padding({ left: 5, right: 5, top: 2, bottom: 2 })
-                      }, (free: boolean, idx: number) => 'sec_' + String(idx))
+                    // 第二行：节次状态 4/4/3 分组（1~4 / 5~8 / 9~11 节），格内带节次号，
+                    // 一眼看出是哪节课；组间留空隙模拟 Flutter 的三段视觉分隔
+                    Row() {
+                      this.sectionGroup(room.isUsed, 0, [0, 1, 2, 3])
+                      Blank().width(10)
+                      this.sectionGroup(room.isUsed, 4, [0, 1, 2, 3])
+                      Blank().width(10)
+                      this.sectionGroup(room.isUsed, 8, [0, 1, 2])
                     }.width('100%').margin({ top: 8 })
                   }.width('100%')
                 }.width('100%').padding(10).borderRadius(12).backgroundColor(ThemeColors.bgCard)

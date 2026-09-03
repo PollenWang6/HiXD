@@ -1,12 +1,12 @@
-// RuisiMessagesPage.ets — 消息中心
+﻿// RuisiMessagesPage.ets — 消息中心
 // 对齐 Android FrageMessage / iOS MessageViewController：回复 / 私信 / @我 三个 tab
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
 import {
   ReplyNotification, AtNotification, TopicDetailParam, PmConversation, PmParam
-} from '../../services/RuisiModels';
+} from '../../models/ruisi/RuisiModels';
 import { SegmentTab } from '../../components/SegmentTab';
 import { ToastUtil } from '../../utils/ToastUtil';
 
@@ -55,7 +55,7 @@ export struct RuisiMessagesPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text('消息')
@@ -107,7 +107,7 @@ export struct RuisiMessagesPage {
                 Text(n.content).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(2).margin({ top: 4 })
               }
             }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
-            .onClick(() => { this.pageInfo.pushPath({ name: 'RuisiTopicDetail', param: new TopicDetailParam(n.tid) }); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pushPath({ name: 'RuisiTopicDetail', param: new TopicDetailParam(n.tid) }); })
           }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })
         }, (n: ReplyNotification) => 'rep_' + n.id)
       }.width('100%').layoutWeight(1)
@@ -147,7 +147,7 @@ export struct RuisiMessagesPage {
                 Text(c.lastMessage).fontSize(13).fontColor(ThemeColors.textSecondary).maxLines(1).margin({ top: 4 })
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
             }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
-            .onClick(() => {
+            .hoverEffect(HoverEffect.Auto).onClick(() => {
               this.pageInfo.pushPath({ name: 'RuisiChat', param: new PmParam(c.tuid, c.username) });
             })
           }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })
@@ -176,7 +176,7 @@ export struct RuisiMessagesPage {
                 Text(n.time).fontSize(12).fontColor(ThemeColors.textHint)
               }.margin({ top: 4 })
             }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
-            .onClick(() => { this.pageInfo.pushPath({ name: 'RuisiTopicDetail', param: new TopicDetailParam(n.tid) }); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pushPath({ name: 'RuisiTopicDetail', param: new TopicDetailParam(n.tid) }); })
           }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })
         }, (n: AtNotification) => 'at_' + n.id)
       }.width('100%').layoutWeight(1)

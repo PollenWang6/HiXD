@@ -1,12 +1,12 @@
-// RuisiUserPage.ets — 个人主页
+﻿// RuisiUserPage.ets — 个人主页
 // 头像卡片(主题/帖子/积分/金币) + 内容入口(我的帖子/我的收藏/每日签到) + 设置入口
 // 关于/退出登录统一收进设置页，避免主页与设置页互相包含造成回环
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { UserInfo, SignResult, RuisiConstants, UserThreadsParam, PmParam } from '../../services/RuisiModels';
-import { RuisiService } from '../../services/RuisiService';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { UserInfo, SignResult, RuisiConstants, UserThreadsParam, PmParam } from '../../models/ruisi/RuisiModels';
+import { RuisiService } from '../../services/ruisi/RuisiService';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { RuisUtils } from '../../utils/RuisUtils';
 
@@ -133,7 +133,7 @@ export struct RuisiUserPage {
     .height(48)
     .padding({ left: 16, right: 16 })
     .backgroundColor(ThemeColors.bgCard)
-    .onClick(() => onClick())
+    .hoverEffect(HoverEffect.Auto).onClick(() => onClick())
   }
 
   @Builder
@@ -159,7 +159,7 @@ export struct RuisiUserPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text('个人主页')
@@ -272,7 +272,7 @@ export struct RuisiUserPage {
             }
             .width('100%').height(56).padding({ left: 16, right: 16 })
             .backgroundColor(ThemeColors.bgCard)
-            .onClick(() => { this.doSign(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doSign(); })
             }
 
             Row().height(8).backgroundColor(ThemeColors.bgPage)
@@ -328,13 +328,13 @@ struct AddFriendDialog {
           .layoutWeight(1)
           .backgroundColor(ThemeColors.bgInput)
           .fontColor(ThemeColors.textPrimary)
-          .onClick(() => { this.controller.close(); })
+          .hoverEffect(HoverEffect.Auto).onClick(() => { this.controller.close(); })
         Button('发送')
           .layoutWeight(1)
           .margin({ left: 12 })
           .backgroundColor(this.accentColor)
           .fontColor(AccentColors.textContrast)
-          .onClick(() => {
+          .hoverEffect(HoverEffect.Auto).onClick(() => {
             if (this.note.length > 10) {
               ToastUtil.show('字数太多了,最多10个');
               return;

@@ -1,11 +1,11 @@
-// RuisiMyPostsPage.ets — 我的帖子 / 他的帖子（支持下滑加载更多）
+﻿// RuisiMyPostsPage.ets — 我的帖子 / 他的帖子（支持下滑加载更多）
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { Topic, TopicDetailParam, UserParam, TopicListResult } from '../../services/RuisiModels';
-import { RuisiTopicItem } from '../../components/RuisiTopicItem';
-import { RuisiService } from '../../services/RuisiService';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { Topic, TopicDetailParam, UserParam, TopicListResult } from '../../models/ruisi/RuisiModels';
+import { RuisiTopicItem } from '../../pages/ruisi/components/RuisiTopicItem';
+import { RuisiService } from '../../services/ruisi/RuisiService';
 import { ToastUtil } from '../../utils/ToastUtil';
 
 @Component
@@ -86,7 +86,7 @@ export struct RuisiMyPostsPage {
       }
       .width(40).height(40)
       .backgroundColor('rgba(255,255,255,0.18)')
-      .onClick(() => { this.pageInfo.pop(); })
+      .hoverEffect(HoverEffect.Auto).onClick(() => { this.pageInfo.pop(); })
       .margin({ right: 12 })
 
       Text(this.pageTitle)
@@ -130,7 +130,7 @@ export struct RuisiMyPostsPage {
               ListItem() {
                 Row() { Text('加载更多').fontSize(13).fontColor(ThemeColors.textSecondary) }
                   .width('100%').height(44).justifyContent(FlexAlign.Center)
-                  .onClick(() => { this.loadThreads(this.currentUid(), false); })
+                  .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadThreads(this.currentUid(), false); })
               }
             }
             if (this.loadingMore) {

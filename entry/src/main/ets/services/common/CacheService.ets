@@ -1,0 +1,177 @@
+// CacheService.ets — 本地缓存服务
+import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
+
+const CACHE_TAG = 'CacheService';
+
+interface CacheEntry {
+  data: string;
+  timestamp: number;
+  expiresAt: number;
+}
+
+export interface CacheConfig {
+  ttl: number;
+}
+
+export class CacheService {
+  private static instance: CacheService;
+  private ready = false;
+  private baseDir = '/data/storage/el2/base/haps/hixd_cache';
+
+  private constructor() {}
+
+  static getInstance(): CacheService {
+    if (!CacheService.instance) CacheService.instance = new CacheService();
+    return CacheService.instance;
+  }
+
+  async init(): Promise<void> {
+    if (this.ready) return;
+    try {
+      await fileIo.mkdir(this.baseDir, true);
+    } catch {
+      // 目录可能已存在
+    }
+    this.ready = true;
+  }
+
+  private filePath(key: string): string {
+    // 用 UTF-8 字节计算 hash，避免 charCodeAt 对多字节字符产生不一致结果
+    const encoder = new util.TextEncoder();
+    const bytes: Uint8Array = encoder.encodeInto(key);
+    let hash = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      hash = ((hash << 5) - hash) + bytes[i];
+      hash = hash & hash; // 保持 32bit
+    }
+    const n = hash >= 0 ? hash : -hash;
+    return this.baseDir + '/c_' + n.toString(16) + '.json';
+  }
+
+  async get(key: string): Promise<string | null> {
+    if (!this.ready) return null;
+    const path = this.filePath(key);
+    try {
+      const content: string = await fileIo.readText(path);
+      const entry: CacheEntry = JSON.parse(content);
+      if (Date.now() > entry.expiresAt) {
+        // 不删除过期文件，让 getStale() 仍可兜底（离线时过期缓存优于无数据）
+        // 文件会在 set() 时被覆盖，或 clear() 时统一清理
+        return null;
+      }
+      return entry.data;
+    } catch { return null; }
+  }
+
+  // 读取缓存（忽略过期时间），离线时仍可使用过期缓存
+  async getStale(key: string): Promise<string | null> {
+    if (!this.ready) return null;
+    const path = this.filePath(key);
+    try {
+      const content: string = await fileIo.readText(path);
+      const entry: CacheEntry = JSON.parse(content);
+      // 不过期检查，不删除文件，直接返回数据
+      return entry.data;
+    } catch { return null; }
+  }
+
+  async set(key: string, data: string, ttl: number): Promise<void> {
+    if (!this.ready) return;
+    const path = this.filePath(key);
+    const now = Date.now();
+    const entry: CacheEntry = { data, timestamp: now, expiresAt: now + ttl };
+    try {
+      // 异步 open/write/close，避免主线程同步 IO 卡顿
+      const file: fileIo.File = await fileIo.open(path,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.WRITE_ONLY);
+      const content2: string = JSON.stringify(entry);
+      // 使用 TextEncoder 正确处理 UTF-8 多字节字符
+      const encoder = new util.TextEncoder();
+      const encoded = encoder.encodeInto(content2);
+      await fileIo.write(file.fd, encoded.buffer);
+      await fileIo.close(file);
+    } catch (e) {
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      const files: string[] = await fileIo.listFile(this.baseDir);
+      for (const f of files) {
+        try { await fileIo.unlink(this.baseDir + '/' + f); } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+  }
+
+  async getOrFetch<T>(
+    key: string,
+    fetchFn: () => Promise<T>,
+    ttlMs: number,
+    forceRefresh?: boolean
+  ): Promise<T> {
+    const meta: CacheFetchMeta<T> = await this.getOrFetchWithMeta(key, fetchFn, ttlMs, forceRefresh);
+    return meta.data;
+  }
+
+  /**
+   * 带数据来源标记的 getOrFetch：返回数据 + 来源（cache/network/stale）+ 缓存时间。
+   * 调用方可据此在 UI 上显示"缓存数据"提示，对齐 Flutter 课表 Source 标记。
+   */
+  async getOrFetchWithMeta<T>(
+    key: string,
+    fetchFn: () => Promise<T>,
+    ttlMs: number,
+    forceRefresh?: boolean
+  ): Promise<CacheFetchMeta<T>> {
+    // 1. 优先读未过期缓存
+    if (!forceRefresh) {
+      const cached: string | null = await this.get(key);
+      if (cached !== null) {
+        try {
+          const data: T = JSON.parse(cached) as T;
+          const cachedAt: number = await this.getTimestamp(key);
+          return { data: data, source: 'cache', cachedAt: cachedAt };
+        } catch { /* ignore */ }
+      }
+    }
+
+    // 2. 网络请求
+    try {
+      const data: T = await fetchFn();
+      try {
+        await this.set(key, JSON.stringify(data), ttlMs);
+      } catch { /* ignore */ }
+      return { data: data, source: 'network', cachedAt: Date.now() };
+    } catch (fetchErr) {
+      // 3. 网络失败，用过期缓存兜底
+      const stale: string | null = await this.getStale(key);
+      if (stale !== null) {
+        try {
+          const data: T = JSON.parse(stale) as T;
+          const cachedAt: number = await this.getTimestamp(key);
+          return { data: data, source: 'stale', cachedAt: cachedAt };
+        } catch { /* ignore */ }
+      }
+      throw new Error(String(fetchErr));
+    }
+  }
+
+  // 读取缓存条目的 timestamp（用于显示"缓存于 xx:xx"）
+  private async getTimestamp(key: string): Promise<number> {
+    if (!this.ready) return 0;
+    const path = this.filePath(key);
+    try {
+      const content: string = await fileIo.readText(path);
+      const entry: CacheEntry = JSON.parse(content);
+      return entry.timestamp;
+    } catch { return 0; }
+  }
+}
+
+/** 带数据来源标记的缓存结果 */
+export interface CacheFetchMeta<T> {
+  data: T;
+  source: 'cache' | 'network' | 'stale'; // cache=未过期缓存, network=刚拉的网络数据, stale=过期缓存兜底
+  cachedAt: number; // 缓存写入时间戳（source=network 时为当前时间）
+}

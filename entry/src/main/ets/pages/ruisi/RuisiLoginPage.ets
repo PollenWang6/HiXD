@@ -1,12 +1,12 @@
-// RuisiLoginPage.ets — 睿思论坛登录页
+﻿// RuisiLoginPage.ets — 睿思论坛登录页
 // 对标 Flutter login_page.dart：用户名 + 密码 + 验证码（按需显示）
 // 验证码流程：1.获取hash → 2.获取update token → 3.获取图片二进制
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
-import { RuisiService } from '../../services/RuisiService';
-import { RuisiApiService } from '../../services/RuisiApiService';
-import { RuisiConstants } from '../../services/RuisiModels';
+import { RuisiService } from '../../services/ruisi/RuisiService';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
+import { RuisiConstants } from '../../models/ruisi/RuisiModels';
 import { ToastUtil } from '../../utils/ToastUtil';
 import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -266,7 +266,7 @@ export struct RuisiLoginPage {
               .borderRadius(8)
               .backgroundColor(ThemeColors.bgInput)
               .justifyContent(FlexAlign.Center)
-              .onClick(() => { this.refreshCaptcha(); })
+              .hoverEffect(HoverEffect.Auto).onClick(() => { this.refreshCaptcha(); })
             }
             .width('100%')
             .margin({ top: 16 })
@@ -292,7 +292,7 @@ export struct RuisiLoginPage {
             .borderRadius(12)
             .margin({ top: 24 })
             .enabled(!this.loginLoading)
-            .onClick(() => { this.doLogin(); })
+            .hoverEffect(HoverEffect.Auto).onClick(() => { this.doLogin(); })
 
           if (this.loginLoading) {
             LoadingProgress()
@@ -308,7 +308,7 @@ export struct RuisiLoginPage {
             .fontSize(14)
             .fontColor(ThemeColors.textSecondary)
             .margin({ top: 16 })
-            .onClick(() => {
+            .hoverEffect(HoverEffect.Auto).onClick(() => {
               RuisiService.getInstance().clearCookies().then(() => {
                 this.isLoggedIn = false;
                 this.needCaptcha = false;

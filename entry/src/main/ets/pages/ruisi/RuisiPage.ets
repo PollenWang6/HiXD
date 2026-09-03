@@ -1,4 +1,4 @@
-// RuisiPage.ets — 睿思论坛 Tab 入口页
+﻿// RuisiPage.ets — 睿思论坛 Tab 入口页
 // 登录态判断：已登录 → 渲染 RuisiHomePage（睿思首页），未登录 → RuisiLoginPage
 // 子页（含帖子详情）统一走 MainPage 根 Navigation 栈：
 //   RuisiHomePage 调用 this.pageInfo.pushPath({ name: 'RuisiTopicDetail', param })
@@ -9,8 +9,8 @@
 
 import { ThemeColors } from '../../utils/ThemeColors';
 import { AccentColors } from '../../utils/AccentColors';
-import { RuisiService } from '../../services/RuisiService';
-import { RuisiApiService } from '../../services/RuisiApiService';
+import { RuisiService } from '../../services/ruisi/RuisiService';
+import { RuisiApiService } from '../../services/ruisi/RuisiApiService';
 import { RuisiHomePage } from './RuisiHomePage';
 import { RuisiLoginPage } from './RuisiLoginPage';
 
