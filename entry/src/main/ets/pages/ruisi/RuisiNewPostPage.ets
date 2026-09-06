@@ -369,6 +369,7 @@ export struct RuisiNewPostPage {
           .padding(16)
         }
         .layoutWeight(1)
+        .edgeEffect(EdgeEffect.Spring)
       }
       .width('100%').height('100%')
       .backgroundColor(ThemeColors.bgPage)

@@ -178,6 +178,7 @@ export struct SportPage {
     .layoutWeight(1)
     .scrollBar(BarState.Auto)
     .align(Alignment.Top)
+    .edgeEffect(EdgeEffect.Spring)
   }
 
   @Builder
@@ -308,6 +309,7 @@ export struct SportPage {
         .layoutWeight(1)
         .scrollBar(BarState.Auto)
         .align(Alignment.Top)
+        .edgeEffect(EdgeEffect.Spring)
       }
     }.width('100%').height('100%')
   }

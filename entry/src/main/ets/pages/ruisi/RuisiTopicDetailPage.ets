@@ -325,6 +325,14 @@ export struct RuisiTopicDetailPage {
   @State previewPinchBase: number = 1;
   @State previewOffsetX: number = 0;
   @State previewOffsetY: number = 0;
+  // 进出场动画因子（显式状态动画，替代 TransitionEffect）：
+  //   previewEnterScale —— 图片进出场缩放（×previewScale；捏合只动 previewScale 互不干扰）
+  //   previewBgAlpha    —— 整层透明度（黑幕+图片+浮层统一淡入淡出，避免浮层抢镜）
+  // 关闭动画分两步：放大态先快速复位到 1 倍 → 再整体缩小淡出 → 动画完才卸载组件，
+  // 彻底避开 TransitionEffect 退场 scale 与捏合值叠加出怪动画的问题。
+  @State previewEnterScale: number = 1;
+  @State previewBgAlpha: number = 1;
+  private previewAnimating: boolean = false; // 关闭动画进行中（防连点重入）
   private previewTapTimer: number = -1;
   private panStartX: number = 0;
   private panStartY: number = 0;
@@ -708,6 +716,7 @@ export struct RuisiTopicDetailPage {
           .padding({ left: 16, right: 16, top: 4 })
         }
         .constraintSize({ maxHeight: '55%' })
+        .edgeEffect(EdgeEffect.Spring)
 
         // 按钮行
         Row() {
@@ -810,9 +819,12 @@ export struct RuisiTopicDetailPage {
     }
   }
 
-  // 打开全屏预览：传入整帖图片列表与点击位置，复位缩放/平移并隐藏系统栏进入沉浸
+  // 打开全屏预览：传入整帖图片列表与点击位置，复位缩放/平移并隐藏系统栏进入沉浸。
+  // 进场动画：先以 0.4 倍+透明渲染首帧，下一帧弹簧放大淡入（从点击的小图"弹开"到全屏）
   private openPreview(images: string[], index: number): void {
     if (images.length === 0 || index < 0 || index >= images.length) return;
+    this.previewEnterScale = 0.4;
+    this.previewBgAlpha = 0;
     this.previewImages = images;
     this.previewIndex = index;
     this.previewScale = 1;
@@ -821,6 +833,13 @@ export struct RuisiTopicDetailPage {
     this.previewOffsetY = 0;
     this.previewImageUrl = images[index];
     this.setImmersive(true);
+    // 等首帧（0.4 倍+透明）渲染完成后再播放大淡入，否则动画起点丢失、直接跳到 1 倍
+    setTimeout(() => {
+      animateTo({ duration: 320, curve: curves.springMotion(0.45, 0.85) }, () => {
+        this.previewEnterScale = 1;
+        this.previewBgAlpha = 1;
+      });
+    }, 16);
   }
 
   // 全屏预览左右切换：dir=-1 上一张，+1 下一张；首/尾不越界
@@ -836,20 +855,47 @@ export struct RuisiTopicDetailPage {
     this.previewOffsetY = 0;
   }
 
-  // 关闭全屏预览并复位缩放/平移状态，恢复系统栏
+  // 关闭全屏预览：两段式退场动画（更精致的"缩回"感）——
+  //   ① 若处于放大/平移态（双击或捏合过）：先 140ms 快速复位到 1 倍；
+  //   ② 整体 220ms 缩小到 0.55 倍 + 淡出（黑幕/图片/浮层同步）；
+  //   ③ 动画播完才真正卸载组件并恢复系统栏。动画期间 previewAnimating 防连点重入。
   private closePreview(): void {
+    if (this.previewAnimating) return;
     if (this.previewTapTimer !== -1) {
       clearTimeout(this.previewTapTimer);
       this.previewTapTimer = -1;
     }
-    this.previewImageUrl = '';
-    this.previewImages = [];
-    this.previewIndex = 0;
-    this.previewScale = 1;
-    this.previewPinchBase = 1;
-    this.previewOffsetX = 0;
-    this.previewOffsetY = 0;
-    this.setImmersive(false);
+    const needReset: boolean = this.previewScale > 1.05 ||
+      this.previewOffsetX !== 0 || this.previewOffsetY !== 0;
+    this.previewAnimating = true;
+    if (needReset) {
+      animateTo({ duration: 140, curve: Curve.EaseOut }, () => {
+        this.previewScale = 1;
+        this.previewPinchBase = 1;
+        this.previewOffsetX = 0;
+        this.previewOffsetY = 0;
+      });
+    }
+    // 等复位播完（或直接）再进入缩小淡出；卸载延迟略长于动画，保证退场完整可见
+    setTimeout(() => {
+      animateTo({ duration: 220, curve: Curve.EaseIn }, () => {
+        this.previewEnterScale = 0.55;
+        this.previewBgAlpha = 0;
+      });
+      setTimeout(() => {
+        this.previewAnimating = false;
+        this.previewImageUrl = '';
+        this.previewImages = [];
+        this.previewIndex = 0;
+        this.previewScale = 1;
+        this.previewPinchBase = 1;
+        this.previewOffsetX = 0;
+        this.previewOffsetY = 0;
+        this.previewEnterScale = 1; // 复位因子，供下次打开
+        this.previewBgAlpha = 1;
+        this.setImmersive(false);
+      }, 250);
+    }, needReset ? 150 : 10);
   }
 
   // 对标 Flutter _PostTile: 头像 + 作者/时间/楼层 + 内容 + 回复按钮
@@ -1267,6 +1313,7 @@ export struct RuisiTopicDetailPage {
                   this.loadDetail(false);
                 }
               })
+              .edgeEffect(EdgeEffect.Spring)
 
               // 回复输入栏（展开时占位在底部，此时悬浮按钮隐藏）
               if (this.showReplyInput) {
@@ -1397,6 +1444,7 @@ export struct RuisiTopicDetailPage {
       if (this.previewImageUrl.length > 0) {
         Stack() {
           // 黑色背景层：点图片以外的区域即退出预览
+          // 透明度由根 Stack 的 previewBgAlpha 统一控制（进出场同步淡入淡出）
           Column() { }
             .width('100%').height('100%')
             .backgroundColor('#000000')
@@ -1407,7 +1455,12 @@ export struct RuisiTopicDetailPage {
             .width('100%').height('100%')
             .objectFit(ImageFit.Contain)
             .draggable(false)
-            .scale({ x: this.previewScale, y: this.previewScale })
+            // 进出场缩放 × 捏合/双击缩放：previewScale 只由手势修改，previewEnterScale 只由
+            // openPreview/closePreview 的动画驱动，两者相乘互不干扰（退场缩小不会与捏合值打架）
+            .scale({
+              x: this.previewScale * this.previewEnterScale,
+              y: this.previewScale * this.previewEnterScale
+            })
             .translate({ x: this.previewOffsetX, y: this.previewOffsetY })
             .hoverEffect(HoverEffect.Auto).onClick(() => { this.handlePreviewTap(); })
             .gesture(
@@ -1507,6 +1560,9 @@ export struct RuisiTopicDetailPage {
         .backgroundColor('#000000')
         .position({ top: 0, left: 0 })
         .zIndex(100)
+        // 整层进出场淡入淡出：黑幕/图片/关闭按钮/计数等全部内容共享 previewBgAlpha，
+        // 由 openPreview(0→1)/closePreview(1→0) 显式动画驱动（替代 TransitionEffect）
+        .opacity(this.previewBgAlpha)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       }
       // 举报浮层（自管理，状态由 showReportSheet 控制，可重复打开/关闭）

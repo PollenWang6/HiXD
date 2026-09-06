@@ -111,6 +111,7 @@ export struct RuisiMessagesPage {
           }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })
         }, (n: ReplyNotification) => 'rep_' + n.id)
       }.width('100%').layoutWeight(1)
+      .edgeEffect(EdgeEffect.Spring)
     }
   }
 
@@ -153,6 +154,7 @@ export struct RuisiMessagesPage {
           }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })
         }, (c: PmConversation, idx: number) => `pm_${c.tuid}`)
       }.width('100%').layoutWeight(1)
+      .edgeEffect(EdgeEffect.Spring)
     }
   }
 
@@ -180,6 +182,7 @@ export struct RuisiMessagesPage {
           }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })
         }, (n: AtNotification) => 'at_' + n.id)
       }.width('100%').layoutWeight(1)
+      .edgeEffect(EdgeEffect.Spring)
     }
   }
 

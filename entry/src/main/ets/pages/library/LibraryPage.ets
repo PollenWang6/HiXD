@@ -1666,6 +1666,7 @@ export struct LibraryPage {
           .hoverEffect(HoverEffect.Auto).onClick(() => {
             this.hideHistory();
           })
+          .edgeEffect(EdgeEffect.Spring)
         } else {
           Column() {
             Text('📚').fontSize(48)
@@ -1870,6 +1871,7 @@ export struct LibraryPage {
               }.padding({ left: 8, right: 8, bottom: 12 })
             }, (borrow: BorrowItem) => 'loan_' + String(borrow.loanId) + ((borrow.imagePixelMap !== null) || (borrow.imageUrl.length > 0) ? '_c' : ''))
           }.layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
           .columnsTemplate('1fr '.repeat(this.gridColumns()).trim())
           .padding({ left: 6, right: 6 })
           .onScroll(() => {
@@ -1940,6 +1942,7 @@ export struct LibraryPage {
                 this.hideHistory();
               }
             })
+            .edgeEffect(EdgeEffect.Spring)
           } else {
             Column() {
               Text('📚').fontSize(48)
@@ -2174,6 +2177,7 @@ export struct LibraryPage {
             }
           }.width('100%').padding({ bottom: 16 })
         }.width('100%').height('100%')
+        .edgeEffect(EdgeEffect.Spring)
 
         // ===== Tab1 馆藏副本 =====
         Scroll() {
@@ -2236,6 +2240,7 @@ export struct LibraryPage {
             }
           }.width('100%').padding({ bottom: 16 })
         }.width('100%').height('100%')
+        .edgeEffect(EdgeEffect.Spring)
       }
       }.layoutWeight(1).width('100%')
     }
@@ -2306,6 +2311,7 @@ export struct LibraryPage {
         }.width('100%')
       }
       .width('100%').layoutWeight(1)
+      .edgeEffect(EdgeEffect.Spring)
     }
     .width('100%').height('100%')
     .padding({ left: 20, right: 20, top: 20, bottom: 20 })

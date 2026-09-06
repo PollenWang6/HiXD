@@ -324,41 +324,75 @@ export class CasLoginService {
   // 自动过滑块：拉图 → NCC 算缺口 → 邻域微调 → 拟人轨迹 → verify。
   // 成功返回 true；全失败返回 false（调用方应 fallback 到手动拖动 UI）。
   // 注：本方法只负责「滑块验证」这一步，后续仍需 postLogin 提交账号密码表单。
-  async autoSolveSlider(maxRounds: number = 6): Promise<boolean> {
-    // 浮点邻域：先扫整数 ±0..4，再细扫 ±0.5，覆盖 NCC 亚像素误差
-    const deltas: number[] = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, 3, -3, 4, -4];
+  //
+  // ⚠️ 2026-09-06 失败收敛策略重写（真机日志 F1[18146] 实锤）：
+  //   旧实现每张图一口气试 15 个邻域点（含 ±0.5/±1.5 亚像素），40 秒内对同一会话
+  //   连发 56 次 verify 全败、登录卡 5% 死循环。CAS 滑块验证上下文在一次 verify
+  //   失败后即被服务端作废并对会话打风控标记——同图/同会话后续 verify 全是必败
+  //   请求，试得越多死得越快（重开 App 新会话 3 次即过，证明非数据损坏）。
+  //   对齐 Flutter solve()：每轮【换新图】、每图只试少量整数邻域、失败立即换图重来。
+  //   ① 邻域收敛为整数 ±0..3（NCC 亚像素误差由整数吸收，0.5 步长无意义且徒增请求）；
+  //   ② 连续 8 次被拒 = 会话已被风控 → 立即 false 交还手动拖动（真人一次即可过）；
+  //   ③ 总 verify 保险丝 28 次，防极端死循环。
+  async autoSolveSlider(maxRounds: number = 6, onProgress?: (p: LoginProgress) => void): Promise<boolean> {
+    // 整数邻域（Flutter 用 [1,-1,2,-2,3,-3,4]，此处加 0 覆盖直落，最多 7 点/图）
+    const deltas: number[] = [0, 1, -1, 2, -2, 3, -3];
+    const MAX_TOTAL_VERIFY: number = 28;  // 全局保险丝：28 次仍不过 → 判定失败交还手动
+    const MAX_CONSECUTIVE_FAIL: number = 8; // 连续被拒 8 次 → 会话已被风控，快速交还手动
+    let totalVerify: number = 0;
+    let consecutiveFail: number = 0;
     for (let round: number = 0; round < maxRounds; round++) {
+      if (onProgress) {
+        onProgress({ step: 'captcha', message: '正在进行滑块验证...', percent: Math.min(20 + round * 5, 50) });
+      }
+      if (totalVerify >= MAX_TOTAL_VERIFY) {
+        return false;
+      }
+      let puzzle: SliderPuzzle;
       try {
-        const puzzle: SliderPuzzle = await this.getSliderCaptcha();
-        const offset: number | null = await this.solveOffset(puzzle.bigImage, puzzle.smallImage);
-        if (offset === null) {
-          await this.delay(200);
+        puzzle = await this.getSliderCaptcha();
+      } catch (_e) {
+        // 拉图失败（网络抖动/频率风控）→ 稍等换下一张，不中断整轮
+        await this.delay(500);
+        continue;
+      }
+      const offset: number | null = await this.solveOffset(puzzle.bigImage, puzzle.smallImage);
+      if (offset === null) {
+        await this.delay(300);
+        continue;
+      }
+      const baseMove: number = offset * this.PUZZLE_WIDTH; // 保留浮点精度，整数邻域吸收取整误差
+      let solved: boolean = false;
+      for (const delta of deltas) {
+        const move: number = baseMove + delta;
+        if (move < 1 || move > this.PUZZLE_WIDTH - 1) {
           continue;
         }
-        const baseMove: number = offset * this.PUZZLE_WIDTH; // 保留浮点精度，不提前 round
-        let solved: boolean = false;
-        for (const delta of deltas) {
-          const move: number = baseMove + delta;
-          if (move < 1 || move > this.PUZZLE_WIDTH - 1) {
-            continue;
+        // ⚠️ 真人节奏：每次 verify 前睡眠 400~900ms（对齐 Flutter solve() 的
+        // sleep(tracks.last.c-100) 思路）。高频连发会被 CAS 风控判为非人类。
+        await this.delay(400 + Math.floor(Math.random() * 500));
+        const tracks: TrackPoint[] = this.generateTracks(move);
+        totalVerify++;
+        try {
+          if (await this.verifySliderCaptcha(tracks, puzzle.smallImage)) {
+            solved = true;
+            break;
           }
-          const tracks: TrackPoint[] = this.generateTracks(move);
-          try {
-            if (await this.verifySliderCaptcha(tracks, puzzle.smallImage)) {
-              solved = true;
-              break;
-            }
-          } catch (_e) {
-            // 单次 verify 失败，继续尝试邻域 / 下一轮
+          consecutiveFail++;
+          if (consecutiveFail >= MAX_CONSECUTIVE_FAIL) {
+            // 连续 8 次被 CAS 拒（F1[18146] 实证：56 连败卡 5%）→ 本会话已被风控，
+            // 继续自动尝试纯属浪费，立即交还手动拖动（真人拖一次即可过）。
+            return false;
           }
+        } catch (_e) {
+          // 单次 verify 网络异常：不累计连败（非服务端拒绝），继续下一邻域
         }
-        if (solved) {
-          return true;
-        }
-      } catch (e) {
       }
-      // 本轮未过，间隔后重试（换图）
-      await this.delay(200);
+      if (solved) {
+        return true;
+      }
+      // 本轮未过：换图也需人类节奏，过快换图同样触发频率风控
+      await this.delay(1000 + Math.floor(Math.random() * 600));
     }
     return false;
   }
@@ -644,18 +678,25 @@ export class CasLoginService {
     );
 
     // 先检查 CAS 返回的错误（冻结、密码错等）
-    if (postResult.body.indexOf('账号已被锁定') >= 0 || postResult.body.indexOf('账号已冻结') >= 0 ||
-        postResult.body.indexOf('密码错误次数过多') >= 0 || postResult.body.indexOf('locked') >= 0 ||
-        postResult.body.indexOf('被锁定') >= 0 || postResult.body.indexOf('被冻结') >= 0) {
+    // ⚠️ 2026-09-06 对齐 Flutter _parsePasswordWrongMsg：错误分类以 #showErrorTip 的
+    // 【实际文本】为准。此前用"body 含 showErrorTip 元素"当密码错信号，但该空容器
+    // 常驻登录页模板，导致账号冻结/风险提示页（body 必然带此元素）被误报成
+    // "用户名或密码有误"，用户分不清到底是密码错还是账号被冻结。
+    const errTip: string = this.extractErrorTip(postResult.body);
+    const lowBody: string = postResult.body.toLowerCase();
+    if (lowBody.indexOf('账号已被锁定') >= 0 || lowBody.indexOf('账号已冻结') >= 0 ||
+        lowBody.indexOf('密码错误次数过多') >= 0 || lowBody.indexOf('locked') >= 0 ||
+        lowBody.indexOf('被锁定') >= 0 || lowBody.indexOf('被冻结') >= 0 ||
+        errTip.indexOf('锁') >= 0 || errTip.indexOf('冻结') >= 0 || errTip.indexOf('次数过多') >= 0) {
       throw new AccountLockedException('账号已被冻结，请稍后再试');
     }
-    if (postResult.body.indexOf('用户名或密码') >= 0 || postResult.body.indexOf('showErrorTip') >= 0) {
-      const errMatch: RegExpMatchArray | null = postResult.body.match(/id="showErrorTip"[^>]*>([^<]+)/);
-      const errMsg: string = errMatch ? errMatch[1] : '用户名或密码有误';
-      throw new PasswordWrongException(errMsg);
-    }
-    if (postResult.statusCode === 401) {
-      throw new PasswordWrongException('用户名或密码有误');
+    // 凭证错误 / 其他失败：透传 CAS 真实文案（对齐 Flutter），避免吞掉具体原因
+    if (postResult.statusCode === 401 || errTip.length > 0) {
+      let reason: string = errTip.length > 0 ? errTip : '用户名或密码有误';
+      if (reason.indexOf('用户名') >= 0 || reason.indexOf('密码') >= 0) {
+        reason = '用户名或密码有误';
+      }
+      throw new PasswordWrongException(reason);
     }
 
     // 检查 ehall cookie 是否有 MOD_AUTH_CAS
@@ -711,8 +752,15 @@ export class CasLoginService {
       // 这里发一个轻量请求让 ehall 完成握手，并读返回体校验 hasLogin。
       // 对齐 Flutter loginEhall：统一认证成功但 ehall 侧会话未建立时明确抛错，
       // 而不是仅凭本地 MOD_AUTH_CAS 存在就判定登录成功（否则用户进业务页才发现没进去）。
-      const confirmResp: HttpResponse = await this.http.get(
-        'https://ehall.xidian.edu.cn/jsonp/getAppUsageMonitor.json?type=uv');
+      // ⚠️ 2026-09-06 修复：本确认请求是 ehall 业务域，postLogin 自身处于登录流程中
+      //（loginStatus 尚未置 ok），必须与 sendBfp/POST login 一样绕过 offline 守卫。
+      // 此前 LoginPage 手动登录路径在此被 sessionRestoreHandler 拦截（MainPage 已被
+      // replace 销毁、handler=null）→ postLogin 抛"当前未登录校园账号"→ 协议层
+      // 明明登录成功（ST+ehall 200）但 UI 一直停在登录页（真机日志：getAppUsageMonitor 0 次）。
+      const confirmResp: HttpResponse = await HttpUtil.withNoOfflineCheck(async (): Promise<HttpResponse> => {
+        return await this.http.get(
+          'https://ehall.xidian.edu.cn/jsonp/getAppUsageMonitor.json?type=uv');
+      });
       const confirmMatch: RegExpMatchArray | null =
         confirmResp.body.match(/"hasLogin"\s*:\s*(true|false)/);
       if (!confirmMatch || confirmMatch[1] !== 'true') {
@@ -748,17 +796,33 @@ export class CasLoginService {
   }
 
   // ========== 二次验证（设备验证）相关 ==========
-  // 判断 CAS 是否因二次认证拦截了登录
+  // 解析 CAS 错误页 #showErrorTip 的文本内容（对齐 Flutter _parsePasswordWrongMsg）。
+  // ⚠️ 该元素是常驻空容器（无错误时也存在于登录页模板），必须取其【实际文本】，
+  // 绝不能拿"页面含 showErrorTip 元素"当失败信号——否则账号冻结/风险提示等
+  // 非密码错误会被误报成"用户名或密码有误"（2026-09-06 对照 Flutter 定位）。
+  private extractErrorTip(body: string): string {
+    const m: RegExpMatchArray | null = body.match(/id="showErrorTip"[^>]*>\s*([^<]{1,300}?)\s*</);
+    if (!m) {
+      return '';
+    }
+    return m[1].trim();
+  }
+  // 二次验证判定（对齐 Flutter isIDSReAuthLocation）：
+  // ⚠️ 只认 CAS 302 跳转目标路径 === /authserver/reAuthCheck/reAuthLoginView.do。
+  // 严禁扫响应 body 关键词：账号锁定页/登录失败页/普通登录页模板的 JS 里常驻
+  // 'reauth'/'二次认证'/'动态码'/'多因子' 等字样（含隐藏表单与静态资源引用），
+  // 扫 body 会把普通登录失败（如账号被锁）误判成“需要二次验证”→ 强跑短信流程，
+  // 但 CAS 根本不处于 reAuth 态 → 永远收不到验证码（2026-09-06 线上实证）。
+  private isReAuthLocation(loc: string): boolean {
+    if (!loc) return false;
+    const idx: number = loc.indexOf('/authserver/');
+    if (idx < 0) return false;
+    return loc.substring(idx).startsWith('/authserver/reauthcheck/reauthloginview.do');
+  }
+
+  // 判断 CAS 是否因二次认证拦截了登录（仅依据 POST 后 302 目标，见 isReAuthLocation 注释）
   private isReAuthRequired(postResult: HttpResponse): boolean {
-    const loc: string = (postResult.location || '').toLowerCase();
-    const body: string = (postResult.body || '').toLowerCase();
-    return loc.includes('reauthloginview') ||
-           loc.includes('reauthcheck') ||
-           body.includes('reauth') ||
-           body.includes('二次认证') ||
-           body.includes('设备验证') ||
-           body.includes('动态码') ||
-           body.includes('多因子');
+    return this.isReAuthLocation((postResult.location || '').toLowerCase());
   }
 
   // 登录“成功”后复查：设备验证是否仍以 step-up 形式 pending（信任设备被删场景）。
@@ -782,19 +846,16 @@ export class CasLoginService {
             location = base + (location.startsWith('/') ? location : '/' + location);
           }
         }
+        // 逐跳复查（对齐 Flutter resolveIDSReAuthIfNeeded）：任一跳 302 指向 reAuth 中间页即命中
+        if (this.isReAuthLocation(location.toLowerCase())) {
+          return true;
+        }
         currentUrl = location;
         resp = await this.http.getNoRedirect(location, this.pageHeaders(this.LOGIN_PAGE));
         loopGuard++;
       }
-      const loc: string = (resp.location || '').toLowerCase();
-      const body: string = (resp.body || '').toLowerCase();
-      return loc.includes('reauthloginview') ||
-             loc.includes('reauthcheck') ||
-             body.includes('reauth') ||
-             body.includes('二次认证') ||
-             body.includes('设备验证') ||
-             body.includes('动态码') ||
-             body.includes('多因子');
+      // 循环退出（非 302 终止）后复查最后一跳
+      return this.isReAuthLocation((resp.location || '').toLowerCase());
     } catch (e) {
       // 网络异常时保守返回 false（不误触发验证码弹窗，交给现有过期/重试逻辑兜底）
       return false;

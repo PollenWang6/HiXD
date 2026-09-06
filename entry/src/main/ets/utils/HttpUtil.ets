@@ -106,19 +106,49 @@ export class HttpUtil {
   static reAuthHandler: ((username: string) => Promise<boolean>) | null = null;
 
   /**
-   * 检查当前是否允许发业务请求。
+   * 业务请求未登录时的静默续登处理器（对齐 Flutter IDSSession Dio 拦截器：
+   * 业务请求不预先拦死，由请求级 checkAndLogin 续登后重试）。
+   * 由 MainPage 注册为 autoHealIfExpired（TGC→保存凭证+自动滑块，无 UI）。
+   * request()/postFormNoRedirect 在 ehall 业务域未登录时先调它续登一次，
+   * 成功（返回 true，会话已重建）则本次请求照常发出；失败才抛 offline 拦截异常交页面提示。
+   * 避免 loginStatus 短暂非 ok（会话过期/自愈进行中）时业务页面一律被拦、
+   * 弹"当前未登录校园账号"这种让用户摸不着头脑的硬错误（2026-09-06 真机复现）。
+   */
+  static sessionRestoreHandler: (() => Promise<boolean>) | null = null;
+
+  /**
+   * 检查当前是否允许发业务请求（纯判断，无副作用）。
    * 对齐 Flutter IDSSession.dio：offline 守卫【只作用于 IDS/ehall 业务域】；
    * 睿思/校园网/图书馆/体育/电费等独立模块各自域名的请求不受限（未登录也能用）。
    * 登录/SSO 请求（ids.xidian.edu.cn）走 withNoOfflineCheck 包裹绕过本守卫。
    */
-  private checkOffline(url?: string): void {
-    if (HttpUtil.noOfflineCheckDepth > 0) return; // 登录/SSO 请求绕过
-    if (LoginState.isLoggedIn()) return; // 已登录，放行
+  private isOfflineBlocked(url?: string): boolean {
+    if (HttpUtil.noOfflineCheckDepth > 0) return false; // 登录/SSO 请求绕过
+    if (LoginState.isLoggedIn()) return false; // 已登录，放行
     // 仅拦截 IDS/ehall 业务域；其余域名直接放行（对齐 Flutter 独立 Dio 客户端）
     if (url) {
       const domain: string = this.getDomain(url);
       if (domain !== 'ehall.xidian.edu.cn') {
-        return;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * ehall 业务域未登录时的统一处理：先给一次静默续登机会（请求级自愈，对齐 Flutter
+   * IDSSession 拦截器），续登成功则放行本次请求；失败才抛拦截异常（页面提示重新登录）。
+   */
+  private async autoRestoreOrBlock(): Promise<void> {
+    const handler = HttpUtil.sessionRestoreHandler;
+    if (handler) {
+      try {
+        const ok: boolean = await HttpUtil.withNoOfflineCheck(() => handler());
+        if (ok) {
+          return;
+        }
+      } catch (_e) {
+        // 续登内部已按错误类型处理（密码错弹窗/需设备验证等），这里统一走拦截提示
       }
     }
     throw new Error('OFFLINE_MODE: 当前未登录校园账号，业务请求已拦截。请先登录后再使用该功能。');
@@ -153,10 +183,16 @@ export class HttpUtil {
       if (raw.length > 0) {
         const entries: CookieEntry[] = JSON.parse(raw) as CookieEntry[];
         for (const entry of entries) {
-          if (!this.cookieStore[entry.domain]) {
-            this.cookieStore[entry.domain] = {};
+          if (!entry || typeof entry.domain !== 'string') {
+            continue;
           }
-          this.cookieStore[entry.domain][entry.name] = entry.value;
+          // 迁移历史脏键：早期把 "host:443" 也当独立域名存过，规整回无端口键，
+          // 否则带 :443 跳转读不到无端口会话的 CASTGC（2026-09-06 登录空转根因之一）。
+          const entryDomain: string = this.normalizeHost(entry.domain);
+          if (!this.cookieStore[entryDomain]) {
+            this.cookieStore[entryDomain] = {};
+          }
+          this.cookieStore[entryDomain][entry.name] = entry.value;
         }
         this.cookiesLoaded = true; // 只有成功加载后才标记
       } else {
@@ -191,6 +227,7 @@ export class HttpUtil {
   }
 
   hasCookies(domain: string): boolean {
+    domain = this.normalizeHost(domain);
     const domMap = this.cookieStore[domain];
     return domMap !== undefined && Object.keys(domMap).length > 0;
   }
@@ -353,6 +390,8 @@ export class HttpUtil {
   }
 
   getCookiesForDomain(domain: string): string {
+    // 入口统一规整默认端口，保证与 cookieStore 键一致（见 normalizeHost 注释）
+    domain = this.normalizeHost(domain);
     // 收集目标域及其所有父域：同时匹配带点（.xidian.edu.cn）与无点（xidian.edu.cn）两种存法，
     // 避免 rcp ResponseCookie.domain 返回无点域名时父域 cookie 永远匹配不上（会话静默丢失）
     const matchDomains: string[] = [domain];
@@ -574,26 +613,58 @@ export class HttpUtil {
 
   private getDomain(url: string): string {
     const m = url.match(/https?:\/\/([^/]+)/);
-    return m ? m[1] : url;
+    return m ? this.normalizeHost(m[1]) : url;
   }
 
   // 将重定向 Location 解析为绝对 URL（支持绝对地址、协议相对 //host/path、根相对 /path、目录相对 path）
   private resolveRedirect(location: string, baseUrl: string): string {
     if (location.startsWith('//')) {
       const proto: string = baseUrl.startsWith('https') ? 'https:' : 'http:';
-      return proto + location;
+      return this.normalizeUrlPort(proto + location);
     }
     if (/^https?:\/\//i.test(location)) {
-      return location;
+      return this.normalizeUrlPort(location);
     }
     const m = baseUrl.match(/^https?:\/\/[^/]+/);
-    const origin: string = m ? m[0] : baseUrl;
+    const origin: string = m ? this.normalizeUrlPort(m[0]) : baseUrl;
     if (location.startsWith('/')) {
       return origin + location;
     }
     const lastSlash: number = baseUrl.lastIndexOf('/');
     const dir: string = lastSlash >= 0 ? baseUrl.substring(0, lastSlash + 1) : origin + '/';
     return dir + location;
+  }
+
+  // 规整 host：剔除默认端口(:443/:80)。
+  // CAS/ehall 重定向 Location 常带显式默认端口（实测 ehall 302 → https://ehall.xidian.edu.cn:443/login?...，
+  // 再弹回 https://ids.xidian.edu.cn:443/authserver/login?...）。若不剔除，
+  // cookieStore 会把 "host:port" 与 "host" 存成两套键：带 :443 的那跳读不到无端口会话刚种下的
+  // CASTGC/TGC/JSESSIONID → CAS 视作全新会话 → 一直返回登录页 → 反复拉滑块，
+  // 静默续登在 ehall ↔ :443 之间空转，登录态永不 ok，业务请求被 offline 守卫拦下
+  //（2026-09-06 真机 HiLog 实证：ST 票据发了一串，登录页 200 一轮接一轮）。
+  private normalizeHost(host: string): string {
+    if (host.endsWith(':443')) {
+      return host.substring(0, host.length - 4);
+    }
+    if (host.endsWith(':80')) {
+      return host.substring(0, host.length - 3);
+    }
+    return host;
+  }
+
+  // 规整 URL：仅剔除与 scheme 匹配的默认端口（https 剥 :443、http 剥 :80），其余原样保留。
+  private normalizeUrlPort(url: string): string {
+    const m = url.match(/^(https?):\/\/([^/]+)(.*)$/);
+    if (!m) {
+      return url;
+    }
+    const isHttps: boolean = m[1] === 'https';
+    let host: string = m[2];
+    const suffix: string = isHttps ? ':443' : ':80';
+    if (host.endsWith(suffix)) {
+      host = host.substring(0, host.length - suffix.length);
+    }
+    return m[1] + '://' + host + m[3];
   }
 
   /**
@@ -620,7 +691,9 @@ export class HttpUtil {
    * 避免 ehall / CAS 自动跟随死循环（20 跳 too many redirects）。
    */
   async postFormNoRedirect(url: string, data: Record<string, string>, headers?: Record<string, string>): Promise<HttpResponse> {
-    this.checkOffline(url); // Offline 拦截：仅 ehall/IDS 业务域未登录时不发出
+    if (this.isOfflineBlocked(url)) {
+      await this.autoRestoreOrBlock(); // ehall 业务域未登录：先静默续登一次，失败抛拦截异常
+    }
     await this.loadCookies();
     const parts: string[] = [];
     for (const key of Object.keys(data)) {
@@ -649,7 +722,9 @@ export class HttpUtil {
     extraHeaders: Record<string, string> | undefined,
     skipCookies?: boolean
   ): Promise<HttpResponse> {
-    this.checkOffline(url); // Offline 拦截（仅 ehall/IDS 业务域）
+    if (this.isOfflineBlocked(url)) {
+      await this.autoRestoreOrBlock(); // ehall 业务域未登录：先静默续登一次，失败抛拦截异常
+    }
     const MAX_REDIRECTS: number = 20;
     let currentUrl: string = url;
     let currentMethod: 'GET' | 'POST' = method === 'GET' ? 'GET' : 'POST';

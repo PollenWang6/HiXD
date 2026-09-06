@@ -397,6 +397,7 @@ export struct MyTab {
       }
       .padding({ left: 16, right: 16, top: 8 })
       .layoutWeight(1)
+      .edgeEffect(EdgeEffect.Spring)
     }
     .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
   }

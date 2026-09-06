@@ -5,6 +5,7 @@ import { PreferenceUtil } from '../../utils/PreferenceUtil';
 import { CasLoginService } from '../auth/CasLoginService';
 import { ClassItemModel, ClassTableRow, UnscheduledCourse, ClassChange, SerializedClassRow, ClassTableRawWrapper, EHALL_APP_CLASS_TABLE } from '../../models/common/Models';
 import { EHALL_HEADERS, APP_PATH_MAP, extractRaw, sharedAppPost, AppPostContext } from './EhallConstants';
+import { ChaoxingClassService } from './ChaoxingClassService';
 
 const TAG = 'ClassService';
 
@@ -120,32 +121,12 @@ export class ClassService {
         return this.getClassTableYjspt(semCode, sid);
       }, 7 * 24 * 60 * 60 * 1000, forceRefresh);
     }
+    // 本科生：ehall 教务课表（xskcb.do）已停止返回数据（仍 200 但 datas 是空壳），
+    // 学校已整体迁移到超星课表 kb.chaoxing.com —— 改走 ChaoxingClassService。
     await this.init();
     const key = 'ct_' + semCode;
     return this.cache.getOrFetch<string>(key, async (): Promise<string> => {
-      try {
-        await this.activateAppSession(EHALL_APP_CLASS_TABLE);
-      } catch (e) {
-        this.rethrowIfAuthError(e);
-      }
-
-      const body: Record<string, string> = { 'XNXQDM': semCode };
-      if (sid && sid.length > 0) {
-        body['XH'] = sid;
-      }
-
-      const resp = await this.appPost(
-        '/jwapp/sys/wdkb/modules/xskcb/xskcb.do',
-        body
-      );
-      if (!resp.isOk) {
-      }
-      // 防止 HTML 错误页被缓存 — appPost 重试后仍返回 HTML 时直接抛异常
-      const trimmed = resp.body.trimStart();
-      if (trimmed.startsWith('<!') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
-        throw new Error('getClassTable: received HTML instead of JSON (session expired?)');
-      }
-      return resp.body;
+      return ChaoxingClassService.getInstance().fetchClassTableRaw();
     }, 7 * 24 * 60 * 60 * 1000, forceRefresh);
   }
 

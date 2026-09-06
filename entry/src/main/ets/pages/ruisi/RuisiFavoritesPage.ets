@@ -119,6 +119,7 @@ export struct RuisiFavoritesPage {
               }.border({ width: { bottom: 0.5 }, color: ThemeColors.border })
             }, (t: Topic) => `fav_${t.favId}`)
           }.width('100%').layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
         }
       }
       .width('100%').height('100%')

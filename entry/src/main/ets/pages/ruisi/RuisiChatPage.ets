@@ -165,6 +165,7 @@ export struct RuisiChatPage {
           }
           .width('100%').layoutWeight(1)
           .backgroundColor(ThemeColors.bgPage)
+          .edgeEffect(EdgeEffect.Spring)
         }
 
         // 发送栏

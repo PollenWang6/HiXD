@@ -418,6 +418,7 @@ export struct ElectricityPage {
           }, (item: DailyItem): string => item.date)
         }
         .layoutWeight(1).divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
+        .edgeEffect(EdgeEffect.Spring)
       }
     }
     .borderRadius(12).backgroundColor(ThemeColors.bgCard)
@@ -458,6 +459,7 @@ export struct ElectricityPage {
           }, (item: DailyItem): string => item.date)
         }
         .layoutWeight(1).divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
+        .edgeEffect(EdgeEffect.Spring)
       } else {
         Text('暂无用水记录').fontSize(14).fontColor(ThemeColors.textSecondary)
           .width('100%').textAlign(TextAlign.Center).padding({ top: 28, bottom: 28 })
@@ -505,6 +507,7 @@ export struct ElectricityPage {
             }
           }
           .layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
         }
 
         if (!this.isLoading && this.loadError.length === 0 && this.balance.length === 0) {

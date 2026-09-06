@@ -1,6 +1,7 @@
 ﻿// AttendanceService.ets — 超星学习平台考勤数据服务
 import { HttpUtil, HttpResponse } from '../../utils/HttpUtil';
 import { ClassAttendance, ClassAttendanceDetail } from '../../models/ids/AttendanceModels';
+import { PreferenceUtil } from '../../utils/PreferenceUtil';
 
 const TAG: string = 'AttendanceService';
 
@@ -41,12 +42,35 @@ export class AttendanceService {
   private static instance: AttendanceService;
   private http: HttpUtil = HttpUtil.getInstance();
   private semesterCode: string = '';
+  // SSO 会话建立互斥锁（对齐 MainPage 启动串行化 / SessionGuard.inFlight）：
+  // 主页预加载（HomeDataProvider）与考勤页 loadData 可能并发进入 getAttendanceRecords，
+  // 各自 ensureLogin→loginToLearning 会共享无锁 cookie 罐互相覆盖（超星会话损坏 →
+  // 数据页恒返空壳），必须让登录段串行。
+  private ssoLock: Promise<void> | null = null;
 
   static getInstance(): AttendanceService {
     if (!AttendanceService.instance) {
       AttendanceService.instance = new AttendanceService();
     }
     return AttendanceService.instance;
+  }
+
+  // 串行化 SSO 会话建立：并发调用只真正登录一次，其余等待同一结果
+  // （对齐 SessionGuard.ensureLoggedIn 的 inFlight 合并锁哲学）
+  private async ensureLoginSerialized(): Promise<void> {
+    if (this.ssoLock) {
+      await this.ssoLock;
+      return;
+    }
+    const p: Promise<void> = this.ensureLogin().catch(() => {});
+    this.ssoLock = p;
+    try {
+      await p;
+    } finally {
+      if (this.ssoLock === p) {
+        this.ssoLock = null;
+      }
+    }
   }
 
   // 检查是否已登录超星
@@ -135,6 +159,45 @@ export class AttendanceService {
     return s.replace(/<[^>]+>/g, '').trim();
   }
 
+  /**
+   * 当前学期超星期码（YYYYN，如 20261 = 2026-2027 第一学期）兜底。
+   * 真机常态课程页（~80KB 变体，多节点渲染）的 yearList option 全不带 selected，
+   * 网页 JS 无 selected 时默认取 value=0（全部课程）；但对考勤页而言用户要的是「只看本学期」，
+   * 故解析不到 selected 时回退当前学期码，而不是空串（空串=98 门全学期混排，2026-09-06 实锤）。
+   * 优先用 ehall 权威 current_semester 偏好（格式 YYYY-YYYY-N），无则按日期推导。
+   */
+  private currentChaoxingSemester(): string {
+    let year: number = 0;
+    let term: number = 0;
+    const saved: string = PreferenceUtil.getString('current_semester');
+    if (saved.length > 0) {
+      const p: string[] = saved.split('-');
+      if (p.length >= 3) {
+        year = parseInt(p[0]);
+        term = parseInt(p[2]);
+      }
+    }
+    if (isNaN(year) || isNaN(term)) {
+      const now = new Date();
+      const y: number = now.getFullYear();
+      const m: number = now.getMonth() + 1;
+      if (m >= 9) {
+        year = y;
+        term = 1;
+      } else if (m >= 2) {
+        year = y - 1;
+        term = 2;
+      } else if (m === 1) {
+        year = y - 1;
+        term = 1;
+      } else {
+        year = y - 1;
+        term = 2; // 8月：上一年春季
+      }
+    }
+    return String(year * 10 + term);
+  }
+
   // ===== 解析课程列表 HTML =====
   private parseCourseInfo(html: string): CourseInfo[] {
     const results: CourseInfo[] = [];
@@ -148,24 +211,47 @@ export class AttendanceService {
       .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, '');
 
     // 提取学期：新版 <select id="yearList"> 找 selected option；旧版 li 上的 semesterNum 属性
-    // 对齐 Flutter：找不到 selected 时 semesterCode 为空，请求全部学期数据
+    // 【2026-09-06 实锤】真机常态课程页（~80KB 多节点变体）yearList 27 个 option 全不带 selected →
+    // 原逻辑 semesterCode='' → semesternum 空 → 拉回全部学期 98 门混排（用户最初抱怨的"混学期"）。
+    // 修复：无 selected 时回退当前学期码（currentChaoxingSemester），保证考勤只看本学期。
     const yearRe: RegExp = /<select[^>]*id="yearList"[^>]*>([\s\S]{0,20000}?)<\/select>/;
     const yearMatch = cleaned.match(yearRe);
+    let diagOptCount: number = 0;       // yearList 内 option 数量（26=全量下拉 / 0=页面变体无下拉）
+    let diagSelVal: string = '(none)';  // selected option 的 value
+    let diagSemAttr: string = '(none)'; // 旧式 semesterNum 属性值
     if (yearMatch !== null) {
+      const optRe: RegExp = /<option\b/g;
+      let om: RegExpExecArray | null;
+      while ((om = optRe.exec(yearMatch[1])) !== null) {
+        diagOptCount++;
+      }
       const selRe: RegExp = /<option[^>]*value="([^"]*)"[^>]*selected[^>]*>/;
       const selMatch = yearMatch[1].match(selRe);
-      if (selMatch !== null) {
+      if (selMatch !== null && selMatch[1] !== '0') {
         this.semesterCode = selMatch[1];
+        diagSelVal = selMatch[1];
       } else {
-        this.semesterCode = '';
+        this.semesterCode = this.currentChaoxingSemester();
+        diagSelVal = selMatch !== null ? '(0→fallback)' : '(none→fallback)';
       }
     } else {
       // 旧版：semesterNum 属性
       const semM: RegExpMatchArray | null = cleaned.match(/semesterNum="(\d+)"/);
       if (semM !== null) {
         this.semesterCode = semM[1];
+        diagSemAttr = semM[1];
+      } else {
+        // 连旧式 semesterNum 都没有（页面无学期控件）：同样兜底当前学期，避免全学期混排
+        this.semesterCode = this.currentChaoxingSemester();
       }
     }
+    console.info('[Att] diag: 课程页 len=' + cleaned.length +
+      ' myde=' + (cleaned.indexOf('myde_course_item') >= 0) +
+      ' yearList=' + (yearMatch !== null) +
+      ' optCount=' + diagOptCount +
+      ' selected=' + diagSelVal +
+      ' semesterNumAttr=' + diagSemAttr +
+      ' -> semesterCode=[' + this.semesterCode + ']');
 
     // 提取每个课程块：新版 div.myde_course_item / 旧版 li.zmy_item
     // 捕获长度设上限，避免前瞻的 $ 兜底把整个 HTML 尾部吞进来
@@ -319,46 +405,100 @@ export class AttendanceService {
   // ===== 主方法：获取考勤数据 =====
   async getAttendanceRecords(): Promise<ClassAttendance[]> {
     try {
-      await this.ensureLogin();
+      await this.ensureLoginSerialized();
 
-      let courseInfos: CourseInfo[] = [];
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const infoResp: HttpResponse = await this.http.get(COURSE_INFO_URL);
-        courseInfos = this.parseCourseInfo(infoResp.body);
-        if (courseInfos.length > 0 || attempt === 1) {
-          if (courseInfos.length === 0) {
-            // 第二次仍解析不到课程：打印响应特征便于诊断（半登录页/页面版本差异）
-            const b: string = infoResp.body;
-            console.info('[Att] 解析0门课 len=' + b.length +
-              ' myde=' + (b.indexOf('myde_course_item') >= 0) +
-              ' zmy=' + (b.indexOf('zmy_item') >= 0) +
-              ' courseId=' + (b.indexOf('courseId=') >= 0) +
-              ' yearList=' + (b.indexOf('yearList') >= 0) +
-              ' dl=' + (b.indexOf('myde_course_dl') >= 0) +
-              ' body: ' + b.substring(0, 800));
-          }
-          break;
-        }
-        // 解析 0 门课：多半是超星会话半建立（isLogin 误判），强制重登后重试一次
-        console.info('[Att] 课程列表解析 0 门课, 重新登录超星后重试');
-        await this.loginToLearning();
-      }
-
+      let courseInfos: CourseInfo[] = await this.fetchCourseInfos();
       if (courseInfos.length === 0) {
         return [];
       }
 
-      const dataUrl: string = buildUrl(COURSE_DATA_URL, {
+      let dataUrl: string = buildUrl(COURSE_DATA_URL, {
         'v': '1',
         'semesternum': this.semesterCode
       });
-      const dataResp: HttpResponse = await this.http.get(dataUrl);
-      const cleanedHtml: string = dataResp.body.replace(/[\r\n\t]/g, '');
-      const attendances: ClassAttendance[] = this.parseAttendanceTable(cleanedHtml, courseInfos);
+      console.info('[Att] diag: 请求考勤数据 semesternum=[' + this.semesterCode + ']');
+      let dataResp: HttpResponse = await this.http.get(dataUrl);
+      let cleanedHtml: string = dataResp.body.replace(/[\r\n\t]/g, '');
+      let attendances: ClassAttendance[] = this.parseAttendanceTable(cleanedHtml, courseInfos);
+      console.info('[Att] diag: 考勤数据页 len=' + cleanedHtml.length +
+        ' 解析课程=' + courseInfos.length +
+        ' 考勤行数=' + attendances.length);
 
+      // ⚠️ 2026-09-06 二次修复（替代 ac71d63 的"重登+重拉数据页"）：
+      // 课程能解析但数据页恒 1031B 空壳（考勤 0 行）的根因不是并发，而是【坏超星会话被服务端无限续用】：
+      // 冷启动自动恢复会复用持久化旧会话 cookie（INGRESSCOOKIE 时间戳不变的铁证），该会话下服务端
+      // 渲染课程页为"全部学期 95 门、无 selected"，数据页按任何学期查都返回空壳；
+      // 手动登录（退登清空 cookie 后）能恢复 = 服务端从零建的新会话才正常。
+      // 处置：清空超星域 cookie 逼服务端重建会话 → 整流程重跑（重拉课程页+重解析学期+重拉数据页）。
+      if (attendances.length === 0 && courseInfos.length > 0) {
+        console.info('[Att] 数据页空壳：清超星会话 cookie 强制重建后整流程重跑');
+        await this.clearChaoxingSession();
+        await this.ensureLoginSerialized(); // 无 cookie → 服务端从零建全新会话
+        courseInfos = await this.fetchCourseInfos();
+        if (courseInfos.length > 0) {
+          dataUrl = buildUrl(COURSE_DATA_URL, {
+            'v': '1',
+            'semesternum': this.semesterCode
+          });
+          dataResp = await this.http.get(dataUrl);
+          cleanedHtml = dataResp.body.replace(/[\r\n\t]/g, '');
+          attendances = this.parseAttendanceTable(cleanedHtml, courseInfos);
+          console.info('[Att] diag: 重建会话后考勤 len=' + cleanedHtml.length +
+            ' 解析课程=' + courseInfos.length +
+            ' 考勤行数=' + attendances.length);
+        }
+      }
       return attendances;
     } catch (e) {
       throw new Error('加载考勤数据失败');
+    }
+  }
+
+  // 拉取课程列表（含 0 门时的重登重试）；学期码解析在 parseCourseInfo 内完成
+  private async fetchCourseInfos(): Promise<CourseInfo[]> {
+    let courseInfos: CourseInfo[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const infoResp: HttpResponse = await this.http.get(COURSE_INFO_URL);
+      courseInfos = this.parseCourseInfo(infoResp.body);
+      if (courseInfos.length > 0 || attempt === 1) {
+        if (courseInfos.length === 0) {
+          // 第二次仍解析不到课程：打印响应特征便于诊断（半登录页/页面版本差异）
+          const b: string = infoResp.body;
+          console.info('[Att] 解析0门课 len=' + b.length +
+            ' myde=' + (b.indexOf('myde_course_item') >= 0) +
+            ' zmy=' + (b.indexOf('zmy_item') >= 0) +
+            ' courseId=' + (b.indexOf('courseId=') >= 0) +
+            ' yearList=' + (b.indexOf('yearList') >= 0) +
+            ' dl=' + (b.indexOf('myde_course_dl') >= 0) +
+            ' body: ' + b.substring(0, 800));
+        }
+        break;
+      }
+      // 解析 0 门课：多半是超星会话半建立（isLogin 误判），强制重登后重试一次
+      console.info('[Att] 课程列表解析 0 门课, 重新登录超星后重试');
+      await this.loginToLearning();
+    }
+    return courseInfos;
+  }
+
+  // 清空超星相关域 cookie（模拟"退出登录"对超星的效果）：罐里残留旧会话时，
+  // 服务端会无限续用（SSO 链走完 jrose/INGRESSCOOKIE 都不变），只有清掉才能逼服务端从零建新会话
+  private async clearChaoxingSession(): Promise<void> {
+    const domains: string[] = [
+      'chaoxing.com',
+      '.chaoxing.com',
+      'passport2.chaoxing.com',
+      'i.chaoxing.com',
+      'kb.chaoxing.com',
+      'fanya.chaoxing.com',
+      'xdspoc.fanya.chaoxing.com',
+      'fycourse.fanya.chaoxing.com',
+      'mobilelearn.chaoxing.com',
+      'mh.chaoxing.com',
+      'xdspoc.xidian.edu.cn'
+    ];
+    for (let i = 0; i < domains.length; i++) {
+      await this.http.clearCookies(domains[i]);
     }
   }
 

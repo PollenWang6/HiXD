@@ -5,6 +5,7 @@ import { ThemeColors } from '../../utils/ThemeColors';
 import { EhallService, SemesterUtil, ClassItemModel, ExamItemModel } from '../../services/ids/EhallService';
 import { ExperimentService } from '../../services/experiment/ExperimentService';
 import { ClassService } from '../../services/ids/ClassService';
+import { ChaoxingClassService } from '../../services/ids/ChaoxingClassService';
 import { UnscheduledCourse, ClassChange } from '../../models/common/Models';
 import { ExamService } from '../../services/ids/ExamService';
 import { PreferenceUtil } from '../../utils/PreferenceUtil';
@@ -330,7 +331,7 @@ export struct ClassTablePage {
 
     // 首次登录后 cookie/session 可能还未就绪，课表为空时自动重试
     // （服务器已确认空课表 emptySchedule 时不再白重试——新学期课程未发布是正常现象）
-    if (this.isClassGridEmpty() && !this.emptySchedule && PreferenceUtil.getBool('is_logged_in') && this.retryCount < this.MAX_RETRY) {
+    if (this.isClassGridEmpty() && !this.emptySchedule && this.isClassTableLoggedIn() && this.retryCount < this.MAX_RETRY) {
       this.retryCount++;
       this.later(() => {
         this.loadTable(true);
@@ -426,6 +427,15 @@ export struct ClassTablePage {
     }
   }
 
+  // 课表数据源是否已就绪：本科生走超星（会话可由西电账号 SSO 打通），研究生走 yjspt（CAS）
+  private isClassTableLoggedIn(): boolean {
+    if (PreferenceUtil.getBool('role')) {
+      return PreferenceUtil.getBool('is_logged_in');
+    }
+    // 有超星会话，或 CAS 在登录态（服务层会用 SSO 静默打通超星）都算就绪
+    return ChaoxingClassService.hasKbSession() || PreferenceUtil.getBool('is_logged_in');
+  }
+
   private async fetchAndSave(): Promise<void> {
     if (this._fetching) {
       return;
@@ -472,11 +482,21 @@ export struct ClassTablePage {
     } catch (_e) { /* ignore */ }
 
     // Step 2: 后台拉最新数据（需登录）
-    const isLoggedIn = PreferenceUtil.getBool('is_logged_in');
+    // 本科生课表数据源已迁至超星：无超星会话时会由服务层用西电账号 SSO 静默打通，
+    // 因此只要西电 CAS 在线就放行；只有 CAS 也不在线时才在此拦截（避免空跑网络）。
+    const isLoggedIn: boolean = this.isClassTableLoggedIn();
     if (!isLoggedIn) {
-      this.loadProgress = '⚠️ 未登录，显示缓存数据';
-      this.later(() => { this.loadProgress = ''; }, 3000);
+      if (!PreferenceUtil.getBool('role') && !this.hasCache) {
+        // 无缓存可显示：给出明确指引，而不是停在空白网格
+        this.errorMsg = '无法读取课表：请先登录西电账号（我的 → 登录），课表将自动同步';
+      } else {
+        this.loadProgress = '⚠️ 未登录，显示缓存数据';
+        this.later(() => { this.loadProgress = ''; }, 3000);
+      }
       this.loading = false;
+      // 原实现在此处直接 return 会漏掉 finally 里的 _fetching 复位，
+      // 导致后续任何刷新都被 _fetching 挡住（课表永远停在缓存）
+      this._fetching = false;
       return;
     }
 
@@ -510,6 +530,9 @@ export struct ClassTablePage {
             // 显示友好空状态提示，不再误导为「缓存数据」或「加载失败」
             this.emptySchedule = true;
             this.showCacheBanner = false;
+            // 空课表也要初始化渲染缓存 + Swiper 周数数据源（maxWeek 取标准周数），
+            // 否则 _weekList 停在初始 [1]、Swiper 只有一页，滑动切周无反应
+            this.buildCellCache();
           }
         } else {
           this.showCacheBanner = false;
@@ -556,7 +579,11 @@ export struct ClassTablePage {
         this.showCacheBanner = true;
         this.loadProgress = '';
       } else {
-        this.errorMsg = '加载课程表失败，请检查网络';
+        // 超星会话缺失（西电未登录/SSO 打通失败）与纯网络错误分开提示
+        const errMsg: string = String(e);
+        this.errorMsg = errMsg.indexOf('CX_NEED_LOGIN') >= 0
+          ? '无法读取课表：西电账号未登录或会话已过期，请重新登录'
+          : '加载课程表失败，请检查网络';
       }
     } finally {
       this.loading = false;
@@ -602,6 +629,8 @@ export struct ClassTablePage {
               // 无缓存 + 刷新仍空：服务器确认本学期空课表
               this.emptySchedule = true;
               this.showCacheBanner = false;
+              // 同步初始化缓存与周数数据源，保证空课表也能滑动切周
+              this.buildCellCache();
             }
           } else {
             this.showCacheBanner = false;
@@ -623,7 +652,10 @@ export struct ClassTablePage {
         this.syncProgress = '';
         AppStorage.setOrCreate('ct_updated', String(Date.now()));
       } catch (e) {
-        this.errorMsg = '刷新失败，请检查网络';
+        const errMsg: string = String(e);
+        this.errorMsg = errMsg.indexOf('CX_NEED_LOGIN') >= 0
+          ? '刷新失败：西电账号未登录或会话已过期，请重新登录'
+          : '刷新失败，请检查网络';
         if (this.hasCache) { this.showCacheBanner = true; }
       } finally {
         this.syncProgress = '';
@@ -1105,14 +1137,7 @@ export struct ClassTablePage {
             }.width('100%').height(32).justifyContent(FlexAlign.Center)
             .backgroundColor(ThemeColors.isDark ? '#3E2723' : '#FFF3E0')
           }
-          // 服务器确认本学期空课表（新学期课程未发布）：友好提示，区别于「缓存数据」/「加载失败」
-          if (this.emptySchedule) {
-            Row() {
-              Text('📭 本学期暂无课程安排').fontSize(12).fontColor(ThemeColors.textSecondary)
-              Text('  新学期课程发布后下拉刷新即可').fontSize(11).fontColor(ThemeColors.textHint)
-            }.width('100%').height(32).justifyContent(FlexAlign.Center)
-            .backgroundColor(Color.Transparent)
-          }
+          // 空课表状态改为网格中央空态层呈现（见下方 buildClassGrid 处），此处不再占 32px 横幅
           if (this.termEnded) {
             Row() {
               Text('📅 当前学期已结束，显示最后一周边课表').fontSize(12).fontColor(ThemeColors.textSecondary)
@@ -1159,6 +1184,25 @@ export struct ClassTablePage {
               Column() {
                 this.buildClassGrid()
               }.layoutWeight(1)
+              // 空课表（服务器确认本学期未发布课程）：网格中央空态层。
+              // 与「加载失败」区分：失败走上方 errorMsg 整页 + 重试，这里是"成功但没课"。
+              // 参考 Flutter 空课表设计：空态渲染在网格内部，周次导航/Swiper 照常可用。
+              // HitTestMode.None 让触摸穿透到下层 Swiper，滑动切周不受影响。
+              if (this.emptySchedule && this.isClassGridEmpty()) {
+                Column() {
+                  Text('📭').fontSize(42)
+                  Text(this.semesterCode.length > 0
+                    ? SemesterUtil.formatSemester(this.semesterCode) + ' 暂无课程安排'
+                    : '本学期暂无课程安排')
+                    .fontSize(15).fontWeight(FontWeight.Medium)
+                    .fontColor(ThemeColors.textPrimary).margin({ top: 12 })
+                  Text('学校还没发布课程，发布后下拉刷新即可显示').fontSize(12)
+                    .fontColor(ThemeColors.textSecondary).margin({ top: 8 })
+                  Text('左右滑动或点击上方箭头可浏览各周').fontSize(12)
+                    .fontColor(ThemeColors.textHint).margin({ top: 4 })
+                }.width('100%').height('100%').justifyContent(FlexAlign.Center)
+                .hitTestBehavior(HitTestMode.None)
+              }
             }.layoutWeight(1)
             .onAreaChange((_old: Area, newArea: Area) => {
               const w: number = parseFloat(newArea.width.toString());
@@ -1271,6 +1315,7 @@ export struct ClassTablePage {
               .width('100%')
               .constraintSize({ maxHeight: 360 })
               .divider({ strokeWidth: 0.5, color: '#F0F0F0' })
+              .edgeEffect(EdgeEffect.Spring)
             }
           }
           .width('85%')
@@ -1450,6 +1495,7 @@ export struct ClassTablePage {
                   }
                 })
               }.height(320).scrollBar(BarState.Auto)
+              .edgeEffect(EdgeEffect.Spring)
             }
             Button('确定').width('100%').height(40).margin({ top: 14 })
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
@@ -1527,6 +1573,7 @@ export struct ClassTablePage {
                   }
                 })
               }.height(380).scrollBar(BarState.Auto)
+              .edgeEffect(EdgeEffect.Spring)
             }
             Button('确定').width('100%').height(40).margin({ top: 14 })
               .backgroundColor(this.accentColor).fontColor('#FFFFFF').borderRadius(10)
@@ -2052,22 +2099,32 @@ export struct ClassTablePage {
   private buildCellCache(): void {
     // 重新计算真实最大周（含考试），避免学期末 currentWeek 超过数据最后周
     this.recalcMaxWeek();
+    // recalcMaxWeek() 可能抬高 maxWeek（例如考试周晚于课程末周），
+    // 必须同步刷新 Swiper 的页数数据源，否则 _weekList 偏短、后面的周次滑不过去
+    this.updateWeekList();
     // 学期已结束（currentWeek 超过数据最后周）：钳制到最后一合法周，避免整周空白
     if (this.currentWeek > this.maxWeek) {
       this.currentWeek = this.maxWeek;
       this.termEnded = true;
     }
     if (this.currentWeek < 1) this.currentWeek = 1;
-    // 重建当前周±1 的渲染缓存，key = `${week}_${day}`
+    // 全周次渲染缓存（1..maxWeek）。
+    // 原实现只缓存当前周±1，于是每次切周都要重建缓存并 _gridVersion++；
+    // 而 cell 的 ForEach key 含 _gridVersion —— key 全部失效 → 整张课表销毁重建 →
+    // 滑动切换时主线程被打满，Swiper 的跟手动画被掐断（表现为"能切但直接跳变、不跟手"）。
+    // 改为全周预建后，切周只需改 currentWeek，缓存与 key 都不变，滑动期零重建。
     const newCache: Map<string, ClassCell[]> = new Map();
-    const weeks: number[] = [this.currentWeek - 1, this.currentWeek, this.currentWeek + 1];
-    for (const w of weeks) {
-      if (w < 1 || w > this.maxWeek) continue;
+    for (let w = 1; w <= this.maxWeek; w++) {
       for (let d = 1; d <= DAY_COUNT; d++) {
-        newCache.set(`${w}_${d}`, this.getCellsForDay(d, w));
+        const cells: ClassCell[] = this.getCellsForDay(d, w);
+        // 只存非空格，减少 Map 体积（渲染侧已用 ?? [] 兜底）
+        if (cells.length > 0) {
+          newCache.set(`${w}_${d}`, cells);
+        }
       }
     }
     this._renderCache = newCache;
+    // 仅在数据真正变更时递增；切周不再触发，保证 cell 组件可复用
     this._gridVersion++;
   }
 
@@ -2273,14 +2330,19 @@ export struct ClassTablePage {
           .cachedCount(1)
           .indicator(false)
           .loop(false)
+          // 与主页/睿思等页的 SegmentTab 对齐：边缘弹性回弹，手感一致
+          .effectMode(EdgeEffect.Spring)
           .onChange((index: number) => {
+            // 只切换周次，不重建缓存：渲染缓存已在数据加载时按全周预建，
+            // 此处若再调 buildCellCache() 会令 _gridVersion 变化 → 整表销毁重建 → 滑动掉帧
             this.currentWeek = index + 1;
-            this.buildCellCache();
           })
           .layoutWeight(1)
         }.width('100%').alignItems(VerticalAlign.Top)
       }.width('100%')
     }.scrollable(ScrollDirection.Vertical).scrollBar(BarState.Auto).layoutWeight(1)
+    // 课表主体纵向滚动：滑到顶部/底部橡皮筋回弹
+    .edgeEffect(EdgeEffect.Spring)
     .backgroundColor(this.classBgShow && this.classBgPath.length > 0 ? Color.Transparent : (ThemeColors.isDark ? '#0F0F11' : '#F3F3F3'))
     }
   }

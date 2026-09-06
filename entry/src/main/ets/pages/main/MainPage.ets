@@ -607,6 +607,11 @@ struct MainPage {
     // 注册全局 IDS 二次验证处理器（对齐 Flutter activeIDSReAuthHandler）：
     // ehall 请求链命中 reAuthLoginView 重定向时由 HttpUtil 内联触发，弹短信验证码弹窗。
     HttpUtil.reAuthHandler = (username: string): Promise<boolean> => this.onReAuthNeeded(username);
+    // 注册全局"业务请求未登录自动续登"处理器（对齐 Flutter IDSSession Dio 拦截器）：
+    // ehall 业务请求在登录态短暂非 ok（会话过期/自愈进行中）时，由 HttpUtil 先调本处理器
+    // 静默续登（TGC→凭证+自动滑块），成功则原请求放行，用户无感；失败才弹"未登录拦截"。
+    // 避免业务页面在过期窗口一律被 offline 守卫硬拦（2026-09-06 真机复现"当前未登录校园账号"）。
+    HttpUtil.sessionRestoreHandler = (): Promise<boolean> => this.autoHealIfExpired();
     // 把主页 Navigation 栈暴露给 EntryAbility，用于「根页面返回=退出 App」判断
     AppStorage.setOrCreate('mainNavStack', this.pageInfo);
     this.loadHomeMenuOrder();
@@ -741,6 +746,10 @@ AppStorage.set('loginStatus', 'offline');
     // 解绑监听，避免页面重建时 handler 累积、或销毁后回调触发空引用
     networkUtil.stopListen(this.onNetworkChangeHandler);
     this.getUIContext().getHostContext()?.eventHub.off('cardNavigate');
+    // 主页面销毁时摘除全局处理器（重建时会重新注册，防止闭包引用已销毁的 this）
+    if (HttpUtil.sessionRestoreHandler !== null) {
+      HttpUtil.sessionRestoreHandler = null;
+    }
   }
 
   // 应用退到后台时暂停常驻轮询，避免不必要的后台唤醒（泄漏①修复）
@@ -824,7 +833,12 @@ AppStorage.set('loginStatus', 'offline');
   // 成功 → 标 ok 并返回 true，后续卡片加载/重试原请求用户无感；
   // 失败（设备验证/密码错/无凭证/滑块失败）→ 返回 false，由调用方回退手动弹层。
   private async autoHealIfExpired(): Promise<boolean> {
-    if (this.loginStatus !== 'expired' && this.loginStatus !== 'timeout') {
+    // ⚠️ 必须放行 'checking'：checkLogin 首查失败（tryAutoRestoreLogin 无 TGC）后会调本方法
+    // 续登，但此时 loginStatus 仍是 aboutToAppear 置的 'checking'。若守卫只放行 expired/timeout，
+    // autoHeal 被短路 return false → 提前置 expired → 右上角闪「重新登录」按钮（用户刚登录完
+    // 却看到按钮），直到 refreshHomeData 二次自愈才翻 ok（真机复现：退登重登后按钮闪一下才变头像）。
+    // checking 语义=「正在确认/恢复登录态」，此时静默续登不破坏任何既有状态机分支。
+    if (this.loginStatus !== 'expired' && this.loginStatus !== 'timeout' && this.loginStatus !== 'checking') {
       return this.loginStatus === 'ok';
     }
     try {
@@ -1085,7 +1099,7 @@ AppStorage.set('loginStatus', 'ok');
       try {
         this.loginProgMsg = '正在进行滑块验证...';
         this.loginProgVisible = true;
-        if (await cas.autoSolveSlider()) {
+        if (await cas.autoSolveSlider(6, prog)) {
           const ok: boolean = await this.finishCaptchaLogin(fields, prog);
           if (ok) {
             return;
@@ -2546,6 +2560,7 @@ AppStorage.set('loginStatus', 'expired');
       }
       .layoutWeight(1)
       .width('100%')
+      .edgeEffect(EdgeEffect.Spring)
     }
     .width(240)
     .height('100%')

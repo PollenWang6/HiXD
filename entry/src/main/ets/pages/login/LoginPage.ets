@@ -1,6 +1,7 @@
 ﻿// LoginPage.ets — HTTP 原生登录 + 滑块验证码
 // 替代 WebView 自动填表方案，消除 Cookie 隔离问题
 import { CasLoginService, TrackPoint, SliderPuzzle, PuzzleImages, LoginProgress, CasFormFields } from '../../services/auth/CasLoginService';
+import { HttpUtil } from '../../utils/HttpUtil';
 import { EhallService } from '../../services/ids/EhallService';
 import { UserInfoService } from '../../services/common/UserInfoService';
 import { ThemeColors } from '../../utils/ThemeColors';
@@ -119,7 +120,9 @@ struct LoginPage {
 
       // 优先自动过滑块；失败（或异常）再回退手动拖动 UI
       try {
-        if (await this.cas.autoSolveSlider()) {
+        if (await this.cas.autoSolveSlider(6, (p: LoginProgress) => {
+          this.mapLoginStep(p);
+        })) {
           this.loginOverlayMsg = '正在进行滑块验证...';
           this.loginOverlayPercent = 35;
           const ok: boolean = await this.finishLogin();
@@ -210,19 +213,27 @@ struct LoginPage {
       this.statusText = '登录失败，请重试';
       return false;
     }
-    const success: boolean = await this.cas.postLogin(
-      this.username,
-      this.password,
-      fields,
-      (p: LoginProgress) => {
-        this.mapLoginStep(p);
-      },
-      (username: string, onProgress?: (p: LoginProgress) => void) => {
-        // 设备验证弹窗接管：隐藏登录进度遮罩（弹窗自身负责交互与进度）
-        this.loginOverlayVisible = false;
-        return this.onReAuthNeeded(username, onProgress);
-      }
-    );
+    // ⚠️ 2026-09-06 修复：整个 postLogin 收尾包进 withNoOfflineCheck（对齐 MainPage
+    // finishCaptchaLogin 的写法）。LoginPage 路径从不写 loginStatus='ok'，postLogin 内部
+    // 的 ehall 业务域确认请求（getAppUsageMonitor）会被 offline 守卫拦截（MainPage 已
+    // replaceUrl 销毁、sessionRestoreHandler=null → 直接抛"当前未登录校园账号"），
+    // 导致协议层登录成功（ST+ehall 200）但 UI 一直停在登录页（真机日志 [29855]：两次
+    // 手动登录均无 replaceUrl MainPage 路由、getAppUsageMonitor 0 次）。
+    const success: boolean = await HttpUtil.withNoOfflineCheck(async (): Promise<boolean> => {
+      return await this.cas.postLogin(
+        this.username,
+        this.password,
+        fields,
+        (p: LoginProgress) => {
+          this.mapLoginStep(p);
+        },
+        (username: string, onProgress?: (p: LoginProgress) => void) => {
+          // 设备验证弹窗接管：隐藏登录进度遮罩（弹窗自身负责交互与进度）
+          this.loginOverlayVisible = false;
+          return this.onReAuthNeeded(username, onProgress);
+        }
+      );
+    });
     if (success) {
       // 关键：保存登录态后立即跳转，非关键操作移到跳转后异步执行，避免网络请求卡住导致一直停在登录页
       await PreferenceUtil.putString('ids_account', this.username);

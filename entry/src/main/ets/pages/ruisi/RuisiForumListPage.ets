@@ -87,6 +87,7 @@ export struct RuisiForumListPage {
               }
             }, (group: ForumGroup) => 'group_' + group.title)
           }.width('100%').layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
         }
       }
       .width('100%').height('100%')

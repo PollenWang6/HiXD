@@ -79,4 +79,5 @@ export class SecureAlias {
   static readonly SPORT_PASSWORD: string = 'com.hixd.sport.password.v1';
   static readonly SCHOOLNET_PASSWORD: string = 'com.hixd.schoolnet.password.v1';
   static readonly PHYSICS_PWD: string = 'com.hixd.physics.pwd.v1';
+  static readonly CHAOXING_PASSWORD: string = 'com.hixd.chaoxing.password.v1';
 }

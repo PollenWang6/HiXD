@@ -432,6 +432,7 @@ export struct SchoolNetPage {
             .hoverEffect(HoverEffect.Auto).onClick(() => { this.loadAuthData(); })
         }.width('100%').padding({ left: 16, right: 16, top: 8 })
       }
+      .edgeEffect(EdgeEffect.Spring)
     } else {
       Column() {
         Text('🌐').fontSize(48)
@@ -505,6 +506,7 @@ export struct SchoolNetPage {
           .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
           .margin({ top: 20, left: 16, right: 16 })
       }
+      .edgeEffect(EdgeEffect.Spring)
     } else if (this.zfwState === 'logged_in') {
       Scroll() {
         Column() {
@@ -588,6 +590,7 @@ export struct SchoolNetPage {
             })
         }.width('100%').padding({ left: 16, right: 16, top: 8 })
       }
+      .edgeEffect(EdgeEffect.Spring)
     } else if (this.zfwState === 'error') {
       Column() {
         Text('⚠️').fontSize(40)

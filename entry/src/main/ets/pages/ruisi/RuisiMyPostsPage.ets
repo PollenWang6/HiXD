@@ -152,6 +152,7 @@ export struct RuisiMyPostsPage {
               this.loadThreads(this.currentUid(), false);
             }
           })
+          .edgeEffect(EdgeEffect.Spring)
         }
       }
       .width('100%').height('100%')

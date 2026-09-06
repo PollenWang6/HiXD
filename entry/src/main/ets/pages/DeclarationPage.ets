@@ -124,6 +124,7 @@ struct DeclarationPage {
       .backgroundColor(ThemeColors.bgCard)
       .borderRadius(12)
       .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring)
 
       // 手打确认区（固定）
       Column({ space: 10 }) {

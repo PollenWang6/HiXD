@@ -272,6 +272,7 @@ export struct ExamPage {
               }
             }
           }.padding({ left: 16, right: 16, top: 12 }).layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
         }
       }
       .width('100%')

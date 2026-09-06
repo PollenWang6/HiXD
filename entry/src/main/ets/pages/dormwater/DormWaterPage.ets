@@ -385,6 +385,7 @@ export struct DormWaterPage {
           })
         }
         .width('100%').layoutWeight(1).padding({ left: 16, right: 16, top: 8 })
+        .edgeEffect(EdgeEffect.Spring)
       } else {
         Column() {
           Text('🚰').fontSize(48).margin({ top: 60 })
@@ -530,6 +531,7 @@ export struct DormWaterPage {
       .width('100%')
     }
     .width('100%').layoutWeight(1).align(Alignment.Top)
+    .edgeEffect(EdgeEffect.Spring)
   }
 
   @Builder

@@ -23,11 +23,18 @@ export struct EmptyClassroomPage {
   @State selectedDate: Date = new Date();
   @State errorMsg: string = '';
   @State showCacheBanner: boolean = false; // 当前显示的是缓存数据（网络失败回退）
+  @State screenWidth: number = 360; // 内容区宽度（vp），onAreaChange 更新，宽屏多列展示教室卡片
 
   private ehallsvc: EmptyClassroomService = EmptyClassroomService.getInstance();
 
   private addDays(d: Date, n: number): Date {
     return new Date(d.getTime() + n * 24 * 60 * 60 * 1000);
+  }
+
+  // 教室卡片列数：宽屏多列、窄屏单列（对齐成绩页 AlignedGridView：列宽 ~380vp 自适应）
+  private getColumns(): number {
+    if (this.screenWidth <= 0) return 1;
+    return Math.max(1, Math.floor(this.screenWidth / 380));
   }
 
   // 错误文案：会话失效给「可行动」提示（告诉用户去重新登录），其余走「动作失败：原因」。
@@ -287,9 +294,9 @@ export struct EmptyClassroomPage {
             Text('请选择其他楼栋或日期').fontSize(12).fontColor(ThemeColors.textSecondary).margin({ top: 4 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else {
-          List() {
+          Grid() {
             ForEach(this.filteredRooms, (room: EmptyClassroomItem) => {
-              ListItem() {
+              GridItem() {
                 Column() {
                   Column() {
                     // 第一行：教室名 + 楼层，允许自动换行，保证名字完整
@@ -312,10 +319,25 @@ export struct EmptyClassroomPage {
                     }.width('100%').margin({ top: 8 })
                   }.width('100%')
                 }.width('100%').padding(10).borderRadius(12).backgroundColor(ThemeColors.bgCard)
-                .shadow({ radius: 2, color: '#00000008', offsetY: 1 }).margin({ bottom: 8 })
+                .shadow({ radius: 2, color: '#00000008', offsetY: 1 })
+                // ⚠️ 不能设 height('100%')：Grid 会把它撑满整行可滚动高度，卡片被拉成大方块。
+                // GridItem 同行自动等高由网格布局保证，无需子组件显式撑满。
               }
             }, (room: EmptyClassroomItem) => 'rm_' + room.roomName + '_' + room.floor)
-          }.width('100%').layoutWeight(1).padding({ left: 16, right: 16, top: 8, bottom: 16 })
+          }
+          .columnsTemplate('1fr '.repeat(this.getColumns()).trim())
+          .columnsGap(8).rowsGap(8)
+          .width('100%').layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
+          // 边缘回弹：滑到列表顶/底部时橡皮筋回弹（对齐主页/成绩页等既有滚动容器风格）
+          .edgeEffect(EdgeEffect.Spring)
+          .padding({ left: 16, right: 16, top: 8, bottom: 16 })
+          .onAreaChange((o: Area, n: Area) => {
+            const w = n.width as number;
+            if (w > 0 && Math.abs(w - this.screenWidth) > 1) {
+              this.screenWidth = w;
+            }
+          })
         }
       }.width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
     }

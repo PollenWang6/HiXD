@@ -2,7 +2,7 @@
   "app": {
     "bundleName": "com.HiXD.myapplication",
     "vendor": "王继磊",
-    "versionCode": 1050005,
+    "versionCode": 1050006,
     "versionName": "1.5.0",
     "minAPIVersion": 23,
     "targetAPIVersion": 23,

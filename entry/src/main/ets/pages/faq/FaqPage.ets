@@ -67,6 +67,7 @@ export struct FaqPage {
         }
         .width('100%').layoutWeight(1)
         .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgInput)
     }

@@ -539,6 +539,7 @@ export struct AttendancePage {
               }
             }, (item: ClassAttendanceDetail, index: number) => String(item.activeid) + '_' + String(index))
           }.layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
         }
     }
     .width('100%').height('100%')
@@ -595,6 +596,7 @@ export struct AttendancePage {
             .scrollable(ScrollDirection.Vertical)
             .layoutWeight(1)
             .align(Alignment.TopStart)
+            .edgeEffect(EdgeEffect.Spring)
           } else {
             List({ space: 12 }) {
               if (this.ineligible.length > 0) {
@@ -637,6 +639,7 @@ export struct AttendancePage {
             }
             .padding({ left: 16, right: 16, top: 4 })
             .layoutWeight(1)
+            .edgeEffect(EdgeEffect.Spring)
           }
         }
         .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)

@@ -225,6 +225,7 @@ export struct AboutPage {
       }
       .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)
       .align(Alignment.TopStart)
+      .edgeEffect(EdgeEffect.Spring)
 
       // 版本更新弹窗
       if (this.showUpdateDialog && this.updateInfo) {

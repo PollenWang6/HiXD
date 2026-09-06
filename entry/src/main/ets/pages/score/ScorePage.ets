@@ -40,7 +40,7 @@ export struct ScorePage {
   @State isLeftHand: boolean = false;
   @State fabTranslateX: number = 0;  // 悬浮按钮位置：正值靠右，负值靠左
   private fabInitialized: boolean = false;  // 首次布局完成后才做动画
-  private screenWidth: number = 360;  // 屏幕宽度（vp），onAreaChange 更新
+  @State screenWidth: number = 360;  // 屏幕宽度（vp），onAreaChange 更新 → @State 保证转屏/分屏时列数即时重排（对齐空教室页）
 
   // 成绩卡片网格列数：宽屏多列，窄屏单列（对齐 Flutter AlignedGridView count = maxWidth~/cardWidth）
   private getScoreColumns(): number {
@@ -733,6 +733,14 @@ export struct ScorePage {
             .padding({ left: 0, right: 0, top: 10, bottom: 16 })
             .margin({ bottom: this.isSelectMode ? 64 : 0 })
             .edgeEffect(EdgeEffect.Spring)
+            .onAreaChange((o: Area, n: Area) => {
+              // Grid 自身宽度喂 @State screenWidth：转屏/分屏即时重排列数（对齐空教室页）。
+              // 悬浮按钮 Stack 的 onAreaChange 只在按钮渲染时触发，选择模式/加载中会漏。
+              const w = n.width as number;
+              if (w > 0 && Math.abs(w - this.screenWidth) > 1) {
+                this.screenWidth = w;
+              }
+            })
           }
         }
         .width('100%').height('100%').backgroundColor(ThemeColors.bgPage)

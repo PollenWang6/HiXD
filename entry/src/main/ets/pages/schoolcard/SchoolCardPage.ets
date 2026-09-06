@@ -322,6 +322,7 @@ export struct SchoolCardPage {
             }
             .layoutWeight(1)
             .divider({ strokeWidth: 0.5, color: '#F5F5F5', startMargin: 18, endMargin: 18 })
+            .edgeEffect(EdgeEffect.Spring)
           }
         }
         .borderRadius(12).backgroundColor(ThemeColors.bgCard)
